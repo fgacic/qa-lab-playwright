@@ -18,6 +18,8 @@ export class Header {
   /** The cart link only exists while the cart holds something. Its name is just the count. */
   readonly cartLink: Locator;
   readonly userMenu: Locator;
+  /** "Sign out" as assistive tech should see it: a link or a button. */
+  readonly signOutControl: Locator;
   readonly language: LanguageSwitcher;
 
   constructor(private readonly root: Locator) {
@@ -30,6 +32,7 @@ export class Header {
     this.signInLink = root.getByRole('link', { name: 'Sign in', exact: true });
     this.cartLink = root.getByTestId('nav-cart');
     this.userMenu = root.getByTestId('nav-menu');
+    this.signOutControl = root.getByRole('link', { name: 'Sign out' }).or(root.getByRole('button', { name: 'Sign out' }));
     this.language = new LanguageSwitcher(root);
   }
 

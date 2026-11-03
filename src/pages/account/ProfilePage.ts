@@ -16,6 +16,9 @@ export class ProfilePage {
   readonly state: FormField;
   readonly country: FormField;
   readonly updateProfileButton: Locator;
+  readonly currentPassword: Locator;
+  readonly newPassword: Locator;
+  readonly confirmNewPassword: Locator;
   readonly changePasswordButton: Locator;
   readonly alerts: Locator;
 
@@ -33,13 +36,24 @@ export class ProfilePage {
     this.state = new FormField(body, 'State');
     this.country = new FormField(body, 'Country');
     this.updateProfileButton = page.getByRole('button', { name: 'Update Profile' });
-    this.changePasswordButton = page.getByTestId('change-password-submit');
+    this.currentPassword = page.getByRole('textbox', { name: 'Current Password' });
+    this.newPassword = page.getByRole('textbox', { name: 'New Password', exact: true });
+    this.confirmNewPassword = page.getByRole('textbox', { name: 'Confirm New Password' });
+    this.changePasswordButton = page.getByRole('button', { name: 'Change Password' });
     this.alerts = page.getByRole('alert');
   }
 
   @step('Open my profile')
   async open(): Promise<void> {
     await this.shell.goto('/account/profile');
+  }
+
+  @step('Change my password')
+  async changePassword(current: string, next: string, confirmation = next): Promise<void> {
+    await this.currentPassword.fill(current);
+    await this.newPassword.fill(next);
+    await this.confirmNewPassword.fill(confirmation);
+    await this.changePasswordButton.click();
   }
 
   @step('Update my profile')

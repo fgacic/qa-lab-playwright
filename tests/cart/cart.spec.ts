@@ -73,6 +73,14 @@ test.describe('Cart', () => {
     await expect(checkout.header.cartLink).toHaveCount(0);
   });
 
+  test('the remove control is a button with an accessible name', { tag: ['@a11y', '@bug'] }, async ({ checkout, cartItems }) => {
+    knownBug('A11Y-01', 'the remove-line control is an <a> with an icon, no href and no accessible name.');
+    const row = checkout.cart.table.row(cartItems[0].product.name);
+    await expect(row.removeButton).toBeVisible();
+
+    await expect(row.root.getByRole('button', { name: /remove|delete/i })).toBeVisible({ timeout: 2_000 });
+  });
+
   test('Continue Shopping goes back to the shop', async ({ checkout, page }) => {
     await checkout.cart.continueShopping();
 

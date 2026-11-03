@@ -56,6 +56,32 @@ test.describe('Chat assistant', () => {
     await expect(chat.reply('Hi! How can I help you today?')).toBeVisible();
   });
 
+  test.describe('a support ticket', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(mock.respond('POST', '/messages', { id: '01QALABFAKEMESSAGE0000000', status: 'NEW' })));
+
+    test('is collected question by question and sent as a message', async ({ homePage, apiMock }) => {
+      const { chat } = homePage.shell;
+      await chat.open();
+      await chat.choose('Create support ticket');
+      await expect(chat.reply("I'll help you create a support ticket. What is your first name?")).toBeVisible();
+
+      await chat.send('Testy');
+      await expect(chat.reply('What is your last name?')).toBeVisible();
+      await chat.send('McTestface');
+      await expect(chat.reply('What is your email address?')).toBeVisible();
+      await chat.send('testy.mctestface@example.com');
+      await expect(chat.reply('Please select a subject for your ticket:')).toBeVisible();
+      await chat.pick('Webmaster');
+      await expect(chat.reply('Please describe your issue (minimum 50 characters):')).toBeVisible();
+      await chat.send('An automated qa-lab support ticket, long enough to be a real message.');
+      await expect(chat.reply('Would you like to add an attachment?')).toBeVisible();
+      const sent = apiMock.waitForRequest('POST', '/messages');
+      await chat.pick('Skip');
+
+      expect((await sent).postDataJSON()).toMatchObject({ email: 'testy.mctestface@example.com', subject: 'webmaster' });
+    });
+  });
+
   test.describe('when the search finds nothing', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products/search', emptyProductPage())));
 

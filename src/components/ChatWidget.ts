@@ -46,6 +46,12 @@ export class ChatWidget {
     await this.action(action).click();
   }
 
+  /** Click one of the answer buttons the assistant offers (subjects, confirmations...). */
+  @step('Answer the chat with "{0}"')
+  async pick(option: string): Promise<void> {
+    await this.window.getByRole('button', { name: option, exact: true }).last().click();
+  }
+
   @step('Ask the chat for "{0}"')
   async findProduct(term: string): Promise<void> {
     await this.choose('Find a product');

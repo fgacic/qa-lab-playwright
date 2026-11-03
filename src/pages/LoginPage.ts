@@ -15,6 +15,8 @@ export class LoginPage {
   readonly error: Locator;
   readonly registerLink: Locator;
   readonly forgotPasswordLink: Locator;
+  readonly totpCode: Locator;
+  readonly verifyTotpButton: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
@@ -29,6 +31,15 @@ export class LoginPage {
     this.error = page.getByTestId('login-error');
     this.registerLink = page.getByRole('link', { name: 'Register your account' });
     this.forgotPasswordLink = page.getByRole('link', { name: 'Forgot your Password?' });
+    this.totpCode = page.getByRole('textbox', { name: 'TOTP Code' });
+    this.verifyTotpButton = page.getByRole('button', { name: 'Verify TOTP' });
+  }
+
+  @step('Verify the TOTP code {0}')
+  async verifyTotp(code: string): Promise<AccountPage> {
+    await this.totpCode.fill(code);
+    await this.verifyTotpButton.click();
+    return new AccountPage(this.page);
   }
 
   @step('Open the login page')

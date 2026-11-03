@@ -84,6 +84,16 @@ test.describe('Product filters', () => {
     for (const price of await homePage.grid.priceValues()) expect(price).toBeLessThanOrEqual(20);
   });
 
+  test('the price slider hides products below the minimum', async ({ homePage, apiMock }) => {
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === 'price,15,100');
+
+    await homePage.filters.setMinPrice(15);
+
+    const { json: found } = await results;
+    await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
+    for (const price of await homePage.grid.priceValues()) expect(price).toBeGreaterThanOrEqual(15);
+  });
+
   test.describe('when the product list comes back empty', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));
 

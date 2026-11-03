@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { knownBug } from '@support/known-bug';
 import { fakeJwt, fakeUser } from '@support/payloads';
 
 /**
@@ -69,6 +70,42 @@ test.describe('Login', () => {
       await expect(loginPage.shell.header.userMenu).toHaveText(`${fakeUser.first_name} ${fakeUser.last_name}`);
       await expect(loginPage.shell.header.signInLink).toHaveCount(0);
     });
+  });
+
+  test.describe('when the account uses two-factor authentication', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(
+      mock.sequence('POST', '/users/login',
+        { status: 200, json: { requires_totp: true, access_token: 'qa-lab-pending-totp' } },
+        { status: 200, json: { access_token: fakeJwt(), token_type: 'bearer', expires_in: 3600 } }),
+      mock.respond('GET', '/users/me', fakeUser),
+    ));
+
+    test('the password step asks for a TOTP code, which completes the login', async ({ loginPage, apiMock, page }) => {
+      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+      await expect(loginPage.totpCode).toBeVisible();
+      await expect(loginPage.password.input).toBeHidden();
+
+      const verification = apiMock.waitForRequest('POST', '/users/login');
+      await loginPage.verifyTotp('123456');
+
+      expect((await verification).postDataJSON()).toEqual({ totp: '123456', access_token: 'qa-lab-pending-totp' });
+      await expect(page).toHaveURL('/account');
+    });
+
+    test('an empty TOTP code is refused', { tag: ['@negative'] }, async ({ loginPage }) => {
+      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+
+      await loginPage.verifyTotp('');
+
+      await expect(loginPage.error).toHaveText('TOTP code is required');
+    });
+  });
+
+  test('the show-password button has an accessible name', { tag: ['@a11y', '@bug'] }, async ({ loginPage }) => {
+    knownBug('A11Y-02', 'the eye button that shows the password has no accessible name (login, register, profile).');
+    await expect(loginPage.showPasswordButton).toBeVisible();
+
+    await expect(loginPage.showPasswordButton).toHaveAccessibleName(/show|hide|password/i, { timeout: 2_000 });
   });
 
   test.describe('when the account is locked', { tag: ['@mocked'] }, () => {

@@ -114,13 +114,17 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   test.describe('messages', () => {
     test.use(withMocks(mock.respond('GET', '/messages', paged([fakeMessage])), mock.respond('GET', `/messages/${fakeMessage.id}`, fakeMessage)));
 
-    test('lists the contact messages and opens one', async ({ messagesPage }) => {
+    test('lists the contact messages, opens one and replies to it', async ({ messagesPage, apiMock }) => {
+      await apiMock.use(mock.respond('POST', `/messages/${fakeMessage.id}/reply`, { id: '01QALABFAKEREPLY', message: 'ok' }, 201));
       await expect(messagesPage.messageRows).toHaveCount(1);
 
       const details = await messagesPage.openDetails('webmaster');
-
       await expect(details.text(fakeMessage.message)).toBeVisible();
       await expect(details.repliesHeading).toBeVisible();
+
+      const reply = apiMock.waitForRequest('POST', `/messages/${fakeMessage.id}/reply`);
+      await details.sendReply('A mocked reply from the qa-lab suite.');
+      expect((await reply).postDataJSON()).toEqual({ message: 'A mocked reply from the qa-lab suite.' });
     });
   });
 
@@ -133,7 +137,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   });
 
   test.describe('profile', () => {
-    test.use(withMocks(mock.respond('POST', '/totp/setup', {}), mock.respond('PUT', /^\/users\/[^/]+$/, { success: true })));
+    test.use(withMocks(
+      mock.respond('POST', '/totp/setup', {}),
+      mock.respond('PUT', /^\/users\/[^/]+$/, { success: true }),
+      mock.respond('POST', '/users/change-password', { success: true }),
+    ));
 
     test('is filled in from the account', async ({ profilePage }) => {
       await expect(profilePage.firstName.input).toHaveValue(fakeUser.first_name);
@@ -150,5 +158,36 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       expect((await saved).postDataJSON()).toMatchObject({ first_name: 'Renamed', last_name: fakeUser.last_name });
     });
+
+    test('changing the password sends the current and the new one', async ({ profilePage, apiMock }) => {
+      const sent = apiMock.waitForRequest('POST', '/users/change-password');
+
+      await profilePage.changePassword('Qa-lab-old-pass-1!', 'Qa-lab-new-pass-2!');
+
+      expect((await sent).postDataJSON()).toEqual({
+        current_password: 'Qa-lab-old-pass-1!',
+        new_password: 'Qa-lab-new-pass-2!',
+        new_password_confirmation: 'Qa-lab-new-pass-2!',
+      });
+    });
+
+    test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
+      knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.');
+      const sent = apiMock.waitForRequest('POST', '/users/change-password');
+
+      await profilePage.changePasswordButton.click();
+
+      // It is sent (the defect), where the form should have said what is missing.
+      await sent;
+      await expect(profilePage.alerts.filter({ hasText: /required/i }).first()).toBeVisible({ timeout: 2_000 });
+    });
+  });
+
+  test('"Sign out" is a real link or button', { tag: ['@a11y', '@bug'] }, async ({ accountPage }) => {
+    knownBug('A11Y-04', '"Sign out" is an <a> without href: no link role, not reachable with Tab.');
+    await accountPage.header.userMenu.click();
+    await expect(accountPage.header.userMenuItem('Sign out')).toBeVisible();
+
+    await expect(accountPage.header.signOutControl).toBeVisible({ timeout: 2_000 });
   });
 });

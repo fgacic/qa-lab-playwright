@@ -70,13 +70,23 @@ export class FilterPanel {
     await this.ecoFriendly.check();
   }
 
+  @step('Raise the minimum price to ${0}')
+  async setMinPrice(min: number): Promise<void> {
+    await this.expand();
+    await this.moveHandle(this.minPrice, min);
+  }
+
   /** The slider is keyboard operable: one arrow press moves a handle by one dollar. */
   @step('Lower the maximum price to ${0}')
   async setMaxPrice(max: number): Promise<void> {
     await this.expand();
-    const current = Number(await this.maxPrice.getAttribute('aria-valuenow'));
-    await this.maxPrice.focus();
-    for (let value = current; value > max; value--) await this.maxPrice.press('ArrowLeft');
-    for (let value = current; value < max; value++) await this.maxPrice.press('ArrowRight');
+    await this.moveHandle(this.maxPrice, max);
+  }
+
+  private async moveHandle(handle: Locator, to: number): Promise<void> {
+    const current = Number(await handle.getAttribute('aria-valuenow'));
+    await handle.focus();
+    for (let value = current; value > to; value--) await handle.press('ArrowLeft');
+    for (let value = current; value < to; value++) await handle.press('ArrowRight');
   }
 }
