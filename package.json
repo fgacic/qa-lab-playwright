@@ -1,0 +1,20 @@
+{
+  "name": "qa-lab-playwright",
+  "version": "1.0.0",
+  "description": "Playwright UI suite for Toolshop",
+  "scripts": {
+    "test": "playwright test",
+    "report": "allure generate allure-results -o allure-report --clean"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.10.2",
+    "allure-commandline": "2.46.1",
+    "allure-playwright": "3.14.0",
+    "typescript": "5.7.2"
+  },
+  "private": true
+}
