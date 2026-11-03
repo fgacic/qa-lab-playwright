@@ -1,10 +1,17 @@
 {
   "name": "qa-lab-playwright",
   "version": "1.0.0",
-  "description": "Playwright UI suite for Toolshop",
+  "description": "Playwright UI suite for the Toolshop practice web shop",
   "scripts": {
     "test": "playwright test",
-    "report": "allure generate allure-results -o allure-report --clean"
+    "test:chromium": "playwright test --project=chromium",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:mocked": "playwright test --grep @mocked",
+    "test:verify-bugs": "VERIFY_BUGS=1 playwright test --project=chromium --grep @bug",
+    "test:account": "RUN_ACCOUNT_TESTS=1 playwright test --project=account",
+    "typecheck": "tsc --noEmit",
+    "report": "allure generate allure-results -o allure-report --clean",
+    "report:html": "playwright show-report"
   },
   "keywords": [],
   "author": "",

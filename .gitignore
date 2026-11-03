@@ -9,3 +9,4 @@ allure-results/
 allure-report/
 blob-report/
 *.log
+.auth/
