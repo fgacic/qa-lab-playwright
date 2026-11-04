@@ -1,8 +1,12 @@
 name: CI
 
+# The gate: the whole suite against the self-hosted Toolshop (TARGET=local), on every push and
+# pull request, nightly, and on demand. The public site is checked separately (live.yml).
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -10,106 +14,192 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI: true
+  TARGET: local
 
 jobs:
-  test:
-    name: Playwright (${{ matrix.project }})
+  typecheck:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-suite
+        with:
+          browsers: none
+      - run: npm run typecheck
+
+  e2e:
+    name: e2e (${{ matrix.id }})
+    needs: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - project: chromium
-            browser: chromium
-          - project: firefox
-            browser: firefox
-          - project: mobile
-            browser: chromium
+          - { id: chromium-1, browsers: chromium, projects: --project=chromium, shard: 1/3 }
+          - { id: chromium-2, browsers: chromium, projects: --project=chromium, shard: 2/3 }
+          - { id: chromium-3, browsers: chromium, projects: --project=chromium, shard: 3/3 }
+          - { id: firefox-1, browsers: firefox, projects: --project=firefox, shard: 1/2 }
+          - { id: firefox-2, browsers: firefox, projects: --project=firefox, shard: 2/2 }
+          - { id: webkit-1, browsers: webkit, projects: --project=webkit, shard: 1/2 }
+          - { id: webkit-2, browsers: webkit, projects: --project=webkit, shard: 2/2 }
+          # Real sign-ins against our own Toolshop, and the phone smoke set.
+          - { id: sessions-mobile, browsers: chromium, projects: --project=account --project=admin --project=mobile, shard: 1/1 }
     steps:
-      - uses: actions/checkout@v4.2.2
-
-      - uses: actions/setup-node@v4.1.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-suite
         with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Type-check
-        run: npm run typecheck
-
-      - name: Install ${{ matrix.browser }}
-        run: npx playwright install --with-deps ${{ matrix.browser }}
-
-      # The account project is gated by RUN_ACCOUNT_TESTS and is not run in CI.
+          browsers: ${{ matrix.browsers }}
+      - uses: ./.github/actions/toolshop
       - name: Run the suite
-        run: npx playwright test --project=${{ matrix.project }}
-
-      - name: Upload the HTML report
+        run: npx playwright test ${{ matrix.projects }} --shard=${{ matrix.shard }}
+        env:
+          REPORT_ID: ${{ matrix.id }}
+      - name: Upload the blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
-          name: playwright-report-${{ matrix.project }}
-          path: playwright-report/
-          retention-days: 14
-
+          name: blob-${{ matrix.id }}
+          path: blob-report/
+          retention-days: 7
       - name: Upload Allure results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
-          name: allure-results-${{ matrix.project }}
+          name: allure-${{ matrix.id }}
           path: allure-results/
-          retention-days: 14
+          retention-days: 7
 
-  allure-report:
-    name: Build the Allure report
-    needs: test
-    # Publish from main only, whatever the test outcome: a red run is the one worth reading.
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+  visual:
+    name: visual (Playwright image)
+    needs: typecheck
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4.2.2
-
-      - uses: actions/setup-node@v4.1.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-suite
         with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - uses: actions/setup-java@v4.5.0
+          browsers: none
+      - uses: ./.github/actions/toolshop
+      # Baselines are recorded in mcr.microsoft.com/playwright:v1.64.1-noble; comparing in the
+      # same image means the same fonts and the same rendering.
+      - name: Compare screenshots in the Playwright image
+        run: npm run test:visual
+        env:
+          REPORT_ID: visual
+      - name: Upload the blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
-          distribution: temurin
-          java-version: 21
-
-      - name: Collect the results of every project
-        uses: actions/download-artifact@v4.1.8
+          name: blob-visual
+          path: blob-report/
+          retention-days: 7
+      - name: Upload Allure results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
-          pattern: allure-results-*
+          name: allure-visual
+          path: allure-results/
+          retention-days: 7
+
+  verify-bugs:
+    name: known bugs still reproduce
+    needs: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-suite
+        with:
+          browsers: chromium
+      - uses: ./.github/actions/toolshop
+      # Every knownBug() spec runs as a plain test and must fail; one that passes is a fix to record.
+      - run: npm run test:verify-bugs
+      - name: Upload the result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: verify-bugs
+          path: test-results/verify-bugs.json
+          retention-days: 7
+
+  report:
+    name: merge reports
+    needs: [e2e, visual]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-suite
+        with:
+          browsers: none
+
+      - name: Collect the blob reports
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: blob-*
+          path: all-blob-reports
+          merge-multiple: true
+      - name: One HTML report from every shard
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Collect the Allure results
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: allure-*
           path: allure-results
           merge-multiple: true
 
-      - name: Generate the report
-        run: npx allure generate allure-results -o allure-report --clean
+      # Trend, Duration and Retries charts need the history of earlier runs: take the history file
+      # published with the last report, let this run append to it, publish it again.
+      - name: Fetch the Allure history of earlier runs
+        run: |
+          mkdir -p allure-history
+          curl -fsSL "https://fgacic.github.io/qa-lab-playwright/history/history.jsonl" -o allure-history/history.jsonl \
+            && echo "history: $(wc -l < allure-history/history.jsonl) earlier runs" \
+            || { echo "no published history yet, starting one"; rm -f allure-history/history.jsonl; }
+      - name: Generate the Allure report
+        run: npx allure generate allure-results
+      - name: Assemble the site
+        run: |
+          mkdir -p site/history site/playwright
+          cp -r allure-report/. site/
+          cp allure-history/history.jsonl site/history/history.jsonl
+          cp -r playwright-report/. site/playwright/
+          touch site/.nojekyll
 
-      - uses: actions/configure-pages@v5.0.0
-
-      - uses: actions/upload-pages-artifact@v3.0.1
+      - name: Upload the HTML report
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
-          path: allure-report
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+      - name: Upload the Pages site
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: site
 
   deploy-pages:
-    name: Publish to GitHub Pages
-    needs: allure-report
+    name: publish to GitHub Pages
+    needs: report
+    if: ${{ !cancelled() && needs.report.result == 'success' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       - id: deployment
-        uses: actions/deploy-pages@v4.0.5
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

@@ -1,0 +1,40 @@
+name: Set up the suite
+description: Node with the npm cache, npm ci, and Playwright browsers from cache.
+inputs:
+  browsers:
+    description: Space-separated browsers to install, or "none".
+    default: chromium
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+      with:
+        node-version: 22
+        cache: npm
+
+    - run: npm ci
+      shell: bash
+
+    - name: Playwright version
+      id: pw
+      if: inputs.browsers != 'none'
+      shell: bash
+      run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Playwright browsers
+      id: browser-cache
+      if: inputs.browsers != 'none'
+      uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
+
+    # Browsers come from the cache when it hits; the system libraries they need never do.
+    - name: Install browsers
+      if: inputs.browsers != 'none' && steps.browser-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npx playwright install --with-deps ${{ inputs.browsers }}
+    - name: Install browser system dependencies
+      if: inputs.browsers != 'none' && steps.browser-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: npx playwright install-deps ${{ inputs.browsers }}
