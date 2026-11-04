@@ -29,7 +29,9 @@ jobs:
       # One job at a time: with the config's two workers, never more than two browsers on the public site.
       max-parallel: 1
       matrix:
-        project: [chromium, firefox, webkit, mobile]
+        # Firefox and WebKit are gated on the self-hosted shop. Here, fewer requests also mean fewer
+        # Cloudflare bot challenges from the runner's datacenter IP (src/support/bot-challenge.ts).
+        project: [chromium, mobile]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: ./.github/actions/setup-suite

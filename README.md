@@ -87,7 +87,7 @@ npm run report                       # Allure 3 report from allure-results/
 5. **merge reports.** Downloads every blob and merges them into one HTML report. It then fetches the published Allure `history/history.jsonl`, generates the Allure 3 report (which appends this run to the history), and assembles the site.
 6. **publish.** From `main` only, with `actions/deploy-pages`. The history file is published with the report, which is how the Trend, Duration and Retries charts keep growing.
 
-`.github/workflows/live.yml` runs the suite against practicesoftwaretesting.com nightly and on demand, as a signal and not a gate.
+`.github/workflows/live.yml` runs the suite against practicesoftwaretesting.com nightly and on demand, as a signal and not a gate. It runs Chromium and the mobile set, one job at a time, so at most two workers touch the public site. Cloudflare answers part of the runner's navigations with a bot challenge. The suite never tries to get past it: a test whose own navigation is challenged is skipped with that reason, and any other test the challenge interrupts carries a `bot challenge` annotation in the report.
 
 The rest of the setup:
 

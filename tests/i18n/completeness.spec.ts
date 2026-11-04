@@ -1,6 +1,7 @@
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
 import { expect, test } from '@fixtures';
 import type { Page } from '@playwright/test';
+import { skipIfBotChallenge } from '@support/bot-challenge';
 import { knownBug } from '@support/known-bug';
 import { SAME_AS_ENGLISH, SAME_IN_EVERY_LANGUAGE, untranslatedKeys, visibleUiText } from '@support/i18n';
 import type { Catalog } from '../../fixtures/api';
@@ -47,6 +48,7 @@ async function textIn(page: Page, language: Language, path: string, visit: Visit
   await page.goto(path, { waitUntil: 'domcontentloaded' });
   await page.evaluate((lang) => localStorage.setItem('language', lang), language);
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await skipIfBotChallenge(page);
   await expect(page.locator('html')).toHaveAttribute('lang', language);
   await expect(page.getByRole('contentinfo')).toBeVisible();
   if (visit.submit) await page.getByTestId(visit.submit).click();

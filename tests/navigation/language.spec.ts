@@ -1,6 +1,7 @@
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
 import type { NavKey } from '@components/Header';
 import { expect, test } from '@fixtures';
+import { skipIfBotChallenge } from '@support/bot-challenge';
 
 /** What the header says in each language (as shipped on the site, typos included). */
 const NAV_LABELS: Record<Language, Partial<Record<NavKey, string>>> = {
@@ -42,6 +43,7 @@ test.describe('Language switcher', () => {
     await header.language.switchTo('de');
 
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await skipIfBotChallenge(page);
     await header.navItem('contact').click();
 
     await expect(page).toHaveURL('/contact');

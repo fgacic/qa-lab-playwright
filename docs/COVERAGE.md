@@ -522,6 +522,22 @@ These are real, but a deterministic UI test would only restate the observation:
   axe did not flag it.
 - **The API is intermittently unavailable.** `POST /carts` returned 500 once in three tries during research. In the final run it returned 500, then redirected to a 404, for several minutes in a row.
 
+## The live run and Cloudflare
+
+From GitHub-hosted runners, Cloudflare in front of practicesoftwaretesting.com answers some
+navigations with a managed bot challenge (`__cf_chl_rt_tk`) instead of the shop. The first live run
+(4 browsers, one after the other) was hit on full page loads: sign-out, login redirects, language
+reloads. Bot detection is not something a test suite should defeat, so the suite does not try.
+
+- A test whose own navigation lands on the challenge is skipped with "Cloudflare bot challenge on the
+  live site (not bypassed by design)".
+- Any other test the challenge interrupts carries a `bot challenge` annotation, so its failure reads
+  as environmental.
+- The nightly live run is limited to Chromium and mobile. That means fewer requests, and the other
+  engines are covered on the self-hosted gate.
+
+From a residential connection the live run is not challenged (the earlier local runs).
+
 ## Runs
 
 The current results are on the [published report](https://fgacic.github.io/qa-lab-playwright/), with

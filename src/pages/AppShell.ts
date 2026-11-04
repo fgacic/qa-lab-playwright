@@ -5,6 +5,7 @@ import { Header } from '@components/Header';
 import { LiveActivityPanel } from '@components/LiveActivityPanel';
 import { PromoBanners } from '@components/PromoBanners';
 import { Toast } from '@components/Toast';
+import { skipIfBotChallenge } from '@support/bot-challenge';
 import { API_URL, apiPath } from '@support/env';
 
 /**
@@ -39,6 +40,7 @@ export class AppShell {
   /** `domcontentloaded`: the live-activity feed keeps a connection open, so `load`-idle never settles. */
   async goto(path: string): Promise<void> {
     await this.page.goto(path, { waitUntil: 'domcontentloaded' });
+    await skipIfBotChallenge(this.page);
   }
 
   /**
