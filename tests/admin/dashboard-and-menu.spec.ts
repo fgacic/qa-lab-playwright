@@ -6,7 +6,7 @@ import { knownBug } from '@support/known-bug';
 /**
  * Back office with a mocked admin session and a mocked admin API (fixtures/admin.ts). These
  * specs prove how the UI behaves on given responses; they do not prove the real backend.
- * The real journeys are tests/admin-live (gated by RUN_ADMIN_TESTS).
+ * The real journeys are tests/admin-e2e, against the self-hosted Toolshop.
  */
 test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the dashboard shows the sales chart and the orders awaiting fulfilment', async ({ adminDashboard, backOffice }) => {

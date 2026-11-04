@@ -4,7 +4,7 @@ import { AdminListPage } from '@pages/admin/AdminListPage';
 import { AdminDashboardPage, AdminMessagePage, AdminOrderPage, AdminSalesReportPage, AdminSettingsPage, AdminStatisticsPage } from '@pages/admin/AdminPages';
 import * as A from '@support/admin-payloads';
 import { mock } from '@support/api-mock';
-import { ADMIN_SKIP_REASON, RUN_ADMIN_TESTS } from '@support/env';
+import { ADMIN_CREDENTIALS, ADMIN_SKIP_REASON, RUN_ADMIN_TESTS } from '@support/env';
 import { fakeJwt } from '@support/payloads';
 import { installToken } from '@support/session';
 import type { Product } from '@support/toolshop-api';
@@ -110,13 +110,16 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
   adminSession: ['mocked', { option: true }],
   adminToken: async ({ api }, use, testInfo) => {
     testInfo.skip(!RUN_ADMIN_TESTS, ADMIN_SKIP_REASON);
-    await use(await api.login(process.env.ADMIN_EMAIL ?? '', process.env.ADMIN_PASSWORD ?? ''));
+    await use(await api.login(ADMIN_CREDENTIALS.email ?? '', ADMIN_CREDENTIALS.password ?? ''));
   },
   adminListName: ['products', { option: true }],
 
-  backOffice: async ({ page, adminSession, apiMock, catalog }, use, testInfo) => {
+  backOffice: async ({ page, adminSession, apiMock, api, catalog }, use, testInfo) => {
     if (adminSession === 'storage-state') {
       testInfo.skip(!RUN_ADMIN_TESTS, ADMIN_SKIP_REASON);
+      // The storageState from admin.setup.ts carries the session, but Toolshop's JWT lives 300 s
+      // and cannot be refreshed (/users/refresh answers 500), so a fresh token is put in place.
+      await installToken(page, await api.login(ADMIN_CREDENTIALS.email ?? '', ADMIN_CREDENTIALS.password ?? ''));
       await use({ product: await catalog.inStock(), order: A.order(await catalog.inStock()) });
       return;
     }

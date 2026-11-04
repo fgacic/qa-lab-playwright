@@ -1,15 +1,15 @@
 import { expect, test as setup } from '@fixtures';
-import { ADMIN_SKIP_REASON, ADMIN_STORAGE_STATE, RUN_ADMIN_TESTS } from '@support/env';
+import { ADMIN_CREDENTIALS, ADMIN_SKIP_REASON, ADMIN_STORAGE_STATE, RUN_ADMIN_TESTS } from '@support/env';
 
 /**
  * Signs the real admin in through the login page once and saves the session for the `admin`
- * project. Gated: it uses admin credentials on a public shop. Needs ADMIN_EMAIL / ADMIN_PASSWORD.
+ * project. On the self-hosted target it uses the seeded admin; on the live site it needs
+ * RUN_ADMIN_TESTS=1 with ADMIN_EMAIL / ADMIN_PASSWORD.
  */
 setup.skip(!RUN_ADMIN_TESTS, ADMIN_SKIP_REASON);
 
 setup('sign in the admin and save the session', async ({ loginPage, page }) => {
-  const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
+  const { email, password } = ADMIN_CREDENTIALS;
   expect(email && password, 'ADMIN_EMAIL and ADMIN_PASSWORD must be set').toBeTruthy();
 
   await loginPage.login(email!, password!);

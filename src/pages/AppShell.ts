@@ -5,6 +5,7 @@ import { Header } from '@components/Header';
 import { LiveActivityPanel } from '@components/LiveActivityPanel';
 import { PromoBanners } from '@components/PromoBanners';
 import { Toast } from '@components/Toast';
+import { API_URL, apiPath } from '@support/env';
 
 /**
  * What every route shares: header, footer, banners, toasts and the two floating widgets.
@@ -45,8 +46,8 @@ export class AppShell {
    * Without this, a slow initial product list can land after the test's first search or
    * filter and overwrite its results.
    */
-  async gotoAndSettle(path: string, method: string, apiPath: RegExp): Promise<void> {
-    const isFeed = (url: string, m: string) => m === method && apiPath.test(new URL(url).pathname);
+  async gotoAndSettle(path: string, method: string, feed: RegExp): Promise<void> {
+    const isFeed = (url: string, m: string) => m === method && feed.test(apiPath(url)) && url.startsWith(API_URL);
     const settled = Promise.race([
       this.page.waitForResponse((r) => isFeed(r.url(), r.request().method())),
       this.page.waitForEvent('requestfailed', (r) => isFeed(r.url(), r.method())),

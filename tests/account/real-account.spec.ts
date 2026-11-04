@@ -3,13 +3,13 @@ import { ACCOUNT_SKIP_REASON, RUN_ACCOUNT_TESTS } from '@support/env';
 import { fakeAddress, fakeCustomer } from '@support/test-data';
 
 /**
- * Against the real auth API: real registration, real sign-in, real account data. Written for
- * the `account` project and gated, because it creates accounts on a public shop. Run with
- *   RUN_ACCOUNT_TESTS=1 npx playwright test --project=account
+ * Against the real auth API: real registration, real sign-in, real account data. Runs on the
+ * self-hosted Toolshop (our own environment) in every CI run; on the live site only with
+ * RUN_ACCOUNT_TESTS=1, because it creates accounts on a public shop.
  */
 test.skip(!RUN_ACCOUNT_TESTS, ACCOUNT_SKIP_REASON);
 
-test.describe('Live account', { tag: ['@account'] }, () => {
+test.describe('Real account', { tag: ['@account'] }, () => {
   test.describe('a new customer', () => {
     // Starts signed out, whatever the project's storageState holds.
     test.use({ storageState: { cookies: [], origins: [] } });

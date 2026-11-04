@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { API_URL } from './env';
 import { step } from './step';
 import type { Customer } from './test-data';
 
@@ -42,7 +43,7 @@ export class ToolshopApi {
   @step('API: list products {0}')
   async listProducts(query: ProductQuery = {}): Promise<ProductPage> {
     const response = await this.send(() =>
-      this.request.fetch('/products', { method: 'QUERY', data: { page: '1', ...query } }),
+      this.request.fetch(`${API_URL}/products`, { method: 'QUERY', data: { page: '1', ...query } }),
     );
     return response.json();
   }
@@ -79,14 +80,14 @@ export class ToolshopApi {
 
   @step('API: get product {0}')
   async product(id: string): Promise<Product> {
-    return (await this.send(() => this.request.get(`/products/${id}`))).json();
+    return (await this.send(() => this.request.get(`${API_URL}/products/${id}`))).json();
   }
 
   @step('API: create a cart')
   async createCart(items: CartItem[]): Promise<string> {
-    const { id } = await (await this.send(() => this.request.post('/carts', { data: {} }))).json();
+    const { id } = await (await this.send(() => this.request.post(`${API_URL}/carts`, { data: {} }))).json();
     for (const { product, quantity } of items) {
-      await this.send(() => this.request.post(`/carts/${id}`, { data: { product_id: product.id, quantity } }));
+      await this.send(() => this.request.post(`${API_URL}/carts/${id}`, { data: { product_id: product.id, quantity } }));
     }
     return id;
   }
@@ -94,7 +95,7 @@ export class ToolshopApi {
   @step('API: register customer {0.email}')
   async registerCustomer(customer: Customer): Promise<void> {
     await this.send(() =>
-      this.request.post('/users/register', {
+      this.request.post(`${API_URL}/users/register`, {
         data: {
           first_name: customer.firstName,
           last_name: customer.lastName,
@@ -116,30 +117,30 @@ export class ToolshopApi {
 
   @step('API: sign in')
   async login(email: string, password: string): Promise<string> {
-    const response = await this.send(() => this.request.post('/users/login', { data: { email, password } }));
+    const response = await this.send(() => this.request.post(`${API_URL}/users/login`, { data: { email, password } }));
     return (await response.json()).access_token;
   }
 
   @step('API: add product {1} to favourites')
   async addFavorite(token: string, productId: string): Promise<void> {
-    await this.send(() => this.request.post('/favorites', { data: { product_id: productId }, headers: { authorization: `Bearer ${token}` } }));
+    await this.send(() => this.request.post(`${API_URL}/favorites`, { data: { product_id: productId }, headers: { authorization: `Bearer ${token}` } }));
   }
 
   @step('API: list invoices')
   async invoiceNumbers(token: string): Promise<string[]> {
-    const response = await this.send(() => this.request.get('/invoices', { headers: { authorization: `Bearer ${token}` } }));
+    const response = await this.send(() => this.request.get(`${API_URL}/invoices`, { headers: { authorization: `Bearer ${token}` } }));
     return ((await response.json()).data as { invoice_number: string }[]).map((i) => i.invoice_number);
   }
 
   @step('API (admin): delete product {1}')
   async deleteProduct(token: string, productId: string): Promise<void> {
-    await this.send(() => this.request.delete(`/products/${productId}`, { headers: { authorization: `Bearer ${token}` } }));
+    await this.send(() => this.request.delete(`${API_URL}/products/${productId}`, { headers: { authorization: `Bearer ${token}` } }));
   }
 
   @step('API (admin): find the product named "{1}"')
   async findProductByName(token: string, name: string): Promise<Product | undefined> {
     const response = await this.send(() =>
-      this.request.fetch('/products/search', { method: 'QUERY', data: { q: name }, headers: { authorization: `Bearer ${token}` } }),
+      this.request.fetch(`${API_URL}/products/search`, { method: 'QUERY', data: { q: name }, headers: { authorization: `Bearer ${token}` } }),
     );
     return ((await response.json()).data as Product[]).find((p) => p.name === name);
   }
@@ -148,9 +149,9 @@ export class ToolshopApi {
   @step('API: place a guest order')
   async placeGuestOrder(items: CartItem[], guest: { email: string; firstName: string; lastName: string }): Promise<{ invoice_number: string; id: string }> {
     const cartId = await this.createCart(items);
-    const lookup = await (await this.send(() => this.request.get('/postcode-lookup', { params: { country: 'NL', postcode: '1234 AB', house_number: '1' } }))).json();
+    const lookup = await (await this.send(() => this.request.get(`${API_URL}/postcode-lookup`, { params: { country: 'NL', postcode: '1234 AB', house_number: '1' } }))).json();
     const response = await this.send(() =>
-      this.request.post('/invoices/guest', {
+      this.request.post(`${API_URL}/invoices/guest`, {
         data: {
           billing_street: lookup.street, billing_house_number: '1', billing_city: lookup.city, billing_state: lookup.state,
           billing_country: 'NL', billing_postal_code: '1234 AB', payment_method: 'cash-on-delivery', payment_details: {},
@@ -163,7 +164,7 @@ export class ToolshopApi {
 
   @step('API: send a contact message')
   async sendContactMessage(message: { name: string; email: string; subject: string; message: string }): Promise<void> {
-    await this.send(() => this.request.post('/messages', { data: message }));
+    await this.send(() => this.request.post(`${API_URL}/messages`, { data: message }));
   }
 
   /**

@@ -4,7 +4,7 @@ import { fakeFavorite, fakeInvoice, fakeMessage, fakeUser, page as paged } from 
 
 /**
  * The signed-in area with a mocked session: a fake token and mocked account endpoints, so it
- * runs anywhere without an account. The real thing is covered in live-account.spec.ts (gated).
+ * runs anywhere without an account. The real thing is covered in real-account.spec.ts.
  */
 test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   // An account with nothing in it. Any section the SPA opens needs its endpoint mocked: a real

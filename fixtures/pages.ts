@@ -41,6 +41,11 @@ export interface PageFixtures {
   registerPage: RegisterPage;
   forgotPasswordPage: ForgotPasswordPage;
   contactPage: ContactPage;
+  /**
+   * Page objects that are not opened yet, for journeys that move between areas (back office,
+   * then shop): the test opens them when the story gets there.
+   */
+  shop: { home: HomePage };
 }
 
 export const test = mergeTests(apiTest, mocksTest).extend<PageOptions & PageFixtures>({
@@ -106,6 +111,7 @@ export const test = mergeTests(apiTest, mocksTest).extend<PageOptions & PageFixt
     await forgotPasswordPage.open();
     await use(forgotPasswordPage);
   },
+  shop: async ({ page }, use) => use({ home: new HomePage(page) }),
   contactPage: async ({ page }, use) => {
     const contactPage = new ContactPage(page);
     await contactPage.open();

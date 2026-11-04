@@ -1,12 +1,12 @@
 import type { Page, Request, Response, Route } from '@playwright/test';
-import { API_URL } from './env';
+import { API_URL, apiPath } from './env';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'QUERY';
 const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
  * One mocked endpoint. `path` is the API path without the host: a string matches exactly,
- * a RegExp matches the pathname. Responses are served in order; the last one repeats.
+ * a RegExp matches the path (both relative to API_URL). Responses are served in order; the last one repeats.
  */
 export interface MockRoute {
   method: HttpMethod;
@@ -66,7 +66,15 @@ export class ApiMock {
   /** Writes the guard refused (see `blockUnmockedWrites`). */
   readonly blockedWrites: string[] = [];
 
-  constructor(private readonly page: Page) {}
+  /** `latencyMs` delays every API request, mocked or real, as a slow network would. */
+  constructor(private readonly page: Page, private readonly latencyMs = 0) {}
+
+  /** Routes the API through the mock layer even with no mocks, e.g. to apply the latency. */
+  async install(): Promise<void> {
+    if (this.installed) return;
+    this.installed = true;
+    await this.page.route((url) => url.href.startsWith(API_URL), (route) => this.handle(route));
+  }
 
   async use(...routes: MockRoute[]): Promise<void> {
     // Later registrations win, so a test can override a describe-level mock.
@@ -89,15 +97,10 @@ export class ApiMock {
     await this.install();
   }
 
-  private async install(): Promise<void> {
-    if (this.installed) return;
-    this.installed = true;
-    await this.page.route((url) => url.href.startsWith(API_URL), (route) => this.handle(route));
-  }
 
   /** Waits for the next request to an endpoint, mocked or real, and returns it. */
   waitForRequest(method: HttpMethod, path: MockRoute['path']): Promise<Request> {
-    return this.page.waitForRequest((r) => r.method() === method && matches(path, new URL(r.url()).pathname));
+    return this.page.waitForRequest((r) => r.method() === method && matches(path, apiPath(r.url())));
   }
 
   /**
@@ -112,7 +115,7 @@ export class ApiMock {
     let body: Record<string, string> = {};
     const response = await this.page.waitForResponse((r) => {
       const request = r.request();
-      if (request.method() !== method || !matches(path, new URL(r.url()).pathname)) return false;
+      if (request.method() !== method || !matches(path, apiPath(r.url()))) return false;
       body = (request.postDataJSON() as Record<string, string> | null) ?? {};
       return bodyMatches(body);
     });
@@ -122,7 +125,8 @@ export class ApiMock {
   private async handle(route: Route): Promise<void> {
     const request = route.request();
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
-    const pathname = new URL(request.url()).pathname;
+    if (this.latencyMs) await new Promise((resolve) => setTimeout(resolve, this.latencyMs));
+    const pathname = apiPath(request.url());
     const match = [...this.routes, ...this.defaults].find((r) => r.method === request.method() && matches(r.path, pathname));
     if (!match) {
       if (this.guardWrites && WRITES.has(request.method())) {

@@ -1,5 +1,4 @@
 import { test as base } from '@playwright/test';
-import { API_URL } from '@support/env';
 import { ToolshopApi, type CartItem, type Product } from '@support/toolshop-api';
 
 /**
@@ -37,7 +36,8 @@ export interface ApiFixtures {
 export const test = base.extend<ApiFixtures, ApiWorkerFixtures>({
   api: [
     async ({ playwright }, use) => {
-      const request = await playwright.request.newContext({ baseURL: API_URL });
+      // Ask for JSON: without it Laravel answers a validation error with a 302 redirect, not a 422.
+      const request = await playwright.request.newContext({ extraHTTPHeaders: { accept: 'application/json' } });
       await use(new ToolshopApi(request));
       await request.dispose();
     },

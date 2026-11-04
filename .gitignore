@@ -10,3 +10,5 @@ allure-report/
 blob-report/
 *.log
 .auth/
+!.env.toolshop
+allure-history/

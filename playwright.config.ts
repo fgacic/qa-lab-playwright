@@ -1,70 +1,75 @@
 import { defineConfig, devices } from '@playwright/test';
-import { ADMIN_STORAGE_STATE, CUSTOMER_STORAGE_STATE } from './src/support/env';
+import { ADMIN_STORAGE_STATE, BASE_URL, CUSTOMER_STORAGE_STATE, IS_SELF_HOSTED, RUN_ACCOUNT_TESTS, RUN_ADMIN_TESTS, TARGET } from './src/support/env';
 
 const isCI = !!process.env.CI;
-const runAccountTests = process.env.RUN_ACCOUNT_TESTS === '1';
-const runAdminTests = process.env.RUN_ADMIN_TESTS === '1';
 
 /**
- * The target is a live, shared, public practice shop. Every setting below follows from that:
- * - retries absorb the occasional 5xx from the shared backend (seen on POST /carts),
- * - two workers at most, to be polite to a site other people are testing too,
- * - generous navigation timeout: a cold first load has taken over 30 s.
+ * Two targets (src/support/env.ts): the self-hosted Toolshop (`TARGET=local`, the default and
+ * the CI gate) and the public site (`TARGET=live`, a nightly signal). The live site is shared,
+ * so it gets two workers and an extra retry for its occasional 5xx; our own container gets more
+ * workers and a single retry, so real flakiness is not hidden.
+ *
+ * Projects by tag:
+ * - chromium / firefox / webkit: everything except the gated real-account, real-admin and
+ *   visual specs;
+ * - mobile: @smoke and @mobile on a Pixel 7;
+ * - account / admin: real sign-ins from a setup project's storageState;
+ * - visual: screenshot comparisons, Chromium only, run inside the Playwright Docker image.
  */
 export default defineConfig({
   testDir: './tests',
   timeout: 90_000,
-  expect: { timeout: 15_000 },
+  expect: {
+    timeout: 15_000,
+    toHaveScreenshot: { animations: 'disabled', caret: 'hide', scale: 'css', maxDiffPixelRatio: 0.002 },
+  },
+  // Baselines are Linux renderings from the official image only, so the path has no platform.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
   fullyParallel: true,
   forbidOnly: isCI,
-  retries: isCI ? 2 : 1,
-  workers: 2,
-  reporter: [
-    ['list'],
-    ['html', { open: 'never' }],
-    ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false }],
-  ],
+  retries: IS_SELF_HOSTED ? 1 : 2,
+  workers: IS_SELF_HOSTED ? (isCI ? 2 : 4) : 2,
+  reporter: isCI
+    ? // One blob per CI job (REPORT_ID), so shards of different projects never overwrite each other.
+      [['list'], ['blob', { fileName: `report-${process.env.REPORT_ID ?? 'ci'}.zip` }], ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false, environmentInfo: { target: TARGET, baseURL: BASE_URL } }]]
+    : [['list'], ['html', { open: 'never' }], ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false, environmentInfo: { target: TARGET, baseURL: BASE_URL } }]],
   use: {
-    baseURL: process.env.BASE_URL ?? 'https://practicesoftwaretesting.com',
+    baseURL: BASE_URL,
     testIdAttribute: 'data-test',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
-    navigationTimeout: 90_000,
+    navigationTimeout: IS_SELF_HOSTED ? 30_000 : 90_000,
     actionTimeout: 15_000,
   },
   projects: [
-    // Signs in a real account and saves storageState. Runs only with RUN_ACCOUNT_TESTS=1.
     { name: 'account-setup', testMatch: /account\.setup\.ts/ },
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-      grepInvert: /@account|@admin/,
-    },
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-      grepInvert: /@account|@admin/,
-    },
+    { name: 'admin-setup', testMatch: /admin\.setup\.ts/ },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: /@account|@admin|@visual/ },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, grepInvert: /@account|@admin|@visual/ },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] }, grepInvert: /@account|@admin|@visual/ },
     {
       // The header collapses behind a toggler below 992 px; the smoke set proves the shop still works there.
       name: 'mobile',
       use: { ...devices['Pixel 7'] },
       grep: /@smoke|@mobile/,
-      grepInvert: /@account|@admin|@desktop/,
-    },
-    // Signs in the real admin (ADMIN_EMAIL / ADMIN_PASSWORD). Runs only with RUN_ADMIN_TESTS=1.
-    { name: 'admin-setup', testMatch: /admin\.setup\.ts/ },
-    {
-      name: 'admin',
-      use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
-      grep: /@admin/,
-      dependencies: runAdminTests ? ['admin-setup'] : [],
+      grepInvert: /@account|@admin|@desktop|@visual/,
     },
     {
       name: 'account',
       use: { ...devices['Desktop Chrome'], storageState: CUSTOMER_STORAGE_STATE },
       grep: /@account/,
-      dependencies: runAccountTests ? ['account-setup'] : [],
+      dependencies: RUN_ACCOUNT_TESTS ? ['account-setup'] : [],
+    },
+    {
+      name: 'admin',
+      use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
+      grep: /@admin/,
+      dependencies: RUN_ADMIN_TESTS ? ['admin-setup'] : [],
+    },
+    {
+      name: 'visual',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 },
+      grep: /@visual/,
     },
   ],
 });

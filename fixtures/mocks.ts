@@ -8,15 +8,19 @@ export interface MockFixtures {
    * mock needs runtime data: `test.use({ apiMocks: async ({ catalog }, use) => use({ routes }) })`.
    */
   apiMocks: MockSet;
+  /** Delay every API request by this much (a slow network), before any page opens. */
+  apiLatencyMs: number;
   /** For mocks a test adds itself, or to wait for a request to an endpoint. */
   apiMock: ApiMock;
 }
 
 export const test = base.extend<MockFixtures>({
   apiMocks: [{ routes: [] }, { option: true }],
+  apiLatencyMs: [0, { option: true }],
   apiMock: [
-    async ({ page, apiMocks }, use) => {
-      const apiMock = new ApiMock(page);
+    async ({ page, apiMocks, apiLatencyMs }, use) => {
+      const apiMock = new ApiMock(page, apiLatencyMs);
+      if (apiLatencyMs) await apiMock.install();
       if (apiMocks.routes.length) await apiMock.use(...apiMocks.routes);
       await use(apiMock);
     },

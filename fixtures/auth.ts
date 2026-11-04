@@ -5,7 +5,7 @@ import { InvoicesPage } from '@pages/account/InvoicesPage';
 import { MessagesPage } from '@pages/account/MessagesPage';
 import { ProfilePage } from '@pages/account/ProfilePage';
 import { mock } from '@support/api-mock';
-import { ACCOUNT_SKIP_REASON, RUN_ACCOUNT_TESTS } from '@support/env';
+import { ACCOUNT_SKIP_REASON, CUSTOMER_CREDENTIALS, RUN_ACCOUNT_TESTS } from '@support/env';
 import { fakeJwt, fakeUser } from '@support/payloads';
 import { installToken } from '@support/session';
 import { fakeCustomer, type Customer } from '@support/test-data';
@@ -48,13 +48,20 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
 
   workerAccount: [
     async ({ api }, use) => {
-      let account: Promise<{ customer: Customer; token: string }> | undefined;
+      let registered: Promise<Customer> | undefined;
       const register = async () => {
         const customer = fakeCustomer();
         await api.registerCustomer(customer);
-        return { customer, token: await api.login(customer.email, customer.password) };
+        return customer;
       };
-      await use({ get: () => (account ??= register()) });
+      // Registered once per worker; the token is issued fresh on every call, because
+      // Toolshop's JWT lives 300 s and /users/refresh cannot renew it.
+      await use({
+        get: async () => {
+          const customer = await (registered ??= register());
+          return { customer, token: await api.login(customer.email, customer.password) };
+        },
+      });
     },
     { scope: 'worker' },
   ],
@@ -74,7 +81,7 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
       return;
     }
     // storage-state: the account project's storageState already holds the token.
-    await use({ firstName: '', lastName: '', email: process.env.TOOLSHOP_EMAIL ?? '' });
+    await use({ firstName: '', lastName: '', email: CUSTOMER_CREDENTIALS.email ?? '' });
   },
 
   // Depends on `signedIn` so the session exists before the page opens.
