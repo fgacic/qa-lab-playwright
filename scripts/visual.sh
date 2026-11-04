@@ -15,8 +15,9 @@ else
   NETWORK=(--add-host=host.docker.internal:host-gateway); HOST="host.docker.internal"
 fi
 
+# Mounted at the same path as on the host, so its blob report merges with the other jobs'.
 docker run --rm --ipc=host "${NETWORK[@]}" \
-  -v "$PWD":/work -w /work \
+  -v "$PWD":"$PWD" -w "$PWD" \
   -e CI -e REPORT_ID -e PLAYWRIGHT_DOCKER=1 -e TARGET=local \
   -e BASE_URL="http://${HOST}:4200" -e API_URL="http://${HOST}:4200/api" \
   "$IMAGE" npx playwright test --project=visual "$@"

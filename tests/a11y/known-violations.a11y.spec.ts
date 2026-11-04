@@ -64,13 +64,6 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@bug'] }, () =
     });
   }
 
-  for (const violation of on('chat open')) {
-    test(`${violation.id} ${violation.rule} on ${violation.target} (chat)`, async ({ homePage, a11y }) => {
-      await homePage.shell.chat.open();
-      await expect(homePage.shell.chat.greeting).toBeVisible();
-      await expectFixed(a11y, violation);
-    });
-  }
 
   test.describe('account (mocked session)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('POST', '/totp/setup', {})));

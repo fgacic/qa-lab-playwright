@@ -38,10 +38,14 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       const edit = await adminProducts.edit(name);
       // Wait for the form to load the product, or the load overwrites what is typed.
       await expect(edit.name).toHaveValue(name);
-      // The edit form loads neither the stock (ADM-05) nor brand and category (ADM-09).
+      // The edit form loads neither the stock (ADM-05) nor brand and category (ADM-09). Their
+      // options arrive in separate requests; choose only once they are there.
       await edit.stock.fill('3');
+      await expect(edit.brand.getByRole('option').nth(1)).toBeAttached();
+      await expect(edit.category.getByRole('option').nth(1)).toBeAttached();
       await edit.brand.selectOption({ index: 1 });
       await edit.category.selectOption({ index: 1 });
+      await expect(edit.brand).not.toHaveValue('');
       await edit.price.fill('23.45');
       await edit.chrome.save();
       await expect(edit.chrome.alert('Product saved!')).toBeVisible();

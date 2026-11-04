@@ -31,9 +31,11 @@ export class ChatWidget {
     return this.window.getByRole('button', { name, exact: true }).last();
   }
 
+  /** Opens the chat and waits for its fade-in to finish (half-faded text reads as low contrast). */
   @step('Open the chat')
   async open(): Promise<void> {
     await this.openButton.click();
+    await this.window.page().waitForFunction((el) => el !== null && getComputedStyle(el).opacity === '1', await this.window.elementHandle());
   }
 
   @step('Close the chat')

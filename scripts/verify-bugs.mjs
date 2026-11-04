@@ -13,7 +13,11 @@ spawnSync('npx', ['playwright', 'test', '--project=chromium', '--project=admin',
 const report = JSON.parse(readFileSync(out, 'utf8'));
 const results = [];
 const walk = (suite) => {
-  for (const spec of suite.specs ?? []) for (const t of spec.tests) results.push({ title: `${spec.file} › ${spec.title}`, status: t.results.at(-1)?.status, skipped: t.status === 'skipped' });
+  // Only the pins: setup projects run too, as dependencies of the admin project.
+  for (const spec of suite.specs ?? []) {
+    if (!spec.tags?.includes('bug')) continue;
+    for (const t of spec.tests) results.push({ title: `${spec.file} › ${spec.title}`, status: t.results.at(-1)?.status, skipped: t.status === 'skipped' });
+  }
   for (const child of suite.suites ?? []) walk(child);
 };
 report.suites.forEach(walk);

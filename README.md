@@ -12,12 +12,12 @@ The suite runs **379 tests per desktop browser** in Chromium, Firefox and WebKit
 
 Every control the site exposes, the back office included, is listed in [docs/COVERAGE.md](docs/COVERAGE.md) with the test that covers it.
 
-The suite found **75 defects**, each pinned as a test:
+The suite found **69 defects**, each pinned as a test:
 
 | Kind | Count |
 |---|---|
 | Functional | 38 (9 of them in the back office) |
-| Accessibility | 23 |
+| Accessibility | 17 |
 | Translation | 7 |
 | Security headers | 6 |
 | Performance | 1 |
@@ -30,7 +30,7 @@ The suite found **75 defects**, each pinned as a test:
 | Accounts | `tests/auth`, `tests/account` | Login (incl. TOTP), registration, password reset; **register → log in → account** for real on the self-hosted shop, mocked everywhere else |
 | Back office | `tests/admin`, `tests/admin-e2e` | Every admin list, form, status change, report and setting against a mocked admin API; **real journeys** as the seeded admin: create → sell → reprice → delete a product, ship an order, answer a message |
 | Failure paths | every area | Each request the UI sends also answers 500, 4xx, a network abort, and an empty 200 |
-| Accessibility | `tests/a11y` | axe-core WCAG 2.2 A/AA on 32 pages and states; 19 known violations pinned one by one |
+| Accessibility | `tests/a11y` | axe-core WCAG 2.2 A/AA on 32 pages and states; 13 known violations pinned one by one |
 | Visual | `tests/visual` | 13 screenshots of key pages and states, compared in the official Playwright image |
 | Translations | `tests/i18n` | 10 pages and form states in all 7 languages: no leaked keys, no stray English |
 | Security | `tests/security` | Script and HTML payloads through search, chat, contact, registration and admin forms are shown as text, never run; live response headers |
@@ -131,10 +131,11 @@ Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The hea
 - **Sessions.** `/users/refresh` throws an unhandled exception (500), so every session ends after 5 minutes.
 - **Raw text leaks:** "[object Object]", "true", `page.forgot-password.confirm` (BUG-20, 21, 22).
 - **Untranslated text.** Seven areas stay English in all six other languages (I18N-01..07): the notification bar, the screen-reader heading, the footer, "Sign in with Google", the registration help, the privacy page, and the hard-coded "Quantity".
-- **Accessibility.** 19 axe violations, 6 of them critical:
+- **Accessibility.** 13 axe violations, 6 of them critical:
   - the checkout tabs break the ARIA tab pattern;
   - three password buttons have no name;
-  - the chat fails contrast.
+  - the language button's name does not match its "EN" label;
+  - the related-products links are too small to tap.
 
   Four more defects were found by locator friction: the cart remove control, Sign out, and pagination that is disabled by CSS only.
 - **Security headers.** The live site sends no CSP, X-Frame-Options, nosniff, Referrer-Policy or HSTS, and the API names its server and OS versions (SEC-01..06).
@@ -144,6 +145,7 @@ Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The hea
   - Fixture-driven navigation needs settle waits, or a late initial response overwrites the test's first search.
   - Laravel caches product lists across a reseed.
   - The pinned tag 2.5 differs from what the live site runs, hence building from a commit.
+  - Six chat "contrast" findings were the scan catching a fade-in. Scan settled states only.
 
 ## What I would change
 

@@ -279,13 +279,17 @@ The full axe result of each scan is attached to the report.
   has its own `knownBug` pin that turns red when it is fixed.
 - **Chromium only.** axe reads the accessibility tree the browser builds, and Firefox does not report
   AX-01. The baseline is kept for one engine.
+- **Scan settled states only.** A first baseline held six colour-contrast violations in the chat. They
+  came from scanning while the chat was still fading in, which makes the text half-transparent. With
+  `chat.open()` waiting for full opacity they are gone, locally and in CI. They were dropped from the
+  baseline rather than pinned as defects the site does not have.
 - **What axe does not see.** A11Y-01 (the cart's remove control is an `<a>` without href, so it is
   not focusable and axe skips it), A11Y-03 (pagination disabled by CSS only) and A11Y-04 (Sign out
   without href) were found by the functional specs. They are pinned there.
 
 | Status | Pages scanned | Distinct violations | Critical | Serious | Moderate | Minor |
 |---|---|---|---|---|---|---|
-| bug found (AX-01..AX-19) | 32 | 19 | 6 | 13 | 0 | 0 |
+| bug found (AX-01..AX-13) | 32 | 13 | 6 | 7 | 0 | 0 |
 
 ## Visual regression
 
@@ -451,18 +455,12 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | AX-05 | button-name | critical | 4.1.2 | show-password, "New Password" (profile) | No accessible name. |
 | AX-06 | button-name | critical | 4.1.2 | show-password, "Confirm New Password" (profile) | No accessible name. |
 | AX-07 | color-contrast | serious | 1.4.3 | status badges (admin inbox) | Too little contrast. |
-| AX-08 | color-contrast | serious | 1.4.3 | chat title | Too little contrast. |
-| AX-09 | color-contrast | serious | 1.4.3 | chat messages | Too little contrast. |
-| AX-10 | color-contrast | serious | 1.4.3 | chat "Find a product" | Too little contrast. |
-| AX-11 | color-contrast | serious | 1.4.3 | chat "Order a product" | Too little contrast. |
-| AX-12 | color-contrast | serious | 1.4.3 | chat "Checkout" | Too little contrast. |
-| AX-13 | color-contrast | serious | 1.4.3 | chat "Create support ticket" | Too little contrast. |
-| AX-14 | label-content-name-mismatch | serious | 2.5.3 | language button (every page) | Shows "EN", named "Select language": voice control by its label fails. |
-| AX-15 | label-content-name-mismatch | serious | 2.5.3 | cart link | Shows the item count, which its name does not contain. |
-| AX-16 | list | serious | 1.3.1 | password rules (register, profile) | The list contains non-list children. |
-| AX-17 | list | serious | 1.3.1 | subcategory lists in the filters | The lists contain groups instead of list items. |
-| AX-18 | listitem | serious | 1.3.1 | checkout tab items | List items outside a list (the parent's role is overridden). |
-| AX-19 | target-size | serious | 2.5.8 | "More information" on related products | Smaller than 24×24 px and too close together. |
+| AX-08 | label-content-name-mismatch | serious | 2.5.3 | language button (every page) | Shows "EN", named "Select language": voice control by its label fails. |
+| AX-09 | label-content-name-mismatch | serious | 2.5.3 | cart link | Shows the item count, which its name does not contain. |
+| AX-10 | list | serious | 1.3.1 | password rules (register, profile) | The list contains non-list children. |
+| AX-11 | list | serious | 1.3.1 | subcategory lists in the filters | The lists contain groups instead of list items. |
+| AX-12 | listitem | serious | 1.3.1 | checkout tab items | List items outside a list (the parent's role is overridden). |
+| AX-13 | target-size | serious | 2.5.8 | "More information" on related products | Smaller than 24×24 px and too close together. |
 
 ### Translations
 
