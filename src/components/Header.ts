@@ -5,6 +5,9 @@ import { LanguageSwitcher } from './LanguageSwitcher';
 export const CATEGORY_MENU = ['Hand Tools', 'Power Tools', 'Other', 'Special Tools', 'Rentals'] as const;
 export type CategoryMenuItem = (typeof CATEGORY_MENU)[number];
 
+export const ADMIN_SECTIONS = ['Dashboard', 'Brands', 'Categories', 'Products', 'Orders', 'Users', 'Messages', 'Settings'] as const;
+export type AdminSection = (typeof ADMIN_SECTIONS)[number];
+
 /** Test ids of the header items, for the language specs where the visible names change. */
 export type NavKey = 'home' | 'categories' | 'contact' | 'sign-in' | 'hand-tools' | 'power-tools' | 'other' | 'special-tools' | 'rentals';
 
@@ -74,6 +77,18 @@ export class Header {
   async openCart(): Promise<void> {
     await this.expand();
     await this.cartLink.click();
+  }
+
+  /** The admin's menu (named after the admin) lists the back-office sections. */
+  adminMenuItem(name: AdminSection): Locator {
+    return this.root.getByRole('list').getByRole('link', { name, exact: true });
+  }
+
+  @step('Open "{0}" from the admin menu')
+  async openAdminSection(name: AdminSection): Promise<void> {
+    await this.expand();
+    await this.userMenu.click();
+    await this.adminMenuItem(name).click();
   }
 
   @step('Open "{0}" from the account menu')

@@ -7,3 +7,9 @@ export const ACCOUNT_SKIP_REASON =
 
 /** Where the account setup project saves the signed-in session (gitignored). */
 export const CUSTOMER_STORAGE_STATE = '.auth/customer.json';
+
+/** Real back-office journeys only run with this set, signed in as ADMIN_EMAIL / ADMIN_PASSWORD. */
+export const RUN_ADMIN_TESTS = process.env.RUN_ADMIN_TESTS === '1';
+export const ADMIN_SKIP_REASON =
+  'Signs in as an admin and changes data on the public shop. Set RUN_ADMIN_TESTS=1 (and ADMIN_EMAIL / ADMIN_PASSWORD) to run.';
+export const ADMIN_STORAGE_STATE = '.auth/admin.json';

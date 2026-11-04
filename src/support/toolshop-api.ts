@@ -13,6 +13,7 @@ export interface Product {
   co2_rating: string;
   brand: { id: string; name: string };
   category: { id: string; name: string; slug: string };
+  product_image: { id: string; title: string; file_name: string; by_name: string; by_url: string; source_name: string; source_url: string };
 }
 
 export interface ProductPage {
@@ -128,6 +129,41 @@ export class ToolshopApi {
   async invoiceNumbers(token: string): Promise<string[]> {
     const response = await this.send(() => this.request.get('/invoices', { headers: { authorization: `Bearer ${token}` } }));
     return ((await response.json()).data as { invoice_number: string }[]).map((i) => i.invoice_number);
+  }
+
+  @step('API (admin): delete product {1}')
+  async deleteProduct(token: string, productId: string): Promise<void> {
+    await this.send(() => this.request.delete(`/products/${productId}`, { headers: { authorization: `Bearer ${token}` } }));
+  }
+
+  @step('API (admin): find the product named "{1}"')
+  async findProductByName(token: string, name: string): Promise<Product | undefined> {
+    const response = await this.send(() =>
+      this.request.fetch('/products/search', { method: 'QUERY', data: { q: name }, headers: { authorization: `Bearer ${token}` } }),
+    );
+    return ((await response.json()).data as Product[]).find((p) => p.name === name);
+  }
+
+  /** A real guest order paid cash on delivery, billed to the address the postcode lookup returns. */
+  @step('API: place a guest order')
+  async placeGuestOrder(items: CartItem[], guest: { email: string; firstName: string; lastName: string }): Promise<{ invoice_number: string; id: string }> {
+    const cartId = await this.createCart(items);
+    const lookup = await (await this.send(() => this.request.get('/postcode-lookup', { params: { country: 'NL', postcode: '1234 AB', house_number: '1' } }))).json();
+    const response = await this.send(() =>
+      this.request.post('/invoices/guest', {
+        data: {
+          billing_street: lookup.street, billing_house_number: '1', billing_city: lookup.city, billing_state: lookup.state,
+          billing_country: 'NL', billing_postal_code: '1234 AB', payment_method: 'cash-on-delivery', payment_details: {},
+          cart_id: cartId, guest_email: guest.email, guest_first_name: guest.firstName, guest_last_name: guest.lastName,
+        },
+      }),
+    );
+    return response.json();
+  }
+
+  @step('API: send a contact message')
+  async sendContactMessage(message: { name: string; email: string; subject: string; message: string }): Promise<void> {
+    await this.send(() => this.request.post('/messages', { data: message }));
   }
 
   /**

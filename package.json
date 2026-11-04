@@ -11,7 +11,8 @@
     "test:account": "RUN_ACCOUNT_TESTS=1 playwright test --project=account",
     "typecheck": "tsc --noEmit",
     "report": "allure generate allure-results -o allure-report --clean",
-    "report:html": "playwright show-report"
+    "report:html": "playwright show-report",
+    "test:admin": "RUN_ADMIN_TESTS=1 playwright test --project=admin"
   },
   "keywords": [],
   "author": "",

@@ -1,7 +1,8 @@
 import type { Page, Request, Response, Route } from '@playwright/test';
 import { API_URL } from './env';
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'QUERY';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'QUERY';
+const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
  * One mocked endpoint. `path` is the API path without the host: a string matches exactly,
@@ -59,17 +60,39 @@ export const mock = {
  */
 export class ApiMock {
   private readonly routes: MockRoute[] = [];
+  private readonly defaults: MockRoute[] = [];
   private installed = false;
+  private guardWrites = false;
+  /** Writes the guard refused (see `blockUnmockedWrites`). */
+  readonly blockedWrites: string[] = [];
 
   constructor(private readonly page: Page) {}
 
   async use(...routes: MockRoute[]): Promise<void> {
     // Later registrations win, so a test can override a describe-level mock.
     this.routes.unshift(...routes);
-    if (!this.installed) {
-      this.installed = true;
-      await this.page.route((url) => url.href.startsWith(API_URL), (route) => this.handle(route));
-    }
+    await this.install();
+  }
+
+  /** Fallback answers that any `use()` or describe-level mock overrides, e.g. a mocked back office. */
+  async useDefaults(...routes: MockRoute[]): Promise<void> {
+    this.defaults.push(...routes);
+    await this.install();
+  }
+
+  /**
+   * Refuses (HTTP 418) every POST/PUT/PATCH/DELETE to the API that no mock answers. The mocked
+   * admin specs turn this on so a gap in the mocks can never write to the real shared backend.
+   */
+  async blockUnmockedWrites(): Promise<void> {
+    this.guardWrites = true;
+    await this.install();
+  }
+
+  private async install(): Promise<void> {
+    if (this.installed) return;
+    this.installed = true;
+    await this.page.route((url) => url.href.startsWith(API_URL), (route) => this.handle(route));
   }
 
   /** Waits for the next request to an endpoint, mocked or real, and returns it. */
@@ -100,8 +123,14 @@ export class ApiMock {
     const request = route.request();
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     const pathname = new URL(request.url()).pathname;
-    const match = this.routes.find((r) => r.method === request.method() && matches(r.path, pathname));
-    if (!match) return route.fallback();
+    const match = [...this.routes, ...this.defaults].find((r) => r.method === request.method() && matches(r.path, pathname));
+    if (!match) {
+      if (this.guardWrites && WRITES.has(request.method())) {
+        this.blockedWrites.push(`${request.method()} ${pathname}`);
+        return route.fulfill({ status: 418, headers: { ...CORS, 'content-type': 'application/json' }, body: '{"message":"Blocked by qa-lab: unmocked write"}' });
+      }
+      return route.fallback();
+    }
     const response = match.responses.length > 1 ? match.responses.shift()! : match.responses[0];
     if ('abort' in response) return route.abort(response.abort);
     return route.fulfill({

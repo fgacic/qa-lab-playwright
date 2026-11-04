@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
-import { CUSTOMER_STORAGE_STATE } from './src/support/env';
+import { ADMIN_STORAGE_STATE, CUSTOMER_STORAGE_STATE } from './src/support/env';
 
 const isCI = !!process.env.CI;
 const runAccountTests = process.env.RUN_ACCOUNT_TESTS === '1';
+const runAdminTests = process.env.RUN_ADMIN_TESTS === '1';
 
 /**
  * The target is a live, shared, public practice shop. Every setting below follows from that:
@@ -37,19 +38,27 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      grepInvert: /@account/,
+      grepInvert: /@account|@admin/,
     },
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
-      grepInvert: /@account/,
+      grepInvert: /@account|@admin/,
     },
     {
       // The header collapses behind a toggler below 992 px; the smoke set proves the shop still works there.
       name: 'mobile',
       use: { ...devices['Pixel 7'] },
       grep: /@smoke|@mobile/,
-      grepInvert: /@account|@desktop/,
+      grepInvert: /@account|@admin|@desktop/,
+    },
+    // Signs in the real admin (ADMIN_EMAIL / ADMIN_PASSWORD). Runs only with RUN_ADMIN_TESTS=1.
+    { name: 'admin-setup', testMatch: /admin\.setup\.ts/ },
+    {
+      name: 'admin',
+      use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
+      grep: /@admin/,
+      dependencies: runAdminTests ? ['admin-setup'] : [],
     },
     {
       name: 'account',

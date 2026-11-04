@@ -7,6 +7,7 @@ import { ProfilePage } from '@pages/account/ProfilePage';
 import { mock } from '@support/api-mock';
 import { ACCOUNT_SKIP_REASON, RUN_ACCOUNT_TESTS } from '@support/env';
 import { fakeJwt, fakeUser } from '@support/payloads';
+import { installToken } from '@support/session';
 import { fakeCustomer, type Customer } from '@support/test-data';
 import { test as apiTest } from './api';
 import { test as mocksTest } from './mocks';
@@ -107,15 +108,3 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
     await use(profilePage);
   },
 });
-
-/**
- * The SPA reads its JWT from localStorage["auth-token"]. Installed once per tab, so that
- * signing out (which clears it and reloads) really signs the user out.
- */
-async function installToken(page: import('@playwright/test').Page, token: string): Promise<void> {
-  await page.addInitScript((token) => {
-    if (sessionStorage.getItem('qa-lab-token-installed')) return;
-    sessionStorage.setItem('qa-lab-token-installed', '1');
-    localStorage.setItem('auth-token', token);
-  }, token);
-}
