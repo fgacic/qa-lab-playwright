@@ -12,7 +12,8 @@ must not happen), *Fail* = API mocked to a 4xx/5xx or a network abort, *Empty* =
 **Status.** `covered` = every applicable column has a passing test. `bug found` = covered, and at least
 one test pins a site defect with `knownBug()` (see [Bugs found](#bugs-found)). `blocked` = deliberately
 not automated, with the reason. `written, gated` = the spec exists but only runs with
-`RUN_ACCOUNT_TESTS=1`, because it creates or uses a real account.
+`RUN_ACCOUNT_TESTS=1` (real customer account) or `RUN_ADMIN_TESTS=1` (real admin), because it uses a real
+account on the public shop.
 
 Locators: the suite uses roles and labels first. The **Locator** column shows what the spec uses, and
 the data-test id in brackets where the role is not unique enough.
@@ -41,7 +42,8 @@ the data-test id in brackets where the role is not unique enough.
 | /admin when signed out | URL | – | n/a | yes | n/a | n/a | navigation/routing | bug found (BUG-01) |
 | Unknown route | URL, grid | – | n/a | yes | n/a | n/a | navigation/routing | bug found (BUG-02) |
 | /compare is not a route (it is /comparison) | URL | – | n/a | yes | n/a | n/a | navigation/routing | covered |
-| Admin area (/admin/*) | – | many | – | – | – | – | – | blocked: needs the admin role; signing in as the published demo admin is outside this suite's safety rules, and a fully mocked back office would only test the mocks |
+| Admin area for a customer | URL | – | n/a | yes (redirected away) | n/a | n/a | admin/dashboard-and-menu | covered |
+| Admin area | see [Back office](#back-office-admin) | | | | | | | |
 
 ## Banners and footer
 
@@ -206,6 +208,76 @@ Mocked session (fake JWT + mocked `GET /users/me`) unless marked gated.
 | Live activity: open, counters, close | button "Show live shop activity", `[live-activity-*]` | GET /sales-stream (SSE, mocked) | yes | n/a | n/a | yes | widgets/live-activity | covered |
 | Live activity: incoming sales listed, totals add up | `[live-activity-item]` | GET /sales-stream (mocked) | yes | n/a | n/a | n/a | widgets/live-activity | covered |
 
+## Back office (admin)
+
+**Two layers, and what each one proves.** The *mocked* specs (`tests/admin`, run everywhere) sign in
+with a fake admin JWT and answer every admin endpoint from `fixtures/admin.ts`. The responses are
+shaped after the [OpenAPI document](https://api.practicesoftwaretesting.com/api/documentation).
+They prove what the back-office UI renders, sends and shows for given responses: validation,
+request bodies, success and error messages, empty and failing lists. They do **not** prove the real
+backend: whether a product is really stored, permissions, or server-side validation. A guard refuses
+(HTTP 418) any write no mock answers, and fails the test, so a gap in the mocks can never change
+the shared shop. The *live* specs (`tests/admin-live`, `@admin`) cover the real backend and are
+gated by `RUN_ADMIN_TESTS=1` with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+
+| Feature / control | Locator | API call | Pos | Neg | Fail | Empty | Spec | Status |
+|---|---|---|---|---|---|---|---|---|
+| Admin menu: Dashboard, Brands, Categories, Products, Orders, Users, Messages, Settings | account menu, links by name | – | yes | n/a | n/a | n/a | admin/dashboard-and-menu | covered |
+| Admin menu: Reports submenu | button "Reports" | – | – | – | – | – | – | blocked: its items did not appear in headless runs when the button was clicked; the report pages are opened by URL instead |
+| Dashboard: sales chart, orders awaiting fulfilment, Edit | heading, `canvas`, table | GET /invoices?in=status,…, GET /reports/total-sales-of-years | yes | n/a | yes | yes | admin/dashboard-and-menu | bug found (ADM-01) |
+| Lists: products, brands, categories, orders, users, messages | heading, table rows | QUERY /products, GET /brands, /categories, /invoices, /users, /messages | yes (×6) | n/a | yes (×6) | yes (×6) | admin/* , admin/lists-failures | bug found (ADM-07) |
+| List search and reset (products, brands, categories, orders, users) | textbox "Search …", buttons | QUERY /…/search `{q}` | yes (×5) | n/a | n/a | n/a | admin/catalog-admin, orders-users-messages | covered |
+| Delete (products, brands, categories, users) | button "Delete" | DELETE /{entity}/{id} | yes (×4) | yes (brand in use, 409) | n/a | n/a | admin/catalog-admin, orders-users-messages | bug found (ADM-02) |
+| Product form: add, required fields, CO₂, brand, category, image | labels | POST /products | yes | yes (required, text price, negative price) | yes (422) | n/a | admin/catalog-admin | bug found (ADM-03, ADM-04) |
+| Product form: edit prefilled, save | labels | GET /products/{id}, PUT /products/{id} | yes | n/a | n/a | n/a | admin/catalog-admin | bug found (ADM-05) |
+| Product specifications: list, add, remove | `[specs-table]`, `[spec-name]`… `[add-spec]`, button "×" | GET/POST/DELETE /products/{id}/specs | yes | n/a | n/a | n/a | admin/catalog-admin | covered |
+| Brand form: add, edit, required name and slug | labels, `[name-error]`, `[slug-error]` | POST /brands, PUT /brands/{id} | yes | yes | n/a | n/a | admin/catalog-admin | covered |
+| Category form: add under a parent, edit, required fields | combobox "Parent Id", labels | POST /categories, PUT /categories/{id} | yes | yes | n/a | n/a | admin/catalog-admin | covered |
+| Order: invoice, payment, billing, lines | textboxes by label, table | GET /invoices/{id} | yes | n/a | n/a | n/a | admin/orders-users-messages | covered |
+| Order: update status (5 statuses) | combobox "Status", button "Update status" | PUT /invoices/{id}/status | yes | n/a | yes (500, error shown) | n/a | admin/orders-users-messages | covered |
+| User form: add (required fields), edit incl. Enabled and failed attempts | labels | PUT /users/{id} | yes | yes (required, email taken 422) | n/a | n/a | admin/orders-users-messages | covered |
+| Message: read, status on change, reply | combobox "Status", textbox "Reply message" | GET /messages/{id}, PUT …/status, POST …/reply | yes | yes (empty reply) | n/a | n/a | admin/orders-users-messages | bug found (ADM-06) |
+| Statistics: 4 report tables | headings, tables | GET /reports/top10-…, customers-by-country, total-sales-per-country | yes | n/a | n/a | yes | admin/reports-and-settings | covered |
+| Average sales per month / week: year picker, chart | combobox "Select year", `canvas` | GET /reports/average-sales-per-{month,week}?year= | yes (×2) | yes (current year) | n/a | n/a | admin/reports-and-settings | bug found (ADM-08) |
+| Settings: payment endpoint, geolocation, CO₂ features, eco badge, save, clear storage | labels, buttons | – (localStorage) | yes | n/a | n/a | n/a | admin/reports-and-settings | covered |
+| Settings take effect in the shop (CO₂ sort hidden) | combobox "sort" | – | yes | n/a | n/a | n/a | admin/reports-and-settings | covered |
+| Order "add" route (/admin/orders/add) | – | – | – | – | – | – | – | blocked: no page links to it, and the API has no endpoint for an admin to create an order |
+| Live: product create → sold in the shop → repriced → deleted (cleanup in teardown) | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
+| Live: a guest order (placed through the API) marked as shipped | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
+| Live: a contact message (sent through the API) read and taken in progress | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
+| Live: statistics and monthly chart render from real data | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
+
+## Accessibility
+
+An axe-core scan (`@axe-core/playwright` 4.14.0, tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`,
+`wcag22aa`) of 32 pages and states, in `tests/a11y` (`npm run test:a11y`):
+
+- **Shop:** home, search results, empty search, product (in stock, out of stock), category, rentals,
+  comparison, and the cart with items.
+- **Checkout:** sign-in, guest step with errors, billing, payment.
+- **Forms and other pages:** login with errors, register with errors, forgot password, contact with
+  errors, chat open, privacy, unknown route.
+- **Account (mocked session):** 5 pages.
+- **Back office (mocked admin):** 14 pages and forms.
+
+The full axe result of each scan is attached to the report.
+
+- **Scope.** The training-aid bar ("Testing Guide", "Bug Hunting") and its guide panel are excluded,
+  because they are laid over the shop for testers and are not part of it. Everything else is
+  scanned, the chat and live-activity widgets included.
+- **Baseline.** A scan fails only on a violation outside `src/support/a11y-baseline.ts`, so it
+  catches regressions. Each known violation (one per rule and element, `nth-child` indices removed)
+  has its own `knownBug` pin that turns red when it is fixed.
+- **Chromium only.** axe reads the accessibility tree the browser builds, and Firefox does not report
+  AX-01. The baseline is kept for one engine.
+- **What axe does not see.** A11Y-01 (the cart's remove control is an `<a>` without href, so it is
+  not focusable and axe skips it), A11Y-03 (pagination disabled by CSS only) and A11Y-04 (Sign out
+  without href) were found by the functional specs. They are pinned there.
+
+| Status | Pages scanned | Distinct violations | Critical | Serious | Moderate | Minor |
+|---|---|---|---|---|---|---|
+| bug found (AX-01..AX-19) | 32 | 19 | 6 | 13 | 0 | 0 |
+
 ## Bugs found
 
 Every entry below was reproduced by the suite. The pinned test states the behaviour the shop should have
@@ -252,6 +324,45 @@ fixed. `npm run test:verify-bugs` runs them as ordinary tests to show each faili
 | A11Y-03 | Pagination | End buttons are only styled as disabled (a class on the `<li>`); the `<button>` stays enabled and focusable. The current page has no `aria-current`. | catalog/pagination |
 | A11Y-04 | Account menu | "Sign out" is an `<a>` without href: no link role, not reachable with Tab. | account/account-area |
 
+### Back office
+
+Found with the mocked back office, so each is UI behaviour on a given response.
+
+| ID | Where | What happens | Pinned in |
+|---|---|---|---|
+| ADM-01 | Dashboard | Failed dashboard requests leave an empty chart and table with no message. | admin/dashboard-and-menu |
+| ADM-02 | All lists | Delete acts on the first click, with no confirmation (products, brands, categories, users). | admin/catalog-admin |
+| ADM-03 | Product form | Any price is sent to the API unvalidated: text ("abc") and negative ("-5") alike. | admin/catalog-admin |
+| ADM-04 | Product form | "Quantity is required" stays on screen next to "Product saved!" although Stock is filled in. | admin/catalog-admin |
+| ADM-05 | Product form | The edit form does not load the stock, so saving an existing product is blocked by "Quantity is required" until it is retyped. | admin/catalog-admin |
+| ADM-06 | Messages | An empty reply is sent to the API (`{"message":""}`) instead of being validated. | admin/orders-users-messages |
+| ADM-07 | All lists | A failed list request shows an empty table and no message, in every section. | admin/lists-failures |
+| ADM-08 | Sales reports | The year picker stops at 2025 and opens on it; the current year cannot be chosen. | admin/reports-and-settings |
+
+### Accessibility (axe)
+
+| ID | Rule | Impact | WCAG | Element | What |
+|---|---|---|---|---|---|
+| AX-01 | aria-required-children | critical | 1.3.1 | `.nav` (checkout) | The sign-in / guest tablist contains list items instead of tabs. |
+| AX-02 | aria-required-parent | critical | 1.3.1 | "Sign in" tab | Not directly inside its tablist. |
+| AX-03 | aria-required-parent | critical | 1.3.1 | "Continue as Guest" tab | Not directly inside its tablist. |
+| AX-04 | button-name | critical | 4.1.2 | show-password button (login, register) | No accessible name (same defect as A11Y-02). |
+| AX-05 | button-name | critical | 4.1.2 | show-password, "New Password" (profile) | No accessible name. |
+| AX-06 | button-name | critical | 4.1.2 | show-password, "Confirm New Password" (profile) | No accessible name. |
+| AX-07 | color-contrast | serious | 1.4.3 | status badges (admin inbox) | Too little contrast. |
+| AX-08 | color-contrast | serious | 1.4.3 | chat title | Too little contrast. |
+| AX-09 | color-contrast | serious | 1.4.3 | chat messages | Too little contrast. |
+| AX-10 | color-contrast | serious | 1.4.3 | chat "Find a product" | Too little contrast. |
+| AX-11 | color-contrast | serious | 1.4.3 | chat "Order a product" | Too little contrast. |
+| AX-12 | color-contrast | serious | 1.4.3 | chat "Checkout" | Too little contrast. |
+| AX-13 | color-contrast | serious | 1.4.3 | chat "Create support ticket" | Too little contrast. |
+| AX-14 | label-content-name-mismatch | serious | 2.5.3 | language button (every page) | Shows "EN", named "Select language": voice control by its label fails. |
+| AX-15 | label-content-name-mismatch | serious | 2.5.3 | cart link | Shows the item count, which its name does not contain. |
+| AX-16 | list | serious | 1.3.1 | password rules (register, profile) | The list contains non-list children. |
+| AX-17 | list | serious | 1.3.1 | subcategory lists in the filters | The lists contain groups instead of list items. |
+| AX-18 | listitem | serious | 1.3.1 | checkout tab items | List items outside a list (the parent's role is overridden). |
+| AX-19 | target-size | serious | 2.5.8 | "More information" on related products | Smaller than 24×24 px and too close together. |
+
 ### Observed, not pinned
 
 These are real, but a deterministic UI test would only restate the observation:
@@ -267,17 +378,26 @@ These are real, but a deterministic UI test would only restate the observation:
   filters, and stock flips (Combination Pliers went out of stock during this work). This is why the suite
   looks every product up at runtime and never assumes fixed counts.
 - **Rental cards** are focusable `<div>`s rather than links.
+- **The API document lists `POST /products`, `PUT /products/{id}`, `POST /brands`, `POST /categories` and
+  their `PUT`/`PATCH` without a security requirement**, while `DELETE` requires a token. If the
+  server matches the document, anyone can create or change catalogue data without signing in. This is
+  **not verified**: the suite never writes to the real admin API outside the gated live specs.
+- **The order page's "Invoice Date" field is labelled by two labels** ("Invoice Number Invoice Date").
+  axe did not flag it.
 - **The API is intermittently unavailable.** `POST /carts` returned 500 once in three tries during research. In the final run it returned 500, then redirected to a 404, for several minutes in a row.
 
 ## Final run (4 Nov 2026, local, retries 1)
 
 | Project | Passed | Failed | Flaky | Skipped |
 |---|---|---|---|---|
-| chromium | 219 | 0 | 0 | 1 (the @mobile-only toggle test) |
-| firefox | 212 | 5 | 2 | 1 (same) |
-| mobile (Pixel 7, @smoke and @mobile) | 14 | 0 | 0 | 0 |
-| account and account-setup (gated) | 0 | 0 | 0 | 6 |
+| chromium (338) | 336 | 0 | 1 | 1 (the @mobile-only toggle test) |
+| firefox (338) | 284 | 1 | 1 | 52 (51 axe tests, Chromium only; the toggle test) |
+| mobile, Pixel 7 (14, @smoke and @mobile) | 14 | 0 | 0 | 0 |
+| account, admin and their setups (gated) | 0 | 0 | 0 | 12 |
 
-The 5 Firefox failures were all in the cart setup (`POST /carts` 500, then 404) during one outage
-window. A re-run of the cart and comparison specs on Firefox passed 29/29. Expected failures of
-`knownBug()` tests count as passed.
+- **The Firefox failure** was the suite's own: the mocked "add spec" response reused the existing
+  spec's name, so two rows matched. Fixed, and the test then passed 12 of 12 on both browsers
+  (`--repeat-each=3`).
+- **The two flaky tests** (guest-details validation on Chromium, opening a rental on Firefox) run
+  against the live site and passed on their retry.
+- **Expected failures** of `knownBug()` tests count as passed.

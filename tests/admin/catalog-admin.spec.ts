@@ -111,12 +111,15 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   test('specifications are added and removed on the spot', async ({ adminProducts, backOffice, apiMock }) => {
+    // The new spec comes back from the API as it was sent.
+    await apiMock.use(mock.respond('POST', /^\/products\/[^/]+\/specs$/, { id: '01QALABSPECLENGTH', product_id: backOffice.product.id, spec_name: 'Length', spec_value: '200', spec_unit: 'mm' }, 201));
     const form = await adminProducts.edit(backOffice.product.id);
     await expect(form.specRows).toHaveCount(1);
     const added = apiMock.waitForRequest('POST', /^\/products\/[^/]+\/specs$/);
 
     await form.addSpec('Length', '200', 'mm');
     expect((await added).postDataJSON()).toEqual({ spec_name: 'Length', spec_value: '200', spec_unit: 'mm' });
+    await expect(form.specRows).toHaveCount(2);
 
     const removed = apiMock.waitForRequest('DELETE', /^\/products\/[^/]+\/specs\/[^/]+$/);
     await form.removeSpec('Weight');
