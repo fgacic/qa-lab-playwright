@@ -540,5 +540,19 @@ From a residential connection the live run is not challenged (the earlier local 
 
 ## Runs
 
-The current results are on the [published report](https://fgacic.github.io/qa-lab-playwright/), with
-its trend charts, and in the CI runs listed in the README.
+Current results and their history: the [published Allure report](https://fgacic.github.io/qa-lab-playwright/)
+(Graphs: Status dynamics, Durations dynamics, Status age pyramid). The
+[merged Playwright report](https://fgacic.github.io/qa-lab-playwright/playwright/) is published alongside it.
+
+| Run | Workflow | Result | Notes |
+|---|---|---|---|
+| [41776797960](https://github.com/fgacic/qa-lab-playwright/actions/runs/41776797960) | CI | failed | First run. Six chat contrast pins "passed" (scan timing), the merge job tripped on the visual container's path, an admin journey raced a form load. All fixed. |
+| [41778285684](https://github.com/fgacic/qa-lab-playwright/actions/runs/41778285684) | CI | failed (1 job) | First publish to Pages. The admin edit journey also needed the image re-chosen (ADM-09). |
+| [41779398991](https://github.com/fgacic/qa-lab-playwright/actions/runs/41779398991) | CI | passed | Every job green; trend history starts building. |
+| [41780293737](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780293737) | CI | passed | Chromium 366 passed (7 skipped); Firefox 295 passed (78 skipped); WebKit 294 passed, 1 flaky (78 skipped); account, admin and mobile 31 passed; visual 13 passed; verify-bugs: 72 of 72 pins still fail. |
+| [41808661261](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808661261) | CI | passed | Every job green. |
+| [41780303630](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780303630) | Live site | failed | 4 browsers; Cloudflare bot challenges (see above). |
+| [41808674880](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808674880) | Live site | failed | Chromium and mobile: 330 passed, 29 skipped as challenged, 13 failed where the challenge hit background requests (translation files, app reloads). The same specs pass from a residential connection. |
+
+Skipped tests in the gate are by design: on Firefox and WebKit, the Chromium-only axe, i18n and
+performance specs, and the phone-only menu test; on Chromium, that phone test.

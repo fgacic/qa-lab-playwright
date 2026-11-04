@@ -72,6 +72,12 @@ npm run report                       # Allure 3 report from allure-results/
 
 **The public site:** `npm run test:live` (`TARGET=live`). There, real-account and admin journeys stay off unless `RUN_ACCOUNT_TESTS=1` / `RUN_ADMIN_TESTS=1` (with `ADMIN_EMAIL`, `ADMIN_PASSWORD`), and payload, visual and performance specs never run. `BASE_URL` / `API_URL` point either target elsewhere.
 
+## Latest runs
+
+- **Gate:** [CI 41808661261](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808661261) and [41780293737](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780293737). Every job is green, including verify-bugs (72 of 72 pins still fail).
+- **Live:** [Live site 41808674880](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808674880). 330 passed. The 13 failures come from Cloudflare challenging the runner's requests; the same specs pass from a home connection.
+- **History:** all runs are listed in [COVERAGE.md](docs/COVERAGE.md#runs).
+
 ## How the CI works
 
 `.github/workflows/ci.yml` runs on every push and pull request, nightly at 03:17 UTC, and on demand. It is the gate, against the self-hosted shop.
