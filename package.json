@@ -12,12 +12,14 @@
     "typecheck": "tsc --noEmit",
     "report": "allure generate allure-results -o allure-report --clean",
     "report:html": "playwright show-report",
-    "test:admin": "RUN_ADMIN_TESTS=1 playwright test --project=admin"
+    "test:admin": "RUN_ADMIN_TESTS=1 playwright test --project=admin",
+    "test:a11y": "playwright test --project=chromium --grep @a11y"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.56.1",
     "@types/node": "22.10.2",
     "allure-commandline": "2.46.1",
