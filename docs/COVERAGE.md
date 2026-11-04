@@ -231,7 +231,7 @@ admin of the self-hosted Toolshop in every CI run; on the live site they are gat
 |---|---|---|---|---|---|---|---|---|
 | Admin menu: Dashboard, Brands, Categories, Products, Orders, Users, Messages, Settings | account menu, links by name | – | yes | n/a | n/a | n/a | admin/dashboard-and-menu | covered |
 | Admin menu: Reports submenu | button "Reports" | – | – | – | – | – | – | blocked: its items did not appear in headless runs when the button was clicked; the report pages are opened by URL instead |
-| Product form: brand and category preselected when editing | combobox "Brand", "Category" | GET /products/{id} | n/a | yes | n/a | n/a | admin/catalog-admin | bug found (ADM-09) |
+| Product form: brand, category and image preselected when editing | combobox "Brand", "Category" | GET /products/{id} | n/a | yes | n/a | n/a | admin/catalog-admin | bug found (ADM-09) |
 | Dashboard: sales chart, orders awaiting fulfilment, Edit | heading, `canvas`, table | GET /invoices?in=status,…, GET /reports/total-sales-of-years | yes | n/a | yes | yes | admin/dashboard-and-menu | bug found (ADM-01) |
 | Lists: products, brands, categories, orders, users, messages | heading, table rows | QUERY /products, GET /brands, /categories, /invoices, /users, /messages | yes (×6) | n/a | yes (×6) | yes (×6) | admin/* , admin/lists-failures | bug found (ADM-07) |
 | List search and reset (products, brands, categories, orders, users) | textbox "Search …", buttons | QUERY /…/search `{q}` | yes (×5) | n/a | n/a | n/a | admin/catalog-admin, orders-users-messages | covered |
@@ -442,7 +442,7 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | ADM-06 | Messages | An empty reply is sent to the API (`{"message":""}`) instead of being validated. | admin/orders-users-messages |
 | ADM-07 | All lists | A failed list request shows an empty table and no message, in every section. | admin/lists-failures |
 | ADM-08 | Sales reports | The year picker stops at 2025 and opens on it; the current year cannot be chosen. | admin/reports-and-settings |
-| ADM-09 | Product form | Editing leaves Brand and Category empty (the API sends `brand` / `category` objects, the form expects `brand_id` / `category_id`), so saving is blocked until both are chosen again. Confirmed against the real backend. | admin/catalog-admin |
+| ADM-09 | Product form | Editing leaves Brand, Category and Image empty (the API sends `brand` / `category` / `product_image` objects, the form expects `*_id` fields), so saving is blocked, without a message, until all three are chosen again. Confirmed against the real backend. | admin/catalog-admin |
 
 ### Accessibility (axe)
 

@@ -111,7 +111,7 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   test('editing preselects the product\'s brand and category', { tag: ['@bug'] }, async ({ adminProducts, backOffice }) => {
-    knownBug('ADM-09', 'the edit form leaves Brand and Category empty (the API sends brand/category objects, the form expects brand_id/category_id), so saving is blocked until both are chosen again.');
+    knownBug('ADM-09', 'the edit form leaves Brand, Category and Image empty (the API sends brand/category/product_image objects, the form expects *_id fields), so saving is blocked until all three are chosen again.');
     const form = await adminProducts.edit(backOffice.product.id);
     await expect(form.name).toHaveValue(backOffice.product.name);
 

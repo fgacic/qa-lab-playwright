@@ -127,7 +127,7 @@ Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The hea
 - **Back office** (ADM-01..09):
   - Delete never asks for confirmation.
   - Prices are not validated.
-  - The edit form drops stock, brand and category, so an existing product cannot be saved as loaded.
+  - The edit form drops stock, brand, category and image, so an existing product cannot be saved as loaded.
 - **Sessions.** `/users/refresh` throws an unhandled exception (500), so every session ends after 5 minutes.
 - **Raw text leaks:** "[object Object]", "true", `page.forgot-password.confirm` (BUG-20, 21, 22).
 - **Untranslated text.** Seven areas stay English in all six other languages (I18N-01..07): the notification bar, the screen-reader heading, the footer, "Sign in with Google", the registration help, the privacy page, and the hard-coded "Quantity".
