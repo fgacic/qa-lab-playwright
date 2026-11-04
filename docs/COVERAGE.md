@@ -1,9 +1,14 @@
 # Coverage
 
-Every control and flow the research pass found on practicesoftwaretesting.com (Toolshop v5.0, UI build
-"v2.5, Angular 20"), what covers it, and where it stands. API paths are on
-`https://api.practicesoftwaretesting.com`. Product lists and search use the HTTP method `QUERY` with a
-JSON body.
+Every control and flow the research pass found on Toolshop (v5.0, sprint 5, Angular 20), what covers
+it, and where it stands. API paths are relative to the API base: `https://api.practicesoftwaretesting.com`
+on the live site, `http://localhost:4200/api` on the self-hosted copy. Product lists and search use the
+HTTP method `QUERY` with a JSON body.
+
+**Targets.** The gate is the self-hosted Toolshop (`TARGET=local`), built from upstream commit `ae7caec`,
+the code the live site runs ("Built 2026-10-11"), and seeded fresh per CI job. The live site
+(`TARGET=live`) runs nightly as a signal. Everything below runs on both targets unless a row says
+*self-hosted only*.
 
 **Columns.** *Pos* = positive case, *Neg* = negative case (validation, wrong input, navigation that
 must not happen), *Fail* = API mocked to a 4xx/5xx or a network abort, *Empty* = API mocked to an empty
@@ -11,9 +16,9 @@ must not happen), *Fail* = API mocked to a 4xx/5xx or a network abort, *Empty* =
 
 **Status.** `covered` = every applicable column has a passing test. `bug found` = covered, and at least
 one test pins a site defect with `knownBug()` (see [Bugs found](#bugs-found)). `blocked` = deliberately
-not automated, with the reason. `written, gated` = the spec exists but only runs with
-`RUN_ACCOUNT_TESTS=1` (real customer account) or `RUN_ADMIN_TESTS=1` (real admin), because it uses a real
-account on the public shop.
+not automated, with the reason. `covered (self-hosted)` = runs for real on our own Toolshop in every CI
+run; on the live site it stays gated behind `RUN_ACCOUNT_TESTS=1` / `RUN_ADMIN_TESTS=1`, because it uses a
+real account on a public shop.
 
 Locators: the suite uses roles and labels first. The **Locator** column shows what the spec uses, and
 the data-test id in brackets where the role is not unique enough.
@@ -64,6 +69,7 @@ the data-test id in brackets where the role is not unique enough.
 | Product grid (cards: name, price, stock) | links with an h5 | QUERY /products | yes | n/a | yes (500, abort) | yes | catalog/filters | bug found (BUG-04) |
 | Search by button and by Enter | textbox / button "Search" | QUERY /products/search `{q}` | yes | yes (no match) | yes | yes | catalog/search | bug found (BUG-03) |
 | Search caption and result count | `[search-caption]`, `[search-result-count]` | – | yes | yes | n/a | yes | catalog/search | covered |
+| Search term over 40 characters | textbox "Search" | – | n/a | yes | n/a | n/a | catalog/search | bug found (BUG-27) |
 | Search reset "X" | button "X" | QUERY /products | yes | n/a | n/a | n/a | catalog/search | covered |
 | Sort: 6 options | combobox "sort" | QUERY /products `{sort}` | yes (×6) | n/a | n/a | n/a | catalog/sort | covered |
 | Category checkbox | checkbox by name | QUERY /products `{by_category}` | yes | n/a | yes | yes | catalog/filters | bug found (BUG-05) |
@@ -128,14 +134,14 @@ the data-test id in brackets where the role is not unique enough.
 | Sign in / Continue as Guest tabs | tab by name | – | yes | n/a | n/a | n/a | checkout/sign-in-step | covered |
 | Sign-in validation (empty, format, length, wrong credentials) | labels, `[email-error]`, `[login-error]` | POST /users/login (401) | n/a | yes (×4) | n/a | n/a | checkout/sign-in-step | covered |
 | Guest details, confirmation, proceed | labels, `[proceed-2-guest]` | – | yes | yes (empty, bad email) | n/a | n/a | checkout/sign-in-step | covered |
-| Signed-in checkout (proceed without guest step) | `[proceed-2]` | POST /invoices | yes | – | – | – | account/live-account | written, gated |
+| Signed-in checkout (proceed without guest step) | `[proceed-2]` | POST /invoices | yes | – | – | – | account/real-account | covered (self-hosted) |
 | Billing address, Proceed disabled until complete | labels, `[proceed-3]` | – | yes | yes | n/a | n/a | checkout/billing-step | covered |
 | Postcode lookup fills street / city / state | labels | GET /postcode-lookup | yes | yes (404) | yes (500) | n/a | checkout/billing-step | covered |
 | Payment method list (5) | combobox "Payment Method" | – | yes | n/a | n/a | n/a | checkout/payment-step | covered |
 | Fields per method: bank, card, BNPL, gift card; COD has none | labels | – | yes (×5) | n/a | n/a | n/a | checkout/payment-step | covered |
 | Field validation with non-numeric junk (bank, card, gift card) | validation texts | – | n/a | yes (×3) | n/a | n/a | checkout/payment-step | covered |
 | Credit card with empty fields | button "Check payment" | – | n/a | yes | n/a | n/a | checkout/payment-step | bug found (BUG-16) |
-| BNPL instalment choice enables the check | select "Monthly Installments" | – | yes | yes | n/a | n/a | checkout/payment-step | covered |
+| BNPL instalment choice enables the check | select "Monthly Installments" | – | yes | yes | n/a | n/a | checkout/payment-step | bug found (BUG-29, self-hosted build) |
 | Check payment → Confirm | `[payment-success-message]`, `[payment-error-message]` | POST /payment/check | yes | yes (400 declined) | yes (500) | n/a | checkout/payment-step | covered |
 | Place order and confirmation (invoice number) | text "Thanks for your order! …" | POST /invoices/guest | yes | n/a | yes (500, 422) | n/a | checkout/payment-step, purchase-flow | bug found (BUG-17) |
 | Card, bank and gift-card payments with real-looking numbers | – | POST /payment/check | – | – | – | – | – | blocked: the suite never types card, bank or gift-card numbers, not even fake ones |
@@ -146,7 +152,7 @@ the data-test id in brackets where the role is not unique enough.
 |---|---|---|---|
 | Browse → product → quantity 2 → cart → guest → billing → Cash on Delivery → invoice number, cart emptied | POST /carts, /carts/{id}, /payment/check, /invoices/guest | checkout/purchase-flow | covered |
 | Search ×3 → three products → change a quantity → remove a line → order; invoice total = cart total, billing city = city on screen | as above + PUT, DELETE | checkout/purchase-flow | covered |
-| Signed-in purchase appears on the customer's invoices | POST /invoices, GET /invoices | account/live-account | written, gated |
+| Signed-in purchase appears on the customer's invoices | POST /invoices, GET /invoices | account/real-account | covered (self-hosted) |
 
 ## Login, registration, password reset
 
@@ -166,7 +172,7 @@ the data-test id in brackets where the role is not unique enough.
 | Registration: postcode lookup | labels | GET /postcode-lookup (mocked) | yes | n/a | n/a | n/a | auth/register | covered |
 | Registration submit: body, redirect to login | – | POST /users/register (mocked 201) | yes | yes (422 duplicate) | yes (500) | n/a | auth/register | covered |
 | Registration → login → account area | – | mocked register, login, me | yes | n/a | n/a | n/a | auth/registration-flow | covered |
-| Same journey against the real API; duplicate email | – | real | yes | yes | – | – | account/live-account | written, gated |
+| Same journey against the real API; duplicate email | – | real | yes | yes | – | – | account/real-account | covered (self-hosted) |
 | Forgot password: empty, malformed, unknown email | `[email-error]`, alert | POST /users/forgot-password (422) | n/a | yes (×3) | n/a | n/a | auth/forgot-password | bug found (BUG-19) |
 | Forgot password: accepted / failed | – | POST /users/forgot-password (mocked) | yes | n/a | yes | n/a | auth/forgot-password | bug found (BUG-20) |
 
@@ -184,7 +190,7 @@ Mocked session (fake JWT + mocked `GET /users/me`) unless marked gated.
 | Profile prefilled, update | labels, button "Update Profile" | GET /users/me, PUT /users/{id} | yes | n/a | n/a | n/a | account/account-area | covered |
 | Change password | textboxes by name, button "Change Password" | POST /users/change-password | yes | yes | n/a | n/a | account/account-area | bug found (BUG-26) |
 | Profile TOTP setup | `[totp-secret]`, `[verify-totp]` | POST /totp/setup | – | – | – | – | – | blocked: enrolling 2FA needs a real authenticator secret from the real backend |
-| Real session from storageState; per-worker account favorites | – | real | yes | – | – | – | account/live-account | written, gated |
+| Real session from storageState; per-worker account favorites | – | real | yes | – | – | – | account/real-account | covered (self-hosted) |
 
 ## Contact
 
@@ -217,13 +223,15 @@ They prove what the back-office UI renders, sends and shows for given responses:
 request bodies, success and error messages, empty and failing lists. They do **not** prove the real
 backend: whether a product is really stored, permissions, or server-side validation. A guard refuses
 (HTTP 418) any write no mock answers, and fails the test, so a gap in the mocks can never change
-the shared shop. The *live* specs (`tests/admin-live`, `@admin`) cover the real backend and are
-gated by `RUN_ADMIN_TESTS=1` with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+the shared shop. The *e2e* specs (`tests/admin-e2e`, `@admin`) cover the real backend as the seeded
+admin of the self-hosted Toolshop in every CI run; on the live site they are gated by
+`RUN_ADMIN_TESTS=1` with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 
 | Feature / control | Locator | API call | Pos | Neg | Fail | Empty | Spec | Status |
 |---|---|---|---|---|---|---|---|---|
 | Admin menu: Dashboard, Brands, Categories, Products, Orders, Users, Messages, Settings | account menu, links by name | – | yes | n/a | n/a | n/a | admin/dashboard-and-menu | covered |
 | Admin menu: Reports submenu | button "Reports" | – | – | – | – | – | – | blocked: its items did not appear in headless runs when the button was clicked; the report pages are opened by URL instead |
+| Product form: brand and category preselected when editing | combobox "Brand", "Category" | GET /products/{id} | n/a | yes | n/a | n/a | admin/catalog-admin | bug found (ADM-09) |
 | Dashboard: sales chart, orders awaiting fulfilment, Edit | heading, `canvas`, table | GET /invoices?in=status,…, GET /reports/total-sales-of-years | yes | n/a | yes | yes | admin/dashboard-and-menu | bug found (ADM-01) |
 | Lists: products, brands, categories, orders, users, messages | heading, table rows | QUERY /products, GET /brands, /categories, /invoices, /users, /messages | yes (×6) | n/a | yes (×6) | yes (×6) | admin/* , admin/lists-failures | bug found (ADM-07) |
 | List search and reset (products, brands, categories, orders, users) | textbox "Search …", buttons | QUERY /…/search `{q}` | yes (×5) | n/a | n/a | n/a | admin/catalog-admin, orders-users-messages | covered |
@@ -242,10 +250,11 @@ gated by `RUN_ADMIN_TESTS=1` with `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 | Settings: payment endpoint, geolocation, CO₂ features, eco badge, save, clear storage | labels, buttons | – (localStorage) | yes | n/a | n/a | n/a | admin/reports-and-settings | covered |
 | Settings take effect in the shop (CO₂ sort hidden) | combobox "sort" | – | yes | n/a | n/a | n/a | admin/reports-and-settings | covered |
 | Order "add" route (/admin/orders/add) | – | – | – | – | – | – | – | blocked: no page links to it, and the API has no endpoint for an admin to create an order |
-| Live: product create → sold in the shop → repriced → deleted (cleanup in teardown) | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
-| Live: a guest order (placed through the API) marked as shipped | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
-| Live: a contact message (sent through the API) read and taken in progress | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
-| Live: statistics and monthly chart render from real data | as above | real | yes | – | – | – | admin-live/back-office | written, gated |
+| Real: product create → sold in the shop → repriced → deleted (cleanup in teardown) | as above | real | yes | – | – | – | admin-e2e/back-office.e2e | covered (self-hosted) |
+| Real: a product with a short word in its name is found by full-name search | as above | QUERY /products/search | n/a | yes | – | – | admin-e2e/back-office.e2e | bug found (BUG-28) |
+| Real: a guest order (placed through the API) marked as shipped | as above | real | yes | – | – | – | admin-e2e/back-office.e2e | covered (self-hosted) |
+| Real: a contact message (sent through the API) read and taken in progress | as above | real | yes | – | – | – | admin-e2e/back-office.e2e | covered (self-hosted) |
+| Real: statistics and monthly chart render from real data | as above | real | yes | – | – | – | admin-e2e/back-office.e2e | covered (self-hosted) |
 
 ## Accessibility
 
@@ -277,6 +286,94 @@ The full axe result of each scan is attached to the report.
 | Status | Pages scanned | Distinct violations | Critical | Serious | Moderate | Minor |
 |---|---|---|---|---|---|---|
 | bug found (AX-01..AX-19) | 32 | 19 | 6 | 13 | 0 | 0 |
+
+## Visual regression
+
+Chromium at 1280×800 with animations off. The baselines are recorded and compared only inside
+`mcr.microsoft.com/playwright:v1.64.1-noble` (`npm run test:visual` / `test:visual:update`), against the
+freshly seeded self-hosted shop, so fonts, data and pixels match on every machine. Masked: the price
+slider, related products (the API picks them), the generated guest email, and the dashboard's canvas
+chart, which animates outside CSS. *Self-hosted only.*
+
+| Page / state | Baseline | Spec | Status |
+|---|---|---|---|
+| Home, product, category, rentals | `home.png`, `product.png`, `category.png`, `rentals.png` | visual/pages.visual | covered (self-hosted) |
+| Contact, login and registration with errors | `contact-errors.png`, `login-errors.png`, `register-errors.png` | visual/pages.visual | covered (self-hosted) |
+| Cart with a product, checkout billing step | `cart.png`, `checkout-billing.png` | visual/pages.visual | covered (self-hosted) |
+| Chat open | `chat.png` (the chat window only) | visual/pages.visual | covered (self-hosted) |
+| Account page (mocked session), admin dashboard and product form (mocked admin) | `account.png`, `admin-dashboard.png`, `admin-product-form.png` | visual/pages.visual | covered (self-hosted) |
+
+## Translations (i18n)
+
+Ten pages and states, in all 7 languages:
+
+- home, product, category, rentals, empty comparison and cart;
+- contact, login and registration, each with their validation errors shown;
+- forgot password.
+
+The privacy page is pinned as a whole (I18N-06).
+
+A page fails on a leaked translation key (dotted, like `page.x.y`). It also fails on text identical to
+the English rendering of the same page, except:
+
+- the shop's data (product, brand and category names, descriptions, prices);
+- the training-aid bar and the build line;
+- words a language shares with English ("Contact" in French and Dutch, "Home" in Dutch).
+
+Chromium only: translation files do not depend on the engine.
+
+| Check | Spec | Status |
+|---|---|---|
+| No leaked keys and no stray English, 10 pages × 6 languages | i18n/completeness | covered (with the known items below excluded) |
+| Untranslated areas, one pin each | i18n/completeness | bug found (I18N-01..07) |
+| The forgot-password confirmation shows its raw key | auth/forgot-password | bug found (BUG-20) |
+
+## Security (UI)
+
+Payloads (`<img src=x onerror=…>`, `<script>…</script>`, an attribute breakout with `<svg onload=…>`)
+are typed as plain text. A sentinel records any `alert('qa-lab-xss')`. The spec then checks that no
+injected element exists and that the payload comes back as text. The payloads stay under 40
+characters, because the search drops longer terms (BUG-27).
+
+| Input | Where it is shown | Target | Spec | Status |
+|---|---|---|---|---|
+| Search box (3 payloads) | search caption | both (read-only) | security/xss-reflected | covered |
+| Chat "Find a product" (3 payloads) | chat transcript | both (read-only) | security/xss-reflected | covered |
+| Contact message (API) | admin inbox list and message page | self-hosted only | security/xss-stored | covered (self-hosted) |
+| Brand name (admin form) | admin brand list | self-hosted only | security/xss-stored | covered (self-hosted) |
+| First name at registration | header account menu after login | self-hosted only | security/xss-stored | covered (self-hosted) |
+| Contact form submission | success state | self-hosted only | security/xss-stored | covered (self-hosted) |
+| Response headers: CSP, X-Frame-Options, nosniff, Referrer-Policy, HSTS, Server | – | live only (headers belong to the deployment) | security/headers | bug found (SEC-01..06) |
+
+The header checks are soft: they are defence in depth, not functional defects, and the shop is a
+training site. They are pinned so that a header appearing turns the nightly live run red.
+
+## Performance
+
+Measured with the browser's own PerformanceObserver entries (Chromium only: WebKit has no LCP,
+layout-shift or longtask entries):
+
+- LCP is the last largest-contentful-paint before input;
+- CLS is the sum of shifts without recent input;
+- TBT is the long-task time above 50 ms;
+- the INP proxy is the longest event duration of the interactions the test makes.
+
+The thresholds are Core Web Vitals "good" limits: LCP 2.5 s, CLS 0.1, INP 200 ms, and Lighthouse's
+200 ms for TBT. Every measurement is attached to its test. *Self-hosted only:* live numbers would
+measure Cloudflare and the network, not the shop.
+
+| Page and interaction | LCP / TBT / INP | CLS (500 ms API) | Spec | Status |
+|---|---|---|---|---|
+| Home, filter click | within budget | 0.26–0.38 | performance/budgets | bug found (PERF-01) |
+| Search for a term | within budget | – | performance/budgets | covered |
+| Product: quantity, add to cart | within budget | 0.30–0.32 | performance/budgets | bug found (PERF-01) |
+| Cart: proceed to sign in | within budget | 0.107 | performance/budgets | bug found (PERF-01) |
+| Contact: submit empty | within budget | 0.17 | performance/budgets | bug found (PERF-01) |
+
+**Why CLS is measured on a slow API.** The footer is painted before the routed page has its data,
+then pushed down. At full speed, whether a run catches that depends on whether the first paint beats
+the API: 0 to 0.32 across repeats, which would make the budget flaky. With 500 ms of API latency, a
+realistic mobile figure, the shift happens every time (12 of 12 runs).
 
 ## Bugs found
 
@@ -314,6 +411,9 @@ fixed. `npm run test:verify-bugs` runs them as ordinary tests to show each faili
 | BUG-24 | Invoices | A failed invoices request shows the bare page title: no table, no message. | account/account-area |
 | BUG-25 | Chat | A failed chat search answers "No products found. Try a different search." | widgets/chat |
 | BUG-26 | Profile | "Change Password" with every field empty is sent to the API instead of being validated in the form. | account/account-area |
+| BUG-27 | Search | A search term over 40 characters is silently ignored: no request, no message. | catalog/search |
+| BUG-28 | Search | A full-name search finds nothing when the name has a word under 3 letters (every word is required, MariaDB's full-text index drops short ones). | admin-e2e/back-office.e2e (self-hosted) |
+| BUG-29 | Payment | Buy Now Pay Later: "Check payment" is enabled before a plan is chosen, and checking answers "Unknown error". Seen on the self-hosted build in all three engines; the live deployment disables the button. | checkout/payment-step (self-hosted) |
 
 ### Accessibility
 
@@ -338,6 +438,7 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | ADM-06 | Messages | An empty reply is sent to the API (`{"message":""}`) instead of being validated. | admin/orders-users-messages |
 | ADM-07 | All lists | A failed list request shows an empty table and no message, in every section. | admin/lists-failures |
 | ADM-08 | Sales reports | The year picker stops at 2025 and opens on it; the current year cannot be chosen. | admin/reports-and-settings |
+| ADM-09 | Product form | Editing leaves Brand and Category empty (the API sends `brand` / `category` objects, the form expects `brand_id` / `category_id`), so saving is blocked until both are chosen again. Confirmed against the real backend. | admin/catalog-admin |
 
 ### Accessibility (axe)
 
@@ -363,12 +464,49 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | AX-18 | listitem | serious | 1.3.1 | checkout tab items | List items outside a list (the parent's role is overridden). |
 | AX-19 | target-size | serious | 2.5.8 | "More information" on related products | Smaller than 24×24 px and too close together. |
 
+### Translations
+
+| ID | What stays English in all six other languages | Pinned in |
+|---|---|---|
+| I18N-01 | The notification bar: "View the Documentation for this application." | i18n/completeness |
+| I18N-02 | The page heading "Practice Software Testing - Toolshop" (visually hidden, read by screen readers). | i18n/completeness |
+| I18N-03 | The footer: "Privacy Policy", "Banner photo by … on Unsplash". | i18n/completeness |
+| I18N-04 | "Sign in with Google". | i18n/completeness |
+| I18N-05 | Registration: the date-format error, the four password rules, the strength meter labels. | i18n/completeness |
+| I18N-06 | The whole privacy policy page. | i18n/completeness |
+| I18N-07 | The product page's "Quantity" label (hard-coded in the template). | i18n/completeness |
+
+### Security headers (live site)
+
+| ID | Finding | Pinned in |
+|---|---|---|
+| SEC-01 | No Content-Security-Policy. | security/headers |
+| SEC-02 | No X-Frame-Options or CSP frame-ancestors: the shop can be framed (clickjacking). | security/headers |
+| SEC-03 | No X-Content-Type-Options: nosniff. | security/headers |
+| SEC-04 | No Referrer-Policy. | security/headers |
+| SEC-05 | No Strict-Transport-Security. | security/headers |
+| SEC-06 | The API answers with `Server: Apache/2.4.52 (Ubuntu)`, disclosing product, version and OS. | security/headers |
+
+### Performance
+
+| ID | Finding | Pinned in |
+|---|---|---|
+| PERF-01 | The footer renders at the top before the page content arrives, then jumps down: CLS 0.11 to 0.38 on home, product, cart and contact, against a 0.1 budget. | performance/budgets |
+
 ### Observed, not pinned
 
 These are real, but a deterministic UI test would only restate the observation:
 
-- **`GET /users/refresh` returns 500** (`{"message":"Server Error"}`) whenever a signed-out visitor opens
-  a protected route, 8 times out of 8. A 401 is expected. The redirect to login still works.
+- **`GET /users/refresh` returns 500** instead of 401. On the self-hosted build with debug on, the cause
+  shows: an unhandled `Tymon\JWTAuth\Exceptions\JWTException` ("Token could not be parsed"). With a
+  JWT that lives 300 s, this means a session cannot be renewed: customers and admins are sent back to
+  the login page after 5 minutes. This is not pinned as a UI test, because it would need a 5-minute wait.
+  The suite works around it by issuing a fresh token per test for real sessions.
+- **After `migrate:fresh --seed`, Laravel's file cache keeps serving product lists with the old ids**
+  ("The selected product id is invalid" on add-to-cart) until the 5-minute cache expires.
+  `scripts/toolshop.sh` clears the cache after every seed.
+- **The tag 2.5 build differs from what the live site runs** (for example, accessible names on the admin
+  search boxes), which is why the self-hosted target is built from a commit.
 - **The postcode lookup fires twice per change, and its late answer overwrites typed fields.** Combined
   with the API's rule that the city must belong to the country, a shopper who types their own city can
   end up with an order rejected silently (BUG-17). The suite keeps the address the lookup suggests.
@@ -386,18 +524,7 @@ These are real, but a deterministic UI test would only restate the observation:
   axe did not flag it.
 - **The API is intermittently unavailable.** `POST /carts` returned 500 once in three tries during research. In the final run it returned 500, then redirected to a 404, for several minutes in a row.
 
-## Final run (4 Nov 2026, local, retries 1)
+## Runs
 
-| Project | Passed | Failed | Flaky | Skipped |
-|---|---|---|---|---|
-| chromium (338) | 336 | 0 | 1 | 1 (the @mobile-only toggle test) |
-| firefox (338) | 284 | 1 | 1 | 52 (51 axe tests, Chromium only; the toggle test) |
-| mobile, Pixel 7 (14, @smoke and @mobile) | 14 | 0 | 0 | 0 |
-| account, admin and their setups (gated) | 0 | 0 | 0 | 12 |
-
-- **The Firefox failure** was the suite's own: the mocked "add spec" response reused the existing
-  spec's name, so two rows matched. Fixed, and the test then passed 12 of 12 on both browsers
-  (`--repeat-each=3`).
-- **The two flaky tests** (guest-details validation on Chromium, opening a rental on Firefox) run
-  against the live site and passed on their retry.
-- **Expected failures** of `knownBug()` tests count as passed.
+The current results are on the [published report](https://fgacic.github.io/qa-lab-playwright/), with
+its trend charts, and in the CI runs listed in the README.

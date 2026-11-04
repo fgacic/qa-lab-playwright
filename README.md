@@ -1,112 +1,156 @@
 # Playwright UI suite
 
-End-to-end UI tests for the Toolshop demo shop (practicesoftwaretesting.com), run in GitHub Actions with an Allure report on GitHub Pages.
+End-to-end UI tests for the Toolshop demo shop (practicesoftwaretesting.com), run in GitHub Actions against a self-hosted copy of the shop, with an Allure report on GitHub Pages.
 
-The suite has **338 tests per desktop browser** (on Firefox the 51 axe tests skip, because the baseline is kept for Chromium), plus a 14-test smoke set on a Pixel 7 viewport. Ten more tests are gated real-account and real-admin journeys. Every control the site exposes, the back office included, is listed in [docs/COVERAGE.md](docs/COVERAGE.md) with the test that covers it. **34 functional defects (8 of them in the back office) and 23 accessibility defects** are pinned as tests.
+**Live report: [fgacic.github.io/qa-lab-playwright](https://fgacic.github.io/qa-lab-playwright/)**, with Allure trends across runs. The Playwright HTML report is under [/playwright](https://fgacic.github.io/qa-lab-playwright/playwright/).
+
+The suite runs **379 tests per desktop browser** in Chromium, Firefox and WebKit, in 41 spec files. On top of that come:
+
+- a 14-test smoke set on a Pixel 7;
+- 13 visual baselines;
+- 17 real-account and real-admin journeys.
+
+Every control the site exposes, the back office included, is listed in [docs/COVERAGE.md](docs/COVERAGE.md) with the test that covers it.
+
+The suite found **75 defects**, each pinned as a test:
+
+| Kind | Count |
+|---|---|
+| Functional | 38 (9 of them in the back office) |
+| Accessibility | 23 |
+| Translation | 7 |
+| Security headers | 6 |
+| Performance | 1 |
 
 ## What it tests
 
 | Area | Specs | Highlights |
 |---|---|---|
-| Navigation | `tests/navigation` | Logo and every header link land where they say, 7 languages, protected routes redirect, banners, footer, mobile menu |
-| Catalogue | `tests/catalog` | Search, 6 sort orders, category / brand / eco / price filters, pagination, category pages, rentals, comparison |
-| Product | `tests/product` | Details against the API, quantity rules (0 → 1, > 99 → 99), add to cart, favourites, out-of-stock, related |
-| Cart | `tests/cart` | Line and total maths, edit, remove, 5 % eco and 15 % combination discounts |
-| Checkout | `tests/checkout` | Sign-in / guest step, billing with postcode lookup, all 5 payment methods, **two full guest purchases** |
-| Auth | `tests/auth` | Login (incl. TOTP), registration (12 fields), password reset, **register → login → account** (mocked auth) |
-| Account | `tests/account` | Favorites, invoices, messages, profile, sign-out (mocked session); real-account journeys (gated) |
-| Contact, widgets | `tests/contact`, `tests/widgets` | Contact form and attachment rules, chat assistant incl. support ticket, live sales feed (mocked SSE) |
-| Back office | `tests/admin`, `tests/admin-live` | Every admin list, form, status change, report and setting against a **mocked** admin API; real journeys (create → sell → reprice → delete a product, ship an order, answer a message) gated |
-| Accessibility | `tests/a11y` | axe-core WCAG 2.2 A/AA scan of 32 pages and states incl. account and back office; 19 known violations pinned one by one |
+| Shop | `tests/navigation`, `catalog`, `product`, `cart`, `checkout`, `contact`, `widgets` | Every header link lands where it says; search, sort, filters, pagination, compare; cart maths and discounts; **full guest purchases** with Cash on Delivery; chat and the live sales feed |
+| Accounts | `tests/auth`, `tests/account` | Login (incl. TOTP), registration, password reset; **register → log in → account** for real on the self-hosted shop, mocked everywhere else |
+| Back office | `tests/admin`, `tests/admin-e2e` | Every admin list, form, status change, report and setting against a mocked admin API; **real journeys** as the seeded admin: create → sell → reprice → delete a product, ship an order, answer a message |
+| Failure paths | every area | Each request the UI sends also answers 500, 4xx, a network abort, and an empty 200 |
+| Accessibility | `tests/a11y` | axe-core WCAG 2.2 A/AA on 32 pages and states; 19 known violations pinned one by one |
+| Visual | `tests/visual` | 13 screenshots of key pages and states, compared in the official Playwright image |
+| Translations | `tests/i18n` | 10 pages and form states in all 7 languages: no leaked keys, no stray English |
+| Security | `tests/security` | Script and HTML payloads through search, chat, contact, registration and admin forms are shown as text, never run; live response headers |
+| Performance | `tests/performance` | LCP, TBT and an INP proxy per key page against Core Web Vitals limits; CLS on a slow API |
 
-Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@mobile`, `@account`, `@admin`.
+Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@visual`, `@i18n`, `@security`, `@perf`, `@mobile`, `@account`, `@admin`.
 
 ## Why these cases
 
-- **One rule per feature: positive, negative, failing API, empty API.** Every request the UI sends has a twin test with `page.route` answering 500, 4xx or a network abort, and one answering an empty 200 in the real shape. That is where most bugs were: the shop handles the happy path and often goes silent on errors.
-- **The UI is checked against the API, not against hard-coded data.** The demo data is shared and drifts (stock flips, other users add categories). A filter test asserts three things: the request carries the filter, the API's answer honours it, and the grid shows exactly that answer.
-- **Arrange through the API, act through the UI.** Carts are created with `POST /carts` before a cart test, and products are looked up at runtime (in stock, out of stock, eco, rental). A test only clicks through what it is about.
-- **Known bugs are tests, not notes.** `knownBug('BUG-14', …)` wraps `test.fail`. The spec states the correct behaviour, today's failure is expected, and the test goes red the day the site is fixed. `npm run test:verify-bugs` runs them as ordinary tests, to prove each fails at its final assertion and not earlier.
-- **The back office is tested in two layers, and the README says which proves what.** Mocked admin specs (fake admin JWT, every endpoint answered from the OpenAPI shapes) prove the UI's behaviour on given responses. A guard refuses any write no mock answers, so they can never touch the shared backend. Real admin journeys exist but are gated, because they change data on a public shop.
-- **Accessibility runs on a baseline.** A scan fails on any violation that is not already known, which catches regressions. Every known violation has its own pin, which catches fixes. Results are attached per scan.
-- **Safe on a public site.** No real accounts and no real sign-ins in normal runs. No card, bank or gift-card numbers are ever typed, not even fake ones. Orders use Cash on Delivery with `example.com` guests. At most 2 workers.
+- **Our own shop as the gate.** CI builds Toolshop from source at a pinned commit, the one the public site runs, and seeds it fresh for every job. Results come from the code under test, not from other people's data or a shared server's mood. Real sign-ins, attack payloads, screenshots and performance budgets run there and only there. The public site gets a nightly read-only run as a signal.
+- **One rule per feature: positive, negative, failing API, empty API.** That is where most defects were: the shop handles the happy path and often goes silent on errors.
+- **The UI is checked against the API, not against hard-coded data.** A filter test asserts three things: the request carries the filter, the API's answer honours it, and the grid shows exactly that answer. Products are looked up at runtime.
+- **Arrange through the API, act through the UI.** Carts, guest orders, favourites and contact messages are created through the API. A test only clicks through what it is about.
+- **Known defects are tests, not notes.** `knownBug('BUG-14', …)` wraps `test.fail`. The spec states the correct behaviour, and it goes red the day the site is fixed. A CI job (`npm run test:verify-bugs`) runs them all as plain tests and fails if one of them passes.
+- **Each layer says what it proves.** Mocked admin specs prove the UI's behaviour on given responses, and a guard refuses any unmocked write. The admin e2e specs prove the real backend. The axe scan runs on a baseline, so it catches both regressions and fixes. CLS is measured where it is deterministic (see Performance in COVERAGE.md).
+- **Safe on the public site.** No real accounts, sign-ins or submitted payloads, at most 2 workers. No card, bank or gift-card number is ever typed anywhere, not even a fake one. Orders use Cash on Delivery with `example.com` guests.
 
 ## How to run
 
+Requires Node 22 and Docker.
+
 ```bash
 npm ci
-npx playwright install chromium firefox   # if the browsers are not cached yet
+npx playwright install --with-deps chromium firefox webkit
+npm run toolshop:up                  # build, start, seed and health-check the shop
 
-npm test                      # everything; the account project skips itself
-npm run test:chromium         # one browser
-npm run test:smoke            # @smoke only (also what the mobile project runs)
-npx playwright test --grep @mocked
-npm run test:verify-bugs      # known-bug specs as plain tests: all should fail
-npm run test:a11y             # axe scans and the known-violation pins (Chromium)
-npm run report:html           # last HTML report
-npm run report                # Allure report from allure-results/
+npm test                             # everything against the self-hosted shop
+npx playwright test --project=webkit # one browser
+npm run test:smoke | test:a11y | test:i18n | test:security | test:perf
+npm run test:account                 # real customer journeys (setup project signs in)
+npm run test:admin                   # real back-office journeys as the seeded admin
+npm run test:visual                  # screenshots, inside mcr.microsoft.com/playwright:v1.64.1-noble
+npm run test:visual:update           # re-record the baselines in that image, then commit them
+npm run test:verify-bugs             # every pinned defect must still fail
+npm run toolshop:reseed              # fresh data between local runs
+npm run toolshop:down
+npm run report                       # Allure 3 report from allure-results/
 ```
 
-`BASE_URL` and `API_URL` point the suite at another deployment of Toolshop.
+**The public site:** `npm run test:live` (`TARGET=live`). There, real-account and admin journeys stay off unless `RUN_ACCOUNT_TESTS=1` / `RUN_ADMIN_TESTS=1` (with `ADMIN_EMAIL`, `ADMIN_PASSWORD`), and payload, visual and performance specs never run. `BASE_URL` / `API_URL` point either target elsewhere.
 
-**Real-account specs** register a customer, sign in for real and place a signed-in order. They are skipped unless you opt in:
+## How the CI works
 
-```bash
-RUN_ACCOUNT_TESTS=1 npm run test:account
-# optional: use an existing account instead of registering one
-TOOLSHOP_EMAIL=… TOOLSHOP_PASSWORD=… RUN_ACCOUNT_TESTS=1 npm run test:account
-```
+`.github/workflows/ci.yml` runs on every push and pull request, nightly at 03:17 UTC, and on demand. It is the gate, against the self-hosted shop.
 
-**Real admin journeys** need an admin account and change data on the shop (each test cleans up what it creates):
+1. **typecheck.** `tsc --noEmit`.
+2. **e2e.** An 8-job matrix:
+   - Chromium in 3 shards, Firefox in 2, WebKit in 2;
+   - one job for the real account and admin projects plus the mobile smoke set.
 
-```bash
-RUN_ADMIN_TESTS=1 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:admin
-```
+   Each job restores npm and the Playwright browsers from cache, then builds Toolshop with `docker/bake-action` and a GitHub Actions layer cache. The cache means the PHP extensions and the Angular build only rebuild when the pinned commit changes. The job then starts the stack (`scripts/toolshop.sh`), runs its shard, and uploads a blob report and its Allure results.
+3. **visual.** Same stack. The screenshots are compared inside `mcr.microsoft.com/playwright:v1.64.1-noble`, the image the baselines were recorded in, so fonts and rendering match.
+4. **verify-bugs.** Runs every `knownBug` spec as a plain test. It must fail; one that passes means a defect was fixed.
+5. **merge reports.** Downloads every blob and merges them into one HTML report. It then fetches the published Allure `history/history.jsonl`, generates the Allure 3 report (which appends this run to the history), and assembles the site.
+6. **publish.** From `main` only, with `actions/deploy-pages`. The history file is published with the report, which is how the Trend, Duration and Retries charts keep growing.
 
-**CI** (`.github/workflows/ci.yml`) runs on every push and PR. It type-checks, runs Chromium, Firefox and mobile in parallel jobs, and uploads each HTML report. On `main` it merges the Allure results and publishes them to GitHub Pages (Settings → Pages → Source: *GitHub Actions*).
+`.github/workflows/live.yml` runs the suite against practicesoftwaretesting.com nightly and on demand, as a signal and not a gate.
+
+The rest of the setup:
+
+- **Actions** are pinned to commit SHAs.
+- **Concurrency** cancels superseded pull-request runs, and Pages deploys are serialised.
+- **No secrets.** None is needed: the only accounts used are the self-hosted shop's seeded test accounts.
 
 ## Structure
 
 ```
-src/components/   Header, FilterPanel, ProductGrid, CartTable, checkout steps, FormField, Toast…
-src/pages/        thin pages that compose components; actions return the next page
-src/support/      @step decorator, ApiMock, ToolshopApi, payloads, fake test data, knownBug
-fixtures/         api.ts · mocks.ts · pages.ts · auth.ts · matchers.ts → index.ts (mergeTests, mergeExpects)
-tests/            specs by area; tests/setup/account.setup.ts writes storageState (gated)
-docs/COVERAGE.md  every control, its test, and the bug list
+docker/, docker-compose.yml, .env.toolshop   the self-hosted Toolshop, pinned
+src/components/   Header, FilterPanel, ProductGrid, CartTable, checkout steps, admin table and search, FormField…
+src/pages/        thin pages composing components; actions return the next page
+src/support/      env (targets), @step, ApiMock, ToolshopApi, payloads, test data, knownBug, i18n, a11y baseline
+fixtures/         api · mocks · pages · auth · admin · a11y · security · performance · matchers → index.ts (mergeTests, mergeExpects)
+tests/            specs by area; tests/setup/* sign in and write storageState
+docs/COVERAGE.md  every control, its test, the bug list, and run results
 ```
 
-- **Fixtures inject page objects.** Tests destructure `{ homePage, productPage, checkout }`. The fixture does the setup (seed a cart, a comparison, a session) and opens the page, so no test calls `new`. A describe block changes the setup with `test.use({ cartItems })`, `test.use({ productKind: 'out-of-stock' })` or `test.use(withMocks(mock.fail('QUERY', '/products')))`.
-- **Composition, not inheritance.** No BasePage. Components take a root `Locator` and scope everything inside it. Pages hold an `AppShell` (header, footer, toasts, widgets) plus their own components.
-- **Locators are readonly properties, user-facing first.** `getByRole` and `getByLabel` throughout. `getByTestId` (with `testIdAttribute: 'data-test'`) is used only where no role or label is unique, such as error labels and the cart badge. There is no XPath and no CSS chain. CSS appears only as a page-wide component root (`body`), for the `<html lang>` check, and for the cart's remove control, which has no role or name (A11Y-01).
-- **Methods say what the user does.** Examples are `filters.filterByCategory('Pliers')`, `checkout.payment.payWith('cash-on-delivery')` and `search.searchFor('hammer')`. Each is wrapped in `test.step` by a small `@step` decorator, so traces read as a scenario.
-- **Assertions live in tests**, as web-first `expect`. The custom matchers are `toBeSorted()` and `toShowAmount()` for money.
-- **Admin.** `adminSession: 'mocked'` (default) installs the mocked back office as low-priority defaults, which a describe block overrides with `withMocks()`. `AdminListPage` is one class configured per list, and the forms compose an `AdminFormChrome`.
-- **Accessibility.** The `a11y` fixture runs AxeBuilder with the WCAG tags and the stated exclusions, attaches the JSON, and returns findings as rule + target.
-- **Auth.** `session: 'mocked'` uses a fake JWT plus mocked `/users/me` and runs everywhere. `storage-state` comes from the gated setup project. `worker-account` gives each worker its own real customer, registered on first use.
+- **Fixtures inject page objects.** Tests destructure `{ homePage, productPage, checkout }`. The fixture does the setup (a seeded cart, a comparison, a session, mocks) and opens the page; no test calls `new`. Options change the setup per describe block, for example `test.use({ productKind: 'out-of-stock' })`, `test.use(withMocks(mock.fail('QUERY', '/products')))` or `test.use({ apiLatencyMs: 500 })`.
+- **Composition, not inheritance.** No BasePage. Components take a root `Locator`. Pages hold an `AppShell`, and admin forms an `AdminFormChrome`.
+- **User-facing locators.** `getByRole` and `getByLabel` first. `getByTestId` (`data-test`) only where no role or label is unique: error labels, the cart badge, and buttons whose names change with the language. CSS only where the markup leaves no other handle, each case commented.
+- **Methods say what the user does.** Examples are `filters.filterByCategory('Pliers')` and `checkout.payment.payWith('cash-on-delivery')`. Each is wrapped in `test.step` by a `@step` decorator.
+- **Sessions.** `mocked` (fake JWT) runs everywhere. `storage-state` comes from a setup project. `worker-account` gives each worker its own customer. Toolshop's JWT lives 300 s and cannot be refreshed, so real sessions get a fresh token per test.
 
 ## What broke
 
-Full list with reproduction notes in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The headline ones:
+Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The headlines:
 
-- **Silent failures everywhere** (BUG-03, 04, 05, 08, 10, 11, 13, 15, 23, 24, 25). A failed product list, cart, product, rentals or favourites request leaves a blank area or a misleading empty state. A failed search says "0 products found".
-- **A failed order looks like a successful one** (BUG-17). When `POST /invoices/guest` returns 500 or 422, "Payment was successful" stays on screen and nothing tells the shopper.
-- **Cart maths drift after an error** (BUG-14). A failed quantity update shows the new line total next to the old cart total.
-- **Raw error text leaks out**: "[object Object]" (BUG-21), the literal "true" (BUG-22), and an untranslated `page.forgot-password.confirm` (BUG-20).
-- **Validation gaps.** A future birth date is accepted (BUG-18). Credit Card can be checked with empty fields (BUG-16). An empty password change is sent to the server (BUG-26). "Show differences only" does nothing (BUG-12).
-- **Back office** (mocked, so UI behaviour on given responses). Delete has no confirmation anywhere (ADM-02). Product prices like "abc" or "-5" are sent unvalidated (ADM-03). An existing product cannot be saved without retyping its stock (ADM-05). Empty replies are sent (ADM-06). Failed lists stay silent (ADM-07). The reports cannot show the current year (ADM-08).
-- **axe: 19 violations, 6 critical** (AX-01..19). The checkout tabs break the ARIA tab pattern, three show-password buttons have no name, the chat fails colour contrast, the language button's name does not match its "EN" label, and the related-products links are too small to tap.
-- **Accessibility.** The cart remove control and the password eye button have no accessible name, pagination "disabled" is CSS only, and Sign out is not a link (A11Y-01 to 04).
-- **The shared backend wobbles.** In the final run, one window of `POST /carts` 500s, followed by a redirect to a 404, failed 5 Firefox cart tests even after three API retries and one test retry. A re-run passed 29/29. Arrange calls retry 5xx; nothing retries the act part, so a real UI failure is never hidden.
-- **Test-design lessons.** `test.use()` reads a two-element array as `[value, options]` and silently dropped the second mock. `apiMocks` became an object for that reason (`withMocks()`). A late initial product response overwrote search results until every page opening waited for its feed. A second postcode-lookup answer overwrote typed addresses until the billing step waited for lookups to go quiet. The logo's accessible name is translated, so the header is scoped by its menubar.
+- **Silent failures everywhere.** A failed product list, cart, product, rentals, favourites, search or admin list leaves a blank area or a misleading empty state. A rejected order still says "Payment was successful" (BUG-17).
+- **Data and validation.**
+  - A failed quantity update leaves line and cart totals disagreeing (BUG-14).
+  - A future birth date is accepted (BUG-18).
+  - Credit Card and Buy Now Pay Later can be checked with nothing filled in (BUG-16, BUG-29).
+  - Searches over 40 characters are silently dropped (BUG-27).
+  - A full-name search fails when the name has a word under 3 letters (BUG-28).
+- **Back office** (ADM-01..09):
+  - Delete never asks for confirmation.
+  - Prices are not validated.
+  - The edit form drops stock, brand and category, so an existing product cannot be saved as loaded.
+- **Sessions.** `/users/refresh` throws an unhandled exception (500), so every session ends after 5 minutes.
+- **Raw text leaks:** "[object Object]", "true", `page.forgot-password.confirm` (BUG-20, 21, 22).
+- **Untranslated text.** Seven areas stay English in all six other languages (I18N-01..07): the notification bar, the screen-reader heading, the footer, "Sign in with Google", the registration help, the privacy page, and the hard-coded "Quantity".
+- **Accessibility.** 19 axe violations, 6 of them critical:
+  - the checkout tabs break the ARIA tab pattern;
+  - three password buttons have no name;
+  - the chat fails contrast.
+
+  Four more defects were found by locator friction: the cart remove control, Sign out, and pagination that is disabled by CSS only.
+- **Security headers.** The live site sends no CSP, X-Frame-Options, nosniff, Referrer-Policy or HSTS, and the API names its server and OS versions (SEC-01..06).
+- **Performance.** The footer renders before the page content and jumps (CLS 0.11 to 0.38, PERF-01). LCP, TBT and INP are well inside budget.
+- **Test-design lessons.**
+  - `test.use()` reads a two-element array as `[value, options]`, so mocks are an object.
+  - Fixture-driven navigation needs settle waits, or a late initial response overwrites the test's first search.
+  - Laravel caches product lists across a reseed.
+  - The pinned tag 2.5 differs from what the live site runs, hence building from a commit.
 
 ## What I would change
 
-- **Run the gated account specs on a schedule** against a disposable account, with credentials in CI secrets, so the signed-in purchase is covered every night and not only on demand.
-- **Run the axe scan on Firefox and WebKit too, each with its own baseline.** Today it runs on Chromium only, because engines disagree in edge cases.
-- **Keep Allure history** between Pages deployments, for trends and flakiness per test, and map `knownBug` to an Allure category so known failures sit apart from new ones.
-- **Contract-check the mocks.** The payloads in `src/support/payloads.ts` and `admin-payloads.ts` mirror the API by hand. A nightly job that validates them against the live responses (or an OpenAPI spec) would catch drift before mocked tests start lying.
-- **Pin action SHAs** instead of version tags, and let Renovate bump them.
+- **Run axe on Firefox and WebKit too, each with its own baseline.** Today it runs on Chromium only, because the engines disagree in edge cases.
+- **Contract-check the mocks.** The payloads mirror the OpenAPI document by hand. A job validating them against the spec would catch drift before mocked tests start lying.
+- **Publish the nightly live run** next to the gate's report, for example under `/live`, with its own Allure history.
+- **Let Renovate** bump the pinned action SHAs, base images and the Toolshop commit, each through its own pull request run.
 
 ---
 Tools: Playwright, TypeScript, GitHub Actions, Allure · Part of the [qa-lab](https://github.com/fgacic?tab=repositories&q=topic:qa-lab) series.
