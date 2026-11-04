@@ -1,6 +1,7 @@
 import { PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
+import { IS_SELF_HOSTED } from '@support/env';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
@@ -46,7 +47,9 @@ test.describe('Checkout: payment step', () => {
   test('Buy Now Pay Later can be checked once an instalment plan is chosen', async ({ checkout }) => {
     const { payment } = checkout;
     await payment.choose('buy-now-pay-later');
-    await expect(payment.checkPaymentButton).toBeDisabled();
+    // The pinned build enables the check before a plan is chosen; the live deployment does not.
+    if (IS_SELF_HOSTED) knownBug('BUG-29', 'Buy Now Pay Later: "Check payment" is enabled before an instalment plan is chosen, and checking then answers "Unknown error" (self-hosted build; live disables it).');
+    await expect(payment.checkPaymentButton).toBeDisabled({ timeout: 5_000 });
 
     await payment.field('Monthly Installments').selectOption('6');
 

@@ -111,6 +111,17 @@ test.describe('Registration form', () => {
     });
   });
 
+  test.describe('when the API rejects a field other than the email', { tag: ['@mocked', '@negative'] }, () => {
+    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.fail('POST', '/users/register', 422, { first_name: ['The first name field must not be greater than 40 characters.'] })));
+
+    test('the API reason is shown', async ({ registerPage, page }) => {
+      await registerPage.register(fakeCustomer());
+
+      await expect(registerPage.error).toHaveText('The first name field must not be greater than 40 characters.');
+      await expect(page).toHaveURL('/auth/register');
+    });
+  });
+
   const failures = [
     { status: 422, json: { email: ['A customer with this email address already exists.'] }, shown: 'A customer with this email address already exists.' },
     { status: 500, json: { message: 'Server Error' }, shown: 'Server Error' },

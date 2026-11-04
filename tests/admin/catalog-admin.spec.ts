@@ -110,6 +110,14 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     await saved;
   });
 
+  test('editing preselects the product\'s brand and category', { tag: ['@bug'] }, async ({ adminProducts, backOffice }) => {
+    knownBug('ADM-09', 'the edit form leaves Brand and Category empty (the API sends brand/category objects, the form expects brand_id/category_id), so saving is blocked until both are chosen again.');
+    const form = await adminProducts.edit(backOffice.product.id);
+    await expect(form.name).toHaveValue(backOffice.product.name);
+
+    await expect(form.brand).toHaveValue(backOffice.product.brand.id, { timeout: 2_000 });
+  });
+
   test('specifications are added and removed on the spot', async ({ adminProducts, backOffice, apiMock }) => {
     // The new spec comes back from the API as it was sent.
     await apiMock.use(mock.respond('POST', /^\/products\/[^/]+\/specs$/, { id: '01QALABSPECLENGTH', product_id: backOffice.product.id, spec_name: 'Length', spec_value: '200', spec_unit: 'mm' }, 201));

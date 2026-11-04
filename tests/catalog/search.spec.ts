@@ -41,6 +41,16 @@ test.describe('Search', () => {
     await expect(homePage.grid.cards).toHaveCount(9);
   });
 
+  test('a long search term is searched or explained', { tag: ['@negative', '@bug'] }, async ({ homePage, apiMock }) => {
+    knownBug('BUG-27', 'a search term over 40 characters is silently ignored: no request, no message.');
+    const term = 'qa lab search term longer than forty chars';
+    const searched = apiMock.waitForRequest('QUERY', '/products/search');
+    await homePage.search.query.fill(term);
+    await homePage.search.submitButton.click();
+
+    await Promise.race([searched, homePage.page.waitForTimeout(3_000).then(() => Promise.reject(new Error('no search request was sent')))]);
+  });
+
   test.describe('when the search API answers with no products', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products/search', emptyProductPage())));
 
