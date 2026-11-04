@@ -4,7 +4,7 @@ End-to-end UI tests for the Toolshop demo shop (practicesoftwaretesting.com), ru
 
 **Live report: [fgacic.github.io/qa-lab-playwright](https://fgacic.github.io/qa-lab-playwright/)**, with Allure trends across runs. The Playwright HTML report is under [/playwright](https://fgacic.github.io/qa-lab-playwright/playwright/).
 
-The suite runs **379 tests per desktop browser** in Chromium, Firefox and WebKit, in 41 spec files. On top of that come:
+The suite runs **366 tests in Chromium and 295 each in Firefox and WebKit** (the axe, translation and performance suites are Chromium-only), in 41 spec files. On top of that come:
 
 - a 14-test smoke set on a Pixel 7;
 - 13 visual baselines;
@@ -36,7 +36,19 @@ The suite found **69 defects**, each pinned as a test:
 | Security | `tests/security` | Script and HTML payloads through search, chat, contact, registration and admin forms are shown as text, never run; live response headers |
 | Performance | `tests/performance` | LCP, TBT and an INP proxy per key page against Core Web Vitals limits; CLS on a slow API |
 
-Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@visual`, `@i18n`, `@security`, `@perf`, `@mobile`, `@account`, `@admin`.
+Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@axe`, `@visual`, `@i18n`, `@security`, `@perf`, `@mobile`, `@account`, `@admin`.
+
+Tags also decide where a spec is scheduled, in `playwright.config.ts`, so nothing is skipped at run time:
+- `@axe`, `@i18n` and `@perf` run on Chromium only;
+- `@mobile` runs only on the phone project;
+- `@self-hosted` never runs on live, and `@live-only` runs only there.
+
+The Chromium count (366) is therefore not 379 on every browser: Firefox and WebKit run 295 each.
+
+Allure labels are derived in one fixture (`fixtures/allure-labels.ts`):
+- epic from the spec folder, feature from the file, story from the innermost describe;
+- severity from the tags (`@flow` blocker, `@smoke` critical);
+- layer `e2e` / `integration` (mocked) / `visual`.
 
 ## Why these cases
 

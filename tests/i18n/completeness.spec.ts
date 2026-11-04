@@ -11,6 +11,7 @@ import type { Catalog } from '../../fixtures/api';
  * key ("page.x.y") or on English text that should have been translated: text identical to the
  * English rendering of the same page, minus the shop's data and legitimate shared words.
  * Untranslated text known today is listed in KNOWN and pinned once per defect below.
+ * @i18n: Chromium only (playwright.config.ts); translation files do not depend on the engine.
  */
 const KNOWN: { id: string; text: RegExp; summary: string }[] = [
   { id: 'I18N-01', text: /^(View the|Documentation|for this application\.)$/, summary: 'the notification bar ("View the Documentation for this application.") is English in every language' },
@@ -57,8 +58,6 @@ async function textIn(page: Page, language: Language, path: string, visit: Visit
 }
 
 test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
-  test.skip(({ browserName }) => browserName !== 'chromium', 'Translation files are browser-independent: one engine is enough.');
-
   for (const visit of VISITS) {
     test(`${visit.name}: no leaked keys and no stray English in any language`, async ({ page, catalog }) => {
       const path = typeof visit.path === 'string' ? visit.path : await visit.path(catalog);
@@ -79,8 +78,6 @@ test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
 });
 
 test.describe('Known untranslated text', { tag: ['@i18n', '@bug'] }, () => {
-  test.skip(({ browserName }) => browserName !== 'chromium', 'Translation files are browser-independent: one engine is enough.');
-
   const pins: { id: string; visit: Visit }[] = [
     { id: 'I18N-01', visit: VISITS[0] },
     { id: 'I18N-02', visit: VISITS[0] },

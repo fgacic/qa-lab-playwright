@@ -6,11 +6,8 @@ import { knownBug } from '@support/known-bug';
 /**
  * One pin per known violation (src/support/a11y-baseline.ts). Each test scans for its single
  * rule and asserts the element no longer violates it: expected to fail today, red once fixed.
+ * @axe: Chromium only, like the baseline it pins (see pages.a11y.spec.ts).
  */
-// axe reads the accessibility tree the browser builds, and engines differ in edge cases
-// (Firefox does not report AX-01). The baseline is kept for one engine, Chromium.
-test.skip(({ browserName }) => browserName !== 'chromium', 'The axe baseline is kept for Chromium only.');
-
 async function expectFixed(a11y: A11yFixtures['a11y'], violation: KnownViolation): Promise<void> {
   knownBug(violation.id, `${violation.rule} (${violation.impact}, WCAG ${violation.wcag}): ${violation.summary}`);
   const scan = await a11y.scan(violation.id, { only: [violation.rule] });
@@ -20,7 +17,7 @@ async function expectFixed(a11y: A11yFixtures['a11y'], violation: KnownViolation
 
 const on = (page: KnownViolation['page']) => KNOWN_VIOLATIONS.filter((v) => v.page === page);
 
-test.describe('Known accessibility violations', { tag: ['@a11y', '@bug'] }, () => {
+test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug'] }, () => {
   for (const violation of on('home')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (home)`, async ({ homePage, a11y }) => {
       await expect(homePage.grid.cards.first()).toBeVisible();

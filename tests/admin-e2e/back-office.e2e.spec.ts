@@ -1,5 +1,4 @@
 import { expect, test } from '@fixtures';
-import { ADMIN_SKIP_REASON, RUN_ADMIN_TESTS } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { fakeGuest, uniqueEmail } from '@support/test-data';
 
@@ -9,7 +8,6 @@ import { fakeGuest, uniqueEmail } from '@support/test-data';
  * data, so on the live site they only run with RUN_ADMIN_TESTS=1 and ADMIN_EMAIL / ADMIN_PASSWORD.
  * Everything a test creates carries a unique "QaLab" name and is removed in teardown.
  */
-test.skip(!RUN_ADMIN_TESTS, ADMIN_SKIP_REASON);
 test.use({ adminSession: 'storage-state' });
 
 test.describe('Back office, real backend', { tag: ['@admin'] }, () => {

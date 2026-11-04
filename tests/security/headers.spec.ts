@@ -1,14 +1,12 @@
 import { expect, test } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { API_URL, BASE_URL, TARGET } from '@support/env';
+import { API_URL, BASE_URL } from '@support/env';
 
 /**
  * Response headers of the real deployment. Only meaningful on the live site: the self-hosted
  * stack's nginx is ours, not the product's. These are a soft, defence-in-depth signal; each
  * missing header is pinned as a known finding, so the nightly live run turns red when one appears.
  */
-test.skip(TARGET !== 'live', 'Headers are a property of the live deployment; run with TARGET=live.');
-
 const expected = [
   { id: 'SEC-01', header: 'content-security-policy', why: 'no Content-Security-Policy: nothing limits where scripts may load from' },
   { id: 'SEC-02', header: 'x-frame-options', why: 'no X-Frame-Options (or CSP frame-ancestors): the shop can be framed (clickjacking)' },
@@ -17,7 +15,7 @@ const expected = [
   { id: 'SEC-05', header: 'strict-transport-security', why: 'no Strict-Transport-Security (HSTS)' },
 ];
 
-test.describe('Security headers of the live shop', { tag: ['@security'] }, () => {
+test.describe('Security headers of the live shop', { tag: ['@security', '@live-only'] }, () => {
   for (const { id, header, why } of expected) {
     test(`the shop sends ${header}`, async ({ request }, testInfo) => {
       knownBug(id, why);

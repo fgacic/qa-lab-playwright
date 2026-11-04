@@ -1,5 +1,4 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { IS_SELF_HOSTED } from '@support/env';
 import { fakeGuest } from '@support/test-data';
 
 /**
@@ -8,8 +7,6 @@ import { fakeGuest } from '@support/test-data';
  * self-hosted shop, in Chromium at 1280×800: same fonts, same data, same pixels everywhere.
  * Animations are off; anything that can change between runs is masked.
  */
-test.skip(!IS_SELF_HOSTED || process.env.PLAYWRIGHT_DOCKER !== '1', 'Runs in the Playwright image against the self-hosted shop: npm run test:visual');
-
 test.describe('Visual regression', { tag: ['@visual'] }, () => {
   test('home page', async ({ homePage, page }) => {
     await expect(homePage.grid.cards).toHaveCount(9);

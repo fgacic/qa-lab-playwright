@@ -1,5 +1,4 @@
 import { expect, test } from '@fixtures';
-import { IS_SELF_HOSTED, SELF_HOSTED_ONLY } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import type { Vitals } from '../../fixtures/performance';
 
@@ -11,9 +10,10 @@ import type { Vitals } from '../../fixtures/performance';
  * Thresholds are Google's Core Web Vitals "good" limits (web.dev/articles/vitals): LCP 2.5 s,
  * CLS 0.1, INP 200 ms; TBT, the lab stand-in for INP during load, uses Lighthouse's 200 ms
  * "good" limit. Measured values are attached to every test and listed in docs/COVERAGE.md.
+ *
+ * Scoped in playwright.config.ts: @perf runs on Chromium only (LCP, layout-shift and longtask
+ * entries are Chromium's), @self-hosted keeps it off the live site.
  */
-test.skip(!IS_SELF_HOSTED, SELF_HOSTED_ONLY);
-test.skip(({ browserName }) => browserName !== 'chromium', 'LCP, layout-shift and longtask entries exist in Chromium only.');
 test.use({ measureVitals: true });
 
 const BUDGET: Vitals = { lcp: 2_500, cls: 0.1, tbt: 200, inp: 200 };
@@ -28,7 +28,7 @@ function expectResponsive(measured: Vitals) {
  * Speed and responsiveness at the container's normal speed. Layout stability is tested apart,
  * below: it depends on a race and needs a controlled network to measure reliably.
  */
-test.describe('Performance budgets (self-hosted)', { tag: ['@perf'] }, () => {
+test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hosted'] }, () => {
   test.describe('home: product grid, then a filter click', () => {
     const visit = async (homePage: import('@pages/HomePage').HomePage) => {
       await expect(homePage.grid.cards.first()).toBeVisible();
@@ -94,7 +94,7 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf'] }, () => {
  * full speed it comes and goes (0 to 0.32 across repeats). With a realistic 500 ms API latency the
  * race is decided and the shift is measured every time, which makes it a stable budget.
  */
-test.describe('Layout stability on a 500 ms API (self-hosted)', { tag: ['@perf'] }, () => {
+test.describe('Layout stability on a 500 ms API (self-hosted)', { tag: ['@perf', '@self-hosted'] }, () => {
   test.use({ apiLatencyMs: 500 });
 
   const SHIFTING_FOOTER = 'the footer renders at the top before the page content arrives, then jumps down (CLS 0.17 to 0.32).';

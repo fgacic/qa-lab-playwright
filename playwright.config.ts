@@ -2,6 +2,16 @@ import { defineConfig, devices } from '@playwright/test';
 import { ADMIN_STORAGE_STATE, BASE_URL, CUSTOMER_STORAGE_STATE, IS_SELF_HOSTED, RUN_ACCOUNT_TESTS, RUN_ADMIN_TESTS, TARGET } from './src/support/env';
 
 const isCI = !!process.env.CI;
+const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
+
+/**
+ * Where a spec may run is decided here, by tag, never by a runtime skip: a test that cannot run
+ * in a project is not scheduled there at all, so reports count only real results.
+ */
+const ownProject = /@account|@admin|@visual/; // these have projects of their own
+const phoneOnly = /@mobile/;
+const chromiumOnly = /@axe|@i18n|@perf/;
+const notOnThisTarget = IS_SELF_HOSTED ? /@live-only/ : /@self-hosted/;
 
 /**
  * Two targets (src/support/env.ts): the self-hosted Toolshop (`TARGET=local`, the default and
@@ -10,11 +20,12 @@ const isCI = !!process.env.CI;
  * workers and a single retry, so real flakiness is not hidden.
  *
  * Projects by tag:
- * - chromium / firefox / webkit: everything except the gated real-account, real-admin and
- *   visual specs;
+ * - chromium: everything not in a project of its own; firefox / webkit: the same minus the
+ *   Chromium-only suites (@axe, @i18n, @perf);
  * - mobile: @smoke and @mobile on a Pixel 7;
- * - account / admin: real sign-ins from a setup project's storageState;
- * - visual: screenshot comparisons, Chromium only, run inside the Playwright Docker image.
+ * - account / admin: real sign-ins from a setup project's storageState, when they may run;
+ * - visual: screenshot comparisons, inside the Playwright Docker image only.
+ * @self-hosted specs never run against the live site, @live-only specs only there.
  */
 export default defineConfig({
   testDir: './tests',
@@ -42,34 +53,45 @@ export default defineConfig({
     actionTimeout: 15_000,
   },
   projects: [
-    { name: 'account-setup', testMatch: /account\.setup\.ts/ },
-    { name: 'admin-setup', testMatch: /admin\.setup\.ts/ },
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: /@account|@admin|@visual/ },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, grepInvert: /@account|@admin|@visual/ },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] }, grepInvert: /@account|@admin|@visual/ },
+    // Real sign-ins: always on our own Toolshop, opt-in on the live site.
+    ...(RUN_ACCOUNT_TESTS
+      ? [
+          { name: 'account-setup', testMatch: /account\.setup\.ts/ },
+          {
+            name: 'account',
+            use: { ...devices['Desktop Chrome'], storageState: CUSTOMER_STORAGE_STATE },
+            grep: /@account/,
+            grepInvert: notOnThisTarget,
+            dependencies: ['account-setup'],
+          },
+        ]
+      : []),
+    ...(RUN_ADMIN_TESTS
+      ? [
+          { name: 'admin-setup', testMatch: /admin\.setup\.ts/ },
+          {
+            name: 'admin',
+            use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
+            grep: /@admin/,
+            grepInvert: notOnThisTarget,
+            dependencies: ['admin-setup'],
+          },
+        ]
+      : []),
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: [ownProject, phoneOnly, notOnThisTarget] },
+    // axe, translations and performance are scoped to Chromium (reasons in their specs' headers).
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },
     {
       // The header collapses behind a toggler below 992 px; the smoke set proves the shop still works there.
       name: 'mobile',
       use: { ...devices['Pixel 7'] },
       grep: /@smoke|@mobile/,
-      grepInvert: /@account|@admin|@desktop|@visual/,
+      grepInvert: [ownProject, chromiumOnly, notOnThisTarget],
     },
-    {
-      name: 'account',
-      use: { ...devices['Desktop Chrome'], storageState: CUSTOMER_STORAGE_STATE },
-      grep: /@account/,
-      dependencies: RUN_ACCOUNT_TESTS ? ['account-setup'] : [],
-    },
-    {
-      name: 'admin',
-      use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
-      grep: /@admin/,
-      dependencies: RUN_ADMIN_TESTS ? ['admin-setup'] : [],
-    },
-    {
-      name: 'visual',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 },
-      grep: /@visual/,
-    },
+    // Screenshots: only inside the Playwright image (scripts/visual.sh), against our own Toolshop.
+    ...(IN_PLAYWRIGHT_IMAGE && IS_SELF_HOSTED
+      ? [{ name: 'visual', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 }, grep: /@visual/ }]
+      : []),
   ],
 });

@@ -1,19 +1,16 @@
 import { expect, test } from '@fixtures';
 import { XSS_PAYLOADS } from '../../fixtures/security';
-import { IS_SELF_HOSTED, SELF_HOSTED_ONLY } from '@support/env';
 import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 
 /**
  * Stored input: payloads are saved through a form and then shown to someone else, the admin or
  * the user themselves. These submit attack strings, so they only ever run against the
- * self-hosted Toolshop, our own environment, never the public site.
+ * self-hosted Toolshop, our own environment, never the public site (@self-hosted).
  */
-test.skip(!IS_SELF_HOSTED, SELF_HOSTED_ONLY);
-
 const payload = XSS_PAYLOADS['img onerror'];
 const breakout = XSS_PAYLOADS['svg onload, breaking out of an attribute'];
 
-test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@admin'] }, () => {
+test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@admin', '@self-hosted'] }, () => {
   test.use({ adminSession: 'storage-state' });
 
   test('a contact message is shown to the admin as text', async ({ api, adminMessages, xss }) => {
@@ -46,7 +43,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
   });
 });
 
-test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@security', '@account'] }, () => {
+test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@security', '@account', '@self-hosted'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   test('a name chosen at registration is shown in the header as text', async ({ registerPage, xss }) => {

@@ -69,8 +69,7 @@ test.describe('Header navigation', () => {
     await expect(homePage.header.userMenu).toHaveCount(0);
   });
 
-  test('on a phone the menu hides behind a toggle that reveals it', { tag: ['@mobile'] }, async ({ homePage, isMobile }) => {
-    test.skip(!isMobile, 'The toggle only exists below the 992 px breakpoint.');
+  test('on a phone the menu hides behind a toggle that reveals it', { tag: ['@mobile'] }, async ({ homePage }) => {
     const { header } = homePage;
     await expect(header.homeLink).toBeHidden();
 

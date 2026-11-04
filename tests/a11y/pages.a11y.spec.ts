@@ -9,11 +9,10 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
  * admin pages under their mocked sessions. A scan fails only on a violation that is not in the
  * known baseline (src/support/a11y-baseline.ts): it catches regressions; known-violations.a11y
  * pins each known one so it turns red when fixed.
+ *
+ * @axe: Chromium only (playwright.config.ts). axe reads the accessibility tree the browser builds
+ * and engines differ in edge cases (Firefox does not report AX-01), so the baseline is kept for one.
  */
-// axe reads the accessibility tree the browser builds, and engines differ in edge cases
-// (Firefox does not report AX-01). The baseline is kept for one engine, Chromium.
-test.skip(({ browserName }) => browserName !== 'chromium', 'The axe baseline is kept for Chromium only.');
-
 async function expectNoNewViolations(scan: A11yScan, page: string): Promise<void> {
   // A11Y_RECORD=<file> appends every finding as JSON lines: how the baseline is (re)built.
   if (process.env.A11Y_RECORD) {
@@ -25,7 +24,7 @@ async function expectNoNewViolations(scan: A11yScan, page: string): Promise<void
   expect(unexpected, `new accessibility violations on ${page}`).toEqual([]);
 }
 
-test.describe('Accessibility scan: shop', { tag: ['@a11y'] }, () => {
+test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('home', async ({ homePage, a11y }) => {
     await expect(homePage.grid.cards.first()).toBeVisible();
     await expectNoNewViolations(await a11y.scan('home'), 'home');
@@ -145,7 +144,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y'] }, () => {
   });
 });
 
-test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '@mocked'] }, () => {
+test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '@axe', '@mocked'] }, () => {
   test.use(withMocks(
     mock.respond('GET', '/favorites', []),
     mock.respond('GET', '/invoices', { current_page: 1, data: [], last_page: 1, total: 0, per_page: 15 }),
@@ -179,7 +178,7 @@ test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '
   });
 });
 
-test.describe('Accessibility scan: back office (mocked admin)', { tag: ['@a11y', '@mocked'] }, () => {
+test.describe('Accessibility scan: back office (mocked admin)', { tag: ['@a11y', '@axe', '@mocked'] }, () => {
   test('dashboard', async ({ adminDashboard, a11y }) => {
     await expect(adminDashboard.salesChart).toBeVisible();
     await expectNoNewViolations(await a11y.scan('admin-dashboard'), 'admin dashboard');

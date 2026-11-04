@@ -1,5 +1,4 @@
 import { expect, test } from '@fixtures';
-import { ACCOUNT_SKIP_REASON, RUN_ACCOUNT_TESTS } from '@support/env';
 import { fakeAddress, fakeCustomer } from '@support/test-data';
 
 /**
@@ -7,8 +6,6 @@ import { fakeAddress, fakeCustomer } from '@support/test-data';
  * self-hosted Toolshop (our own environment) in every CI run; on the live site only with
  * RUN_ACCOUNT_TESTS=1, because it creates accounts on a public shop.
  */
-test.skip(!RUN_ACCOUNT_TESTS, ACCOUNT_SKIP_REASON);
-
 test.describe('Real account', { tag: ['@account'] }, () => {
   test.describe('a new customer', () => {
     // Starts signed out, whatever the project's storageState holds.

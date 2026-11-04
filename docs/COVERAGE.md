@@ -554,5 +554,18 @@ Current results and their history: the [published Allure report](https://fgacic.
 | [41780303630](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780303630) | Live site | failed | 4 browsers; Cloudflare bot challenges (see above). |
 | [41808674880](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808674880) | Live site | failed | Chromium and mobile: 330 passed, 29 skipped as challenged, 13 failed where the challenge hit background requests (translation files, app reloads). The same specs pass from a residential connection. |
 
-Skipped tests in the gate are by design: on Firefox and WebKit, the Chromium-only axe, i18n and
-performance specs, and the phone-only menu test; on Chromium, that phone test.
+**Scheduling.** Where a spec runs is decided in `playwright.config.ts` by tag, never by a runtime
+skip:
+
+| Project | Tests | Notes |
+|---|---|---|
+| chromium | 366 | Everything except `@account`, `@admin`, `@visual` (own projects) and `@mobile` (phone only). |
+| firefox, webkit | 295 each | The same, minus the Chromium-only `@axe`, `@i18n` and `@perf`. |
+| mobile | 14 | `@smoke` and `@mobile` on a Pixel 7. |
+| account / admin | 8 / 9 | Only exist when real sign-ins may run (always on the self-hosted shop). |
+| visual | 13 | Only inside the Playwright image. |
+
+`@self-hosted` specs are never scheduled against the live site, `@live-only` specs only there. Before
+this, those suites called `test.skip()` at file level, which allure-playwright records as a global
+error ("skip modifier failed"). Report #6 showed 142 of them on a green run. A gate run now has no
+skipped tests at all.
