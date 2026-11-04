@@ -7,7 +7,7 @@ HTTP method `QUERY` with a JSON body.
 
 **Targets.** The gate is the self-hosted Toolshop (`TARGET=local`), built from upstream commit `ae7caec`,
 the code the live site runs ("Built 2026-10-11"), and seeded fresh per CI job. The live site
-(`TARGET=live`) runs nightly as a signal. Everything below runs on both targets unless a row says
+(`TARGET=live`) has its own workflow, currently disabled; run it locally or on demand as a signal. Everything below runs on both targets unless a row says
 *self-hosted only*.
 
 **Columns.** *Pos* = positive case, *Neg* = negative case (validation, wrong input, navigation that
@@ -350,7 +350,7 @@ characters, because the search drops longer terms (BUG-27).
 | Response headers: CSP, X-Frame-Options, nosniff, Referrer-Policy, HSTS, Server | – | live only (headers belong to the deployment) | security/headers | bug found (SEC-01..06) |
 
 The header checks are soft: they are defence in depth, not functional defects, and the shop is a
-training site. They are pinned so that a header appearing turns the nightly live run red.
+training site. They are pinned so that a header appearing turns the live run red.
 
 ## Performance
 
@@ -533,7 +533,7 @@ reloads. Bot detection is not something a test suite should defeat, so the suite
   live site (not bypassed by design)".
 - Any other test the challenge interrupts carries a `bot challenge` annotation, so its failure reads
   as environmental.
-- The nightly live run is limited to Chromium and mobile. That means fewer requests, and the other
+- The live run is limited to Chromium and mobile. That means fewer requests, and the other
   engines are covered on the self-hosted gate.
 
 From a residential connection the live run is not challenged (the earlier local runs).

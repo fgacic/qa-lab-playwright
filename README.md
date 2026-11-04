@@ -52,7 +52,7 @@ Allure labels are derived in one fixture (`fixtures/allure-labels.ts`):
 
 ## Why these cases
 
-- **Our own shop as the gate.** CI builds Toolshop from source at a pinned commit, the one the public site runs, and seeds it fresh for every job. Results come from the code under test, not from other people's data or a shared server's mood. Real sign-ins, attack payloads, screenshots and performance budgets run there and only there. The public site gets a nightly read-only run as a signal.
+- **Our own shop as the gate.** CI builds Toolshop from source at a pinned commit, the one the public site runs, and seeds it fresh for every job. Results come from the code under test, not from other people's data or a shared server's mood. Real sign-ins, attack payloads, screenshots and performance budgets run there and only there. A read-only run against the public site exists but is disabled (see below).
 - **One rule per feature: positive, negative, failing API, empty API.** That is where most defects were: the shop handles the happy path and often goes silent on errors.
 - **The UI is checked against the API, not against hard-coded data.** A filter test asserts three things: the request carries the filter, the API's answer honours it, and the grid shows exactly that answer. Products are looked up at runtime.
 - **Arrange through the API, act through the UI.** Carts, guest orders, favourites and contact messages are created through the API. A test only clicks through what it is about.
@@ -105,7 +105,7 @@ npm run report                       # Allure 3 report from allure-results/
 5. **merge reports.** Downloads every blob and merges them into one HTML report. It then fetches the published Allure `history/history.jsonl`, generates the Allure 3 report (which appends this run to the history), and assembles the site.
 6. **publish.** From `main` only, with `actions/deploy-pages`. The history file is published with the report, which is how the Trend, Duration and Retries charts keep growing.
 
-`.github/workflows/live.yml` runs the suite against practicesoftwaretesting.com nightly and on demand, as a signal and not a gate. It runs Chromium and the mobile set, one job at a time, so at most two workers touch the public site. Cloudflare answers part of the runner's navigations with a bot challenge. The suite never tries to get past it: a test whose own navigation is challenged is skipped with that reason, and any other test the challenge interrupts carries a `bot challenge` annotation in the report.
+`.github/workflows/live.yml` runs the suite against practicesoftwaretesting.com, as a signal and not a gate. **It is disabled in GitHub Actions for now:** Cloudflare challenges the runners, and the self-hosted gate already runs the commit the public site runs. Re-enable it with `gh workflow enable "Live site"` to check for drift. It runs Chromium and the mobile set, one job at a time, so at most two workers touch the public site. Cloudflare answers part of the runner's navigations with a bot challenge. The suite never tries to get past it: a test whose own navigation is challenged is skipped with that reason, and any other test the challenge interrupts carries a `bot challenge` annotation in the report.
 
 The rest of the setup:
 
@@ -169,7 +169,7 @@ Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The hea
 
 - **Run axe on Firefox and WebKit too, each with its own baseline.** Today it runs on Chromium only, because the engines disagree in edge cases.
 - **Contract-check the mocks.** The payloads mirror the OpenAPI document by hand. A job validating them against the spec would catch drift before mocked tests start lying.
-- **Publish the nightly live run** next to the gate's report, for example under `/live`, with its own Allure history.
+- **Re-enable the live run** on a runner Cloudflare does not challenge, and publish it next to the gate's report, for example under `/live`, with its own Allure history.
 - **Let Renovate** bump the pinned action SHAs, base images and the Toolshop commit, each through its own pull request run.
 
 ---

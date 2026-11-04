@@ -1,6 +1,7 @@
 name: Live site
 
-# The same suite against the public practicesoftwaretesting.com, nightly and on demand. A signal,
+# The same suite against the public practicesoftwaretesting.com, nightly and on demand.
+# Disabled in GitHub Actions for now (gh workflow enable "Live site" turns it back on). A signal,
 # not a gate: the site is shared and changes under us. Real accounts, real sign-ins and submitted
 # payloads stay off here (src/support/env.ts); the config keeps it to two workers.
 on:
