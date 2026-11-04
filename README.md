@@ -86,7 +86,7 @@ npm run report                       # Allure 3 report from allure-results/
 
 ## Latest runs
 
-- **Gate:** [CI 41808661261](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808661261) and [41780293737](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780293737). Every job is green, including verify-bugs (72 of 72 pins still fail).
+- **Gate:** [CI 41812346305](https://github.com/fgacic/qa-lab-playwright/actions/runs/41812346305), report #7. 1,000 of 1,000 passed, 0 skipped, 0 global errors; verify-bugs: 72 of 72 pins still fail.
 - **Live:** [Live site 41808674880](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808674880). 330 passed. The 13 failures come from Cloudflare challenging the runner's requests; the same specs pass from a home connection.
 - **History:** all runs are listed in [COVERAGE.md](docs/COVERAGE.md#runs).
 

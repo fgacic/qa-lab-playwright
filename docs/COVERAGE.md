@@ -552,6 +552,7 @@ Current results and their history: the [published Allure report](https://fgacic.
 | [41780293737](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780293737) | CI | passed | Chromium 366 passed (7 skipped); Firefox 295 passed (78 skipped); WebKit 294 passed, 1 flaky (78 skipped); account, admin and mobile 31 passed; visual 13 passed; verify-bugs: 72 of 72 pins still fail. |
 | [41808661261](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808661261) | CI | passed | Every job green. |
 | [41780303630](https://github.com/fgacic/qa-lab-playwright/actions/runs/41780303630) | Live site | failed | 4 browsers; Cloudflare bot challenges (see above). |
+| [41812346305](https://github.com/fgacic/qa-lab-playwright/actions/runs/41812346305) | CI | passed | Report #7: 1000 of 1000 passed, 0 skipped, 0 global errors (chromium 366, firefox 295, webkit 295, mobile 14, account 7, admin 8, setups 2, visual 13); Allure labels populate every graph. |
 | [41808674880](https://github.com/fgacic/qa-lab-playwright/actions/runs/41808674880) | Live site | failed | Chromium and mobile: 330 passed, 29 skipped as challenged, 13 failed where the challenge hit background requests (translation files, app reloads). The same specs pass from a residential connection. |
 
 **Scheduling.** Where a spec runs is decided in `playwright.config.ts` by tag, never by a runtime
@@ -562,7 +563,7 @@ skip:
 | chromium | 366 | Everything except `@account`, `@admin`, `@visual` (own projects) and `@mobile` (phone only). |
 | firefox, webkit | 295 each | The same, minus the Chromium-only `@axe`, `@i18n` and `@perf`. |
 | mobile | 14 | `@smoke` and `@mobile` on a Pixel 7. |
-| account / admin | 8 / 9 | Only exist when real sign-ins may run (always on the self-hosted shop). |
+| account / admin | 7 / 8, plus one setup test each | Only exist when real sign-ins may run (always on the self-hosted shop). |
 | visual | 13 | Only inside the Playwright image. |
 
 `@self-hosted` specs are never scheduled against the live site, `@live-only` specs only there. Before
