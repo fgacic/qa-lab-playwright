@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import { AdminTable } from '@components/admin/AdminTable';
+import { apiPath } from '@support/env';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 
@@ -8,9 +9,12 @@ export class AdminDashboardPage {
   readonly salesHeading: Locator;
   readonly salesChart: Locator;
   readonly latestOrders: AdminTable;
+  /** Shown instead of the table when there is nothing to list. */
+  readonly noOrders: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
+    this.noOrders = page.getByText('No recent invoices.');
     this.salesHeading = page.getByRole('heading', { name: 'Sales over the years' });
     // A <canvas> chart: no role or name to reach it by, and nothing inside it to read.
     this.salesChart = page.locator('canvas');
@@ -19,7 +23,7 @@ export class AdminDashboardPage {
 
   @step('Open the admin dashboard')
   async open(): Promise<void> {
-    await this.shell.goto('/admin/dashboard');
+    await this.shell.gotoAndSettle('/admin/dashboard', 'GET', /^\/invoices$/);
   }
 }
 
@@ -41,7 +45,8 @@ export class AdminOrderPage {
   constructor(readonly page: Page) {
     // exact: the date field's accessible name is "Invoice Number Invoice Date" (two labels).
     this.invoiceNumber = page.getByRole('textbox', { name: 'Invoice number', exact: true });
-    this.total = page.getByRole('textbox', { name: 'Total' });
+    // exact: "Subtotal" is a field of the same page.
+    this.total = page.getByRole('textbox', { name: 'Total', exact: true });
     this.status = page.getByRole('combobox', { name: 'Status' });
     this.statusMessage = page.getByTestId('status-message');
     this.updateStatusButton = page.getByRole('button', { name: 'Update status' });
@@ -66,8 +71,10 @@ export class AdminMessagePage {
   readonly replyBox: Locator;
   readonly replyButton: Locator;
   readonly backLink: Locator;
+  readonly feedback: Locator;
 
   constructor(readonly page: Page) {
+    this.feedback = page.getByRole('alert');
     this.status = page.getByRole('combobox', { name: 'Status' });
     this.replyBox = page.getByRole('textbox', { name: 'Reply message' });
     this.replyButton = page.getByRole('button', { name: 'Reply' });
@@ -90,6 +97,16 @@ export class AdminMessagePage {
   }
 }
 
+/** The four tables of the statistics page, in page order, with the request that fills each. */
+const REPORTS = [
+  { title: 'Top 10 Best Selling Categories', feed: '/reports/top10-best-selling-categories' },
+  { title: 'Top 10 Most Purchased Products', feed: '/reports/top10-purchased-products' },
+  { title: 'Customers By Country', feed: '/reports/customers-by-country' },
+  { title: 'Total Sales Per Country', feed: '/reports/total-sales-per-country' },
+] as const;
+export type ReportTitle = (typeof REPORTS)[number]['title'];
+const REPORT_TITLES = REPORTS.map((r) => r.title);
+
 export class AdminStatisticsPage {
   readonly shell: AppShell;
   readonly heading: Locator;
@@ -100,18 +117,22 @@ export class AdminStatisticsPage {
   }
 
   /** The data rows of the table under a report heading. */
-  report(title: 'Top 10 Best Selling Categories' | 'Top 10 Most Purchased Products' | 'Customers By Country' | 'Total Sales Per Country'): Locator {
+  report(title: ReportTitle): Locator {
     return this.page
       .getByRole('table')
       .filter({ has: this.page.getByRole('columnheader') })
-      .nth(['Top 10 Best Selling Categories', 'Top 10 Most Purchased Products', 'Customers By Country', 'Total Sales Per Country'].indexOf(title))
+      .nth(REPORT_TITLES.indexOf(title))
       .getByRole('row')
       .filter({ has: this.page.getByRole('cell') });
   }
 
+  /** Returns once all four reports have been answered, so an empty table means an empty answer. */
   @step('Open the statistics')
   async open(): Promise<void> {
+    const answered = Promise.all(REPORTS.map(({ feed }) => this.page.waitForResponse((r) => r.request().method() === 'GET' && apiPath(r.url()) === feed)));
+    answered.catch(() => undefined); // a failed navigation is reported by goto; this only keeps the rejection from going unhandled
     await this.shell.goto('/admin/reports/statistics');
+    await answered;
   }
 }
 

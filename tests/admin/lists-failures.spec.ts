@@ -1,11 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import type { MockRoute } from '@support/api-mock';
-import { ADMIN_LISTS } from '../../fixtures/admin';
+import type { AdminListName } from '@pages/admin/admin-lists';
 import { paginated } from '@support/admin-payloads';
+import type { MockRoute } from '@support/api-mock';
 import { knownBug } from '@support/known-bug';
 
 /** Every back-office list, against an empty answer and a failing one. */
-const lists: { name: keyof typeof ADMIN_LISTS; feed: [MockRoute['method'], string]; empty: unknown }[] = [
+const lists: { name: AdminListName; feed: [MockRoute['method'], string]; empty: unknown }[] = [
   { name: 'products', feed: ['QUERY', '/products'], empty: paginated([], 9) },
   { name: 'brands', feed: ['GET', '/brands'], empty: [] },
   { name: 'categories', feed: ['GET', '/categories'], empty: [] },
@@ -19,6 +19,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
     test.describe(`${name}, empty`, () => {
       test.use({ adminListName: name, ...withMocks(mock.respond(method, path, empty)) });
 
+      // `adminList` opens the page and returns once the list request has been answered (the empty mock).
       test(`an empty ${name} list shows the table without rows`, async ({ adminList: list }) => {
         await expect(list.heading).toBeVisible();
         await expect(list.table.rows).toHaveCount(0);
@@ -32,7 +33,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
         knownBug('ADM-07', 'a failed back-office list shows an empty table and no message, in every section.');
         await expect(list.heading).toBeVisible();
 
-        await expect(list.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+        await expect(list.shell.errorAlert, 'ADM-07: a failed list tells the admin').toBeVisible({ timeout: 5_000 });
       });
     });
   }

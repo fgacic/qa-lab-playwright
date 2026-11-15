@@ -145,6 +145,14 @@ export class AdminProductForm {
     await this.image.selectOption(product.image ? { label: product.image } : { index: 1 });
   }
 
+  /** The first real brand, category and image, for a form that did not preselect them (ADM-09). */
+  @step('Choose a brand, category and image')
+  async chooseRelations(): Promise<void> {
+    await this.brand.selectOption({ index: 1 });
+    await this.category.selectOption({ index: 1 });
+    await this.image.selectOption({ index: 1 });
+  }
+
   @step('Add spec {0}: {1}')
   async addSpec(name: string, value: string, unit = ''): Promise<void> {
     await this.newSpecName.fill(name);

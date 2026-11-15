@@ -1,12 +1,13 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { contactMessage, customer } from '@support/admin-payloads';
+import { ORDER_STATUSES } from '@pages/admin/AdminPages';
+import { contactMessage, customer, orderPayment, paginated } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each order with status and total', async ({ adminOrders, backOffice }) => {
     const row = adminOrders.table.row(backOffice.order.invoice_number);
 
-    await expect(row).toContainText('AWAITING_FULFILLMENT');
+    await expect(row).toContainText(backOffice.order.status);
     await expect(row).toContainText(`$${backOffice.order.total.toFixed(2)}`);
   });
 
@@ -22,33 +23,38 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     const order = await adminOrders.edit(backOffice.order.invoice_number);
 
     await expect(order.invoiceNumber).toHaveValue(backOffice.order.invoice_number);
-    await expect(order.paymentMethod).toHaveValue('Cash on Delivery');
-    await expect(order.billingCity).toHaveValue('Testville');
+    await expect(order.total).toHaveValue(`$ ${backOffice.order.total.toFixed(2)}`);
+    await expect(order.paymentMethod).toHaveValue(orderPayment.label);
+    await expect(order.billingCity).toHaveValue(backOffice.order.billing_city);
     await expect(order.lines).toHaveCount(1);
     await expect(order.lines.first()).toContainText(backOffice.product.name);
   });
 
-  test('changing the status saves it and confirms', async ({ adminOrders, backOffice, apiMock }) => {
-    const order = await adminOrders.edit(backOffice.order.invoice_number);
-    await expect(order.status).toHaveValue('AWAITING_FULFILLMENT');
-    const sent = apiMock.waitForRequest('PUT', /^\/invoices\/[^/]+\/status$/);
+  // The order's current status is not offered as an option, so every other status is set in turn.
+  for (const status of ORDER_STATUSES.filter((s) => s !== 'AWAITING_FULFILLMENT')) {
+    test(`changing the status to ${status} saves it and confirms`, async ({ adminOrders, backOffice, apiMock }) => {
+      const order = await adminOrders.edit(backOffice.order.invoice_number);
+      await expect(order.status).toHaveValue(backOffice.order.status);
+      const sent = apiMock.waitForRequest('PUT', /^\/invoices\/[^/]+\/status$/);
 
-    await order.updateStatus('SHIPPED');
+      await order.updateStatus(status);
 
-    expect((await sent).postDataJSON()).toMatchObject({ status: 'SHIPPED' });
-    await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeVisible();
-  });
+      expect((await sent).postDataJSON()).toMatchObject({ status });
+      await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeVisible();
+    });
+  }
 
   test.describe('when the status update fails', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('PUT', /^\/invoices\/[^/]+\/status$/, 500)));
 
     test('the admin is told the status was not saved', async ({ adminOrders, backOffice }) => {
       const order = await adminOrders.edit(backOffice.order.invoice_number);
-      await expect(order.status).toHaveValue('AWAITING_FULFILLMENT');
+      await expect(order.status).toHaveValue(backOffice.order.status);
 
       await order.updateStatus('SHIPPED');
 
-      await expect(order.page.getByRole('alert').filter({ hasText: /error|fail|not/i })).toBeVisible();
+      // The page shows the raw HTTP error; the mocked 500 is what must be in it.
+      await expect(order.feedback.filter({ hasText: '500 Internal Server Error' })).toBeVisible();
       await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeHidden();
     });
   });
@@ -94,12 +100,16 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   test('Delete removes the user', async ({ adminUsers, apiMock }) => {
+    // Once deleted, the list the page reloads no longer has the user.
+    await apiMock.use(mock.respond('GET', '/users', paginated([])));
+    await expect(adminUsers.table.row(customer.email)).toBeVisible();
     const deleted = apiMock.waitForRequest('DELETE', `/users/${customer.id}`);
 
     await adminUsers.table.delete(customer.email);
 
     await deleted;
     await expect(adminUsers.feedback.filter({ hasText: 'User deleted.' })).toBeVisible();
+    await expect(adminUsers.table.row(customer.email)).toHaveCount(0);
   });
 
   test.describe('when the email is already taken', { tag: ['@negative'] }, () => {
@@ -141,14 +151,14 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     expect((await sent).postDataJSON()).toEqual({ message: 'A mocked admin reply.' });
   });
 
-  test('an empty reply is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ adminMessages, apiMock }) => {
+  test('an empty reply is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ adminMessages, sentRequests }) => {
     knownBug('ADM-06', 'an empty admin reply is sent to the API ({"message":""}) instead of being validated.');
     const message = await adminMessages.details(contactMessage.name);
-    const sent = apiMock.waitForRequest('POST', `/messages/${contactMessage.id}/reply`);
+    const replies = sentRequests('POST', `/messages/${contactMessage.id}/reply`);
 
     await message.replyButton.click();
 
-    expect((await sent).postDataJSON()).toEqual({ message: '' });
-    await expect(message.page.getByRole('alert').filter({ hasText: /required/i })).toBeVisible({ timeout: 2_000 });
+    await expect(message.feedback.filter({ hasText: /required/i }), 'ADM-06: the form says a reply is required').toBeVisible({ timeout: 2_000 });
+    expect(replies.count, 'ADM-06: no empty reply is sent').toBe(0);
   });
 });

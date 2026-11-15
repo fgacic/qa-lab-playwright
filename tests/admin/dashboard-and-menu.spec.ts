@@ -31,8 +31,8 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
   test.describe('with no orders waiting', () => {
     test.use(withMocks(mock.respond('GET', '/invoices', paginated([]))));
 
-    test('the latest-orders table is empty', async ({ adminDashboard }) => {
-      await expect(adminDashboard.salesHeading).toBeVisible();
+    test('the dashboard says there are no recent orders', async ({ adminDashboard }) => {
+      await expect(adminDashboard.noOrders).toBeVisible();
       await expect(adminDashboard.latestOrders.rows).toHaveCount(0);
     });
   });
@@ -44,7 +44,7 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
       knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.');
       await expect(adminDashboard.salesHeading).toBeVisible();
 
-      await expect(adminDashboard.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(adminDashboard.shell.errorAlert, 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: 5_000 });
     });
   });
 });
@@ -53,6 +53,6 @@ test.describe('Admin access control', () => {
   test('a signed-in customer cannot open the back office', { tag: ['@mocked', '@negative'] }, async ({ signedIn: _, page }) => {
     await page.goto('/admin/dashboard', { waitUntil: 'domcontentloaded' });
 
-    await expect(page).not.toHaveURL(/\/admin/);
+    await expect(page).toHaveURL('/auth/login');
   });
 });

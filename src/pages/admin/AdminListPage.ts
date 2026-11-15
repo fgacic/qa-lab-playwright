@@ -1,12 +1,15 @@
 import type { Locator, Page } from '@playwright/test';
 import { AdminSearch } from '@components/admin/AdminSearch';
 import { AdminTable } from '@components/admin/AdminTable';
+import type { HttpMethod } from '@support/api-mock';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 
 export interface AdminListConfig<Detail> {
   path: string;
   heading: string;
+  /** The request that fills the table; `open()` returns once it has been answered. */
+  feed: { method: HttpMethod; path: RegExp };
   /** Accessible name of the search box, if the list has one. */
   searchLabel?: string;
   /** Name of the "Add …" link, if records can be created. */
@@ -38,7 +41,7 @@ export class AdminListPage<Detail> {
 
   @step('Open the admin list {0}')
   async open(): Promise<void> {
-    await this.shell.goto(this.config.path);
+    await this.shell.gotoAndSettle(this.config.path, this.config.feed.method, this.config.feed.path);
   }
 
   @step('Start a new record')

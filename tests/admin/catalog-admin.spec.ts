@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { brand, category } from '@support/admin-payloads';
+import { brand, category, paginated } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 
 const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
@@ -12,22 +12,41 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(row).toContainText(`$${backOffice.product.price.toFixed(2)}`);
   });
 
-  test('searching sends the term and lists the matches', async ({ adminProducts, apiMock }) => {
+  test('searching sends the term and lists the matches', async ({ adminProducts, backOffice, apiMock }) => {
+    // The answer differs from the full list, so a table that shows it has really been replaced.
+    const match = { ...backOffice.product, id: '01QALABSEARCHHIT0000000000', name: 'Qa Lab Search Hit' };
+    await apiMock.use(mock.respond('QUERY', '/products/search', paginated([match], 9)));
     const sent = apiMock.waitForRequest('QUERY', '/products/search');
 
     await adminProducts.search.searchFor('pliers');
 
     expect((await sent).postDataJSON()).toEqual({ q: 'pliers' });
+    await expect(adminProducts.table.row(match.name)).toBeVisible();
     await expect(adminProducts.table.rows).toHaveCount(1);
   });
 
+  test('Reset clears the search and lists the whole catalogue again', async ({ adminProducts, backOffice, apiMock }) => {
+    await apiMock.use(mock.respond('QUERY', '/products/search', paginated([], 9)));
+    await adminProducts.search.searchFor('no such product');
+    await expect(adminProducts.table.rows).toHaveCount(0);
+
+    await adminProducts.search.reset();
+
+    await expect(adminProducts.search.query).toHaveValue('');
+    await expect(adminProducts.table.row(backOffice.product.id)).toBeVisible();
+  });
+
   test('Delete removes the product and confirms', async ({ adminProducts, backOffice, apiMock }) => {
+    // Once deleted, the list the page reloads no longer has the product.
+    await apiMock.use(mock.respond('QUERY', '/products', paginated([], 9)));
+    await expect(adminProducts.table.row(backOffice.product.id)).toBeVisible();
     const deleted = apiMock.waitForRequest('DELETE', /^\/products\/[^/]+$/);
 
     await adminProducts.table.delete(backOffice.product.id);
 
     expect((await deleted).url()).toContain(backOffice.product.id);
     await expect(adminProducts.feedback.filter({ hasText: 'Product deleted.' })).toBeVisible();
+    await expect(adminProducts.table.row(backOffice.product.id)).toHaveCount(0);
   });
 
   test('Delete asks for confirmation first', { tag: ['@bug'] }, async ({ adminProducts, backOffice, page }) => {
@@ -35,10 +54,11 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     let asked = false;
     page.on('dialog', async (dialog) => { asked = true; await dialog.dismiss(); });
 
+    // A confirm() opens during the click and the click returns once the dialog is dismissed,
+    // so `asked` is final here whether the site has the dialog or not.
     await adminProducts.table.delete(backOffice.product.id);
-    await expect(adminProducts.feedback.filter({ hasText: /deleted/ })).toBeVisible();
 
-    expect(asked, 'a confirmation dialog').toBe(true);
+    expect(asked, 'ADM-02: Delete asks for confirmation before it deletes').toBe(true);
   });
 
   test('a new product is saved with what was entered', async ({ adminProducts, apiMock }) => {
@@ -64,16 +84,16 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   for (const price of ['abc', '-5']) {
-    test(`a price of "${price}" is rejected by the form`, { tag: ['@negative', '@bug'] }, async ({ adminProducts, apiMock }) => {
+    test(`a price of "${price}" is rejected by the form`, { tag: ['@negative', '@bug'] }, async ({ adminProducts, sentRequests }) => {
       knownBug('ADM-03', 'the product form sends any price (text, negative) to the API without validating it.');
       const form = await adminProducts.add();
-      const sent = apiMock.waitForRequest('POST', '/products');
+      const created = sentRequests('POST', '/products');
 
       await form.fillIn({ ...newProduct, price });
       await form.chrome.save();
 
-      expect((await sent).postDataJSON()).toMatchObject({ price });
-      await expect(form.chrome.alert(/price/i)).toBeVisible({ timeout: 2_000 });
+      await expect(form.chrome.alert(/price/i), 'ADM-03: the form names the invalid price').toBeVisible({ timeout: 2_000 });
+      expect(created.count, 'ADM-03: no request is sent with an invalid price').toBe(0);
     });
   }
 
@@ -85,7 +105,7 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     await form.chrome.save();
     await expect(form.chrome.alert('Product saved!')).toBeVisible();
 
-    await expect(form.chrome.alert('Quantity is required')).toBeHidden({ timeout: 2_000 });
+    await expect(form.chrome.alert('Quantity is required'), 'ADM-04: no leftover "Quantity is required"').toBeHidden({ timeout: 2_000 });
   });
 
   test('editing loads the product and its specifications', async ({ adminProducts, backOffice }) => {
@@ -98,16 +118,17 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(form.specRows.filter({ hasText: 'Weight' })).toContainText('340');
   });
 
-  test('an edited product can be saved without retyping its stock', { tag: ['@bug'] }, async ({ adminProducts, backOffice, apiMock }) => {
+  test('an edited product can be saved without retyping its stock', { tag: ['@bug'] }, async ({ adminProducts, backOffice }) => {
     knownBug('ADM-05', 'the edit form does not load the stock, so saving an existing product is blocked by "Quantity is required".');
     const form = await adminProducts.edit(backOffice.product.id);
     await expect(form.name).toHaveValue(backOffice.product.name);
-    const saved = apiMock.waitForRequest('PUT', /^\/products\/[^/]+$/);
+    // Brand, category and image are empty too (ADM-09, pinned below); choose them so only the stock can block the save.
+    await form.chooseRelations();
 
     await form.price.fill('19.99');
     await form.chrome.save();
 
-    await saved;
+    await expect(form.chrome.alert('Product saved!'), 'ADM-05: the product is saved without retyping its stock').toBeVisible({ timeout: 2_000 });
   });
 
   test('editing preselects the product\'s brand and category', { tag: ['@bug'] }, async ({ adminProducts, backOffice }) => {
@@ -115,7 +136,7 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     const form = await adminProducts.edit(backOffice.product.id);
     await expect(form.name).toHaveValue(backOffice.product.name);
 
-    await expect(form.brand).toHaveValue(backOffice.product.brand.id, { timeout: 2_000 });
+    await expect(form.brand, 'ADM-09: the edit form preselects the product\'s brand').toHaveValue(backOffice.product.brand.id, { timeout: 2_000 });
   });
 
   test('specifications are added and removed on the spot', async ({ adminProducts, backOffice, apiMock }) => {
@@ -132,6 +153,8 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     const removed = apiMock.waitForRequest('DELETE', /^\/products\/[^/]+\/specs\/[^/]+$/);
     await form.removeSpec('Weight');
     await removed;
+    await expect(form.specRows.filter({ hasText: 'Weight' })).toHaveCount(0);
+    await expect(form.specRows.filter({ hasText: 'Length' })).toHaveCount(1);
   });
 
   test.describe('when saving is rejected', { tag: ['@negative'] }, () => {
@@ -195,18 +218,26 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   test('Delete removes the brand', async ({ adminBrands, apiMock }) => {
+    // Once deleted, the list the page reloads no longer has the brand.
+    await apiMock.use(mock.respond('GET', '/brands', []));
+    await expect(adminBrands.table.row(brand.name)).toBeVisible();
     const deleted = apiMock.waitForRequest('DELETE', `/brands/${brand.id}`);
 
     await adminBrands.table.delete(brand.name);
 
     await deleted;
     await expect(adminBrands.feedback.filter({ hasText: 'Brand deleted.' })).toBeVisible();
+    await expect(adminBrands.table.row(brand.name)).toHaveCount(0);
   });
 
   test.describe('when a brand is still in use', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('DELETE', /^\/brands\/[^/]+$/, 409, { message: 'Seems like this brand is used elsewhere.' })));
 
-    test('the reason is shown and the brand stays', async ({ adminBrands }) => {
+    test('the reason is shown and the brand stays', async ({ adminBrands, apiMock }) => {
+      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
+      await apiMock.use(mock.respond('GET', '/brands', []));
+      await expect(adminBrands.table.row(brand.name)).toBeVisible();
+
       await adminBrands.table.delete(brand.name);
 
       await expect(adminBrands.feedback.filter({ hasText: 'used elsewhere' })).toBeVisible();
@@ -260,11 +291,15 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
   });
 
   test('Delete removes the category', async ({ adminCategories, apiMock }) => {
+    // Once deleted, the list the page reloads no longer has the category.
+    await apiMock.use(mock.respond('GET', '/categories', []));
+    await expect(adminCategories.table.row(category.name)).toBeVisible();
     const deleted = apiMock.waitForRequest('DELETE', `/categories/${category.id}`);
 
     await adminCategories.table.delete(category.name);
 
     await deleted;
     await expect(adminCategories.feedback.filter({ hasText: 'Category deleted.' })).toBeVisible();
+    await expect(adminCategories.table.row(category.name)).toHaveCount(0);
   });
 });

@@ -1,10 +1,11 @@
 import { expect, mergeTests, type Page } from '@playwright/test';
 import { AdminBrandForm, AdminCategoryForm, AdminProductForm, AdminUserForm } from '@pages/admin/AdminForms';
 import { AdminListPage } from '@pages/admin/AdminListPage';
+import { ADMIN_LISTS, type AdminListName } from '@pages/admin/admin-lists';
 import { AdminDashboardPage, AdminMessagePage, AdminOrderPage, AdminSalesReportPage, AdminSettingsPage, AdminStatisticsPage } from '@pages/admin/AdminPages';
 import * as A from '@support/admin-payloads';
-import { mock } from '@support/api-mock';
-import { ADMIN_CREDENTIALS, ADMIN_SKIP_REASON, RUN_ADMIN_TESTS } from '@support/env';
+import { mock, type HttpMethod, type MockRoute } from '@support/api-mock';
+import { ADMIN_CREDENTIALS, apiPath } from '@support/env';
 import { fakeJwt } from '@support/payloads';
 import { installToken } from '@support/session';
 import type { Product } from '@support/toolshop-api';
@@ -14,7 +15,7 @@ import { test as mocksTest } from './mocks';
 /**
  * - `mocked`: a fake admin JWT and a mocked back office (below). Runs everywhere and never
  *   touches the real admin API: unmocked writes are refused and fail the test.
- * - `storage-state`: the real admin saved by tests/setup/admin.setup.ts (gated, `admin` project).
+ * - `storage-state`: the real admin saved by tests/setup/admin.setup.ts (`admin` project).
  */
 export type AdminSession = 'mocked' | 'storage-state';
 
@@ -24,12 +25,27 @@ export interface MockedBackOffice {
   order: ReturnType<typeof A.order>;
 }
 
+/** The API requests of one kind the page has sent since `sentRequests` was called. */
+export interface RequestCount {
+  readonly count: number;
+}
+
+/** Products a real back-office journey created, deleted by id when the test ends (even when it failed). */
+export interface CreatedProducts {
+  track(id: string | undefined): void;
+  /** For a product the test itself deleted, so teardown does not delete it twice. */
+  forget(id: string): void;
+}
+
 export interface AdminFixtures {
-  /** A real admin API token, for arranging and cleaning up in the gated live journeys. */
+  /** A real admin API token, for arranging and cleaning up in the real back-office journeys. */
   adminToken: string;
+  createdProducts: CreatedProducts;
+  /** Starts counting the requests to an endpoint, to prove after the fact that none was sent. */
+  sentRequests: (method: HttpMethod, path: MockRoute['path']) => RequestCount;
   adminSession: AdminSession;
   /** Which list `adminList` opens, for specs that run the same case over every list. */
-  adminListName: keyof typeof ADMIN_LISTS;
+  adminListName: AdminListName;
   adminList: AdminListPage<unknown>;
   backOffice: MockedBackOffice;
   adminDashboard: AdminDashboardPage;
@@ -44,15 +60,6 @@ export interface AdminFixtures {
   adminWeeklySales: AdminSalesReportPage;
   adminSettings: AdminSettingsPage;
 }
-
-export const ADMIN_LISTS = {
-  products: { path: '/admin/products', heading: 'Products', searchLabel: 'Search products', addLink: 'Add Product', detail: (p: Page) => new AdminProductForm(p) },
-  brands: { path: '/admin/brands', heading: 'Brands', searchLabel: 'Search brands', addLink: 'Add Brand', detail: (p: Page) => new AdminBrandForm(p) },
-  categories: { path: '/admin/categories', heading: 'Categories', searchLabel: 'Search categories', addLink: 'Add Category', detail: (p: Page) => new AdminCategoryForm(p) },
-  orders: { path: '/admin/orders', heading: 'Order', searchLabel: 'Search orders', detail: (p: Page) => new AdminOrderPage(p) },
-  users: { path: '/admin/users', heading: 'Users', searchLabel: 'Search users', addLink: 'Add User', detail: (p: Page) => new AdminUserForm(p) },
-  messages: { path: '/admin/messages', heading: 'Messages', detail: (p: Page) => new AdminMessagePage(p) },
-} as const;
 
 /** Every admin endpoint the back office calls, answered with realistic records. */
 function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
@@ -108,19 +115,41 @@ function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
 
 export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
   adminSession: ['mocked', { option: true }],
-  adminToken: async ({ api }, use, testInfo) => {
-    testInfo.skip(!RUN_ADMIN_TESTS, ADMIN_SKIP_REASON);
+  // No runtime skip here: specs that need a real admin carry @admin, and the `admin` project that
+  // runs them is only scheduled where a real admin may be used (playwright.config.ts).
+  adminToken: async ({ api }, use) => {
     await use(await api.login(ADMIN_CREDENTIALS.email ?? '', ADMIN_CREDENTIALS.password ?? ''));
+  },
+  createdProducts: async ({ api, adminToken }, use) => {
+    const ids = new Set<string>();
+    await use({
+      track: (id) => {
+        if (!id) throw new Error('The create response carried no product id, so the product could not be cleaned up.');
+        ids.add(id);
+      },
+      forget: (id) => void ids.delete(id),
+    });
+    for (const id of ids) await api.deleteProduct(adminToken, id);
+  },
+  sentRequests: async ({ page }, use) => {
+    await use((method, path) => {
+      const seen = { count: 0 };
+      page.on('request', (request) => {
+        const pathname = apiPath(request.url());
+        if (request.method() === method && (typeof path === 'string' ? pathname === path : path.test(pathname))) seen.count++;
+      });
+      return seen;
+    });
   },
   adminListName: ['products', { option: true }],
 
-  backOffice: async ({ page, adminSession, apiMock, api, catalog }, use, testInfo) => {
+  backOffice: async ({ page, adminSession, apiMock, api, catalog }, use) => {
     if (adminSession === 'storage-state') {
-      testInfo.skip(!RUN_ADMIN_TESTS, ADMIN_SKIP_REASON);
       // The storageState from admin.setup.ts carries the session, but Toolshop's JWT lives 300 s
       // and cannot be refreshed (/users/refresh answers 500), so a fresh token is put in place.
       await installToken(page, await api.login(ADMIN_CREDENTIALS.email ?? '', ADMIN_CREDENTIALS.password ?? ''));
-      await use({ product: await catalog.inStock(), order: A.order(await catalog.inStock()) });
+      const product = await catalog.inStock();
+      await use({ product, order: A.order(product) });
       return;
     }
     const real = await catalog.inStock();
