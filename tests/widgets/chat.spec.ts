@@ -1,6 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
+import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 test.describe('Chat assistant', () => {
   test('opens with a greeting and a menu, and closes again', async ({ homePage }) => {
@@ -53,7 +54,9 @@ test.describe('Chat assistant', () => {
 
     await chat.backToMenu();
 
-    await expect(chat.reply('Hi! How can I help you today?')).toBeVisible();
+    // The assistant answers with the greeting and the menu again, below the first ones.
+    await expect(chat.greeting).toHaveCount(2);
+    await expect(chat.action('Find a product')).toBeVisible();
   });
 
   test.describe('a support ticket', { tag: ['@mocked'] }, () => {
@@ -61,24 +64,30 @@ test.describe('Chat assistant', () => {
 
     test('is collected question by question and sent as a message', async ({ homePage, apiMock }) => {
       const { chat } = homePage.shell;
+      const guest = fakeGuest();
       await chat.open();
       await chat.choose('Create support ticket');
       await expect(chat.reply("I'll help you create a support ticket. What is your first name?")).toBeVisible();
 
-      await chat.send('Testy');
+      await chat.send(guest.firstName);
       await expect(chat.reply('What is your last name?')).toBeVisible();
-      await chat.send('McTestface');
+      await chat.send(guest.lastName);
       await expect(chat.reply('What is your email address?')).toBeVisible();
-      await chat.send('testy.mctestface@example.com');
+      await chat.send(guest.email);
       await expect(chat.reply('Please select a subject for your ticket:')).toBeVisible();
       await chat.pick('Webmaster');
       await expect(chat.reply('Please describe your issue (minimum 50 characters):')).toBeVisible();
-      await chat.send('An automated qa-lab support ticket, long enough to be a real message.');
+      await chat.send(CONTACT_MESSAGE);
       await expect(chat.reply('Would you like to add an attachment?')).toBeVisible();
       const sent = apiMock.waitForRequest('POST', '/messages');
       await chat.pick('Skip');
 
-      expect((await sent).postDataJSON()).toMatchObject({ email: 'testy.mctestface@example.com', subject: 'webmaster' });
+      expect((await sent).postDataJSON()).toMatchObject({
+        name: `${guest.firstName} ${guest.lastName}`,
+        email: guest.email,
+        subject: 'webmaster',
+        message: CONTACT_MESSAGE,
+      });
     });
   });
 
@@ -105,7 +114,7 @@ test.describe('Chat assistant', () => {
 
       await chat.findProduct('hammer');
 
-      await expect(chat.reply(/could not|went wrong|error|try again later/i)).toBeVisible({ timeout: 5_000 });
+      await expect(chat.reply(/could not|went wrong|error|try again later/i), 'BUG-25: the assistant says the search failed').toBeVisible({ timeout: 5_000 });
     });
   });
 });

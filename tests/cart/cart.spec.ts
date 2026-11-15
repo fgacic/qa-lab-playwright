@@ -49,21 +49,33 @@ test.describe('Cart', () => {
     });
   });
 
-  test('a quantity of 0 is corrected to 1', { tag: ['@negative'] }, async ({ checkout, cartItems }) => {
+  test('a quantity of 0 is corrected to 1, also in the saved cart', { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
     const [{ product }] = cartItems;
 
-    await checkout.cart.table.setQuantity(product.name, 0);
+    const [saved] = await Promise.all([
+      apiMock.waitForResponse('PUT', /^\/carts\/[^/]+\/product\/quantity$/),
+      checkout.cart.table.setQuantity(product.name, 0),
+    ]);
 
+    expect(saved.response.status()).toBe(200);
+    await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('1');
+    await checkout.page.reload();
     await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('1');
   });
 
-  test('a quantity above 99 is capped at 99 with a warning', { tag: ['@negative'] }, async ({ checkout, cartItems }) => {
+  test('a quantity above 99 is capped at 99 with a warning, also in the saved cart', { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
     const [{ product }] = cartItems;
 
-    await checkout.cart.table.setQuantity(product.name, 150);
+    const [saved] = await Promise.all([
+      apiMock.waitForResponse('PUT', /^\/carts\/[^/]+\/product\/quantity$/),
+      checkout.cart.table.setQuantity(product.name, 150),
+    ]);
 
+    expect(saved.response.status()).toBe(200);
     await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('99');
     await expect(checkout.toast.message('You can order at most 99 of this product.').first()).toBeVisible();
+    await checkout.page.reload();
+    await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('99');
   });
 
   test('removing the last line empties the cart and the header link', async ({ checkout, cartItems }) => {
@@ -78,7 +90,7 @@ test.describe('Cart', () => {
     const row = checkout.cart.table.row(cartItems[0].product.name);
     await expect(row.removeButton).toBeVisible();
 
-    await expect(row.root.getByRole('button', { name: /remove|delete/i })).toBeVisible({ timeout: 2_000 });
+    await expect(row.root.getByRole('button', { name: /remove|delete/i }), 'A11Y-01: the remove control is a button with an accessible name').toBeVisible({ timeout: 2_000 });
   });
 
   test('Continue Shopping goes back to the shop', async ({ checkout, page }) => {
@@ -94,38 +106,60 @@ test.describe('Cart', () => {
     await expect(checkout.signIn.guestTab).toBeVisible();
   });
 
-  test.describe('with only an eco-friendly product', () => {
-    test.use({ cartItems: async ({ catalog }, use) => use([{ product: await catalog.eco(), quantity: 1 }]) });
+  /**
+   * Discounts are checked against a cart with fixed prices, so the expected figures are written
+   * out (5% of 80.00 is 4.00, 15% of 80.00 is 12.00) and not computed with the app's own rule.
+   * The 15% combination discount is the cart's own `additional_discount_percentage`; the page
+   * turns it into an amount, which is what is checked here.
+   */
+  const cartOf = (items: { name: string; price: number; quantity: number; eco?: boolean; rental?: boolean }[], additionalDiscountPercentage: number | null = null) =>
+    mock.respond('GET', /^\/carts\/[^/]+$/, {
+      id: 'qa-lab',
+      additional_discount_percentage: additionalDiscountPercentage,
+      lat: null,
+      lng: null,
+      cart_items: items.map((item, i) => ({
+        id: `qa-lab-line-${i}`,
+        quantity: item.quantity,
+        discount_percentage: null,
+        cart_id: 'qa-lab',
+        product_id: `qa-lab-product-${i}`,
+        product: {
+          id: `qa-lab-product-${i}`,
+          name: item.name,
+          description: 'A product with a fixed price.',
+          price: item.price,
+          is_location_offer: !!item.rental,
+          is_rental: !!item.rental,
+          co2_rating: item.eco ? 'A' : 'D',
+          in_stock: true,
+          is_eco_friendly: !!item.eco,
+        },
+      })),
+    });
 
-    test('a 5% eco-friendly discount comes off the subtotal', async ({ checkout, cartItems }) => {
-      const price = cartItems[0].product.price;
-      const discount = Math.round(price * 0.05 * 100) / 100;
+  test.describe('with only an eco-friendly product', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(cartOf([{ name: 'QA Lab Eco Saw', price: 80, quantity: 1, eco: true }])));
+
+    test('a 5% eco-friendly discount comes off the subtotal', async ({ checkout }) => {
       const { table } = checkout.cart;
 
-      await expect(table.subtotal).toShowAmount(price);
-      await expect(table.ecoDiscount).toShowAmount(-discount);
-      await expect(table.total).toShowAmount(price - discount);
+      await expect(table.subtotal).toShowAmount(80);
+      await expect(table.ecoDiscount).toShowAmount(-4);
+      await expect(table.total).toShowAmount(76);
     });
   });
 
-  test.describe('with a rental and a product', () => {
-    test.use({
-      cartItems: async ({ catalog }, use) =>
-        use([
-          { product: await catalog.rental(), quantity: 1 },
-          { product: await catalog.nonEco(), quantity: 1 },
-        ]),
-    });
+  test.describe('with a rental and a product', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(cartOf([{ name: 'QA Lab Rental Drill', price: 50, quantity: 1, rental: true }, { name: 'QA Lab Hammer', price: 30, quantity: 1 }], 15)));
 
-    test('a 15% combination discount applies and the rental is priced per hour', async ({ checkout, cartItems }) => {
-      const subtotal = cartItems.reduce((sum, i) => sum + i.product.price, 0);
-      const discount = Math.round(subtotal * 0.15 * 100) / 100;
+    test('a 15% combination discount applies and the rental is priced per hour', async ({ checkout }) => {
       const { table } = checkout.cart;
 
-      await expect(table.row(cartItems[0].product.name).root).toContainText('Item for rent, price per hour');
-      await expect(table.subtotal).toShowAmount(subtotal);
-      await expect(table.discount).toShowAmount(-discount);
-      await expect(table.total).toShowAmount(subtotal - discount);
+      await expect(table.row('QA Lab Rental Drill').root).toContainText('Item for rent, price per hour');
+      await expect(table.subtotal).toShowAmount(80);
+      await expect(table.discount).toShowAmount(-12);
+      await expect(table.total).toShowAmount(68);
     });
   });
 
@@ -136,7 +170,7 @@ test.describe('Cart', () => {
       knownBug('BUG-13', 'a visitor without a cart sees only the step header, not "The cart is empty".');
       await expect(checkout.wizard.indicator.steps).toHaveCount(4);
 
-      await expect(checkout.cart.emptyMessage).toBeVisible({ timeout: 5_000 });
+      await expect(checkout.cart.emptyMessage, 'BUG-13: a visitor without a cart is told the cart is empty').toBeVisible({ timeout: 5_000 });
     });
   });
 
@@ -156,7 +190,7 @@ test.describe('Cart', () => {
       knownBug('BUG-13', 'a failed cart request shows only the step header: no lines, no message.');
       await expect(checkout.wizard.indicator.steps).toHaveCount(4);
 
-      await expect(checkout.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(checkout.shell.errorAlert, 'BUG-13: a failed cart request is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 
@@ -170,7 +204,7 @@ test.describe('Cart', () => {
       await checkout.cart.table.setQuantity(product.name, 3);
 
       await expect(checkout.toast.message('Server Error')).toBeVisible();
-      await expect(checkout.cart.table.row(product.name).linePrice).toShowAmount(product.price, { timeout: 5_000 });
+      await expect(checkout.cart.table.row(product.name).linePrice, 'BUG-14: the line keeps the total of the saved quantity').toShowAmount(product.price, { timeout: 5_000 });
     });
   });
 
@@ -183,7 +217,7 @@ test.describe('Cart', () => {
       await checkout.cart.table.remove(cartItems[0].product.name);
 
       await expect(checkout.cart.table.rows).toHaveCount(1);
-      await expect(checkout.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(checkout.shell.errorAlert, 'BUG-15: a failed remove is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 });

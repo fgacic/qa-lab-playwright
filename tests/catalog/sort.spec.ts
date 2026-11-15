@@ -19,9 +19,10 @@ test.describe('Sorting', () => {
       await homePage.filters.sortBy(label);
 
       const { json: sorted } = await results;
+      expect(sorted.data).not.toHaveLength(0);
       expect(sorted.data.map(sortKey[field])).toBeSorted({ descending: direction === 'desc' });
       await expect(homePage.grid.names).toHaveText(sorted.data.map((p) => p.name));
-      if (field === 'price') expect(await homePage.grid.priceValues()).toBeSorted({ descending: direction === 'desc' });
+      if (field === 'price') await expect.poll(() => homePage.grid.priceValues()).toBeSorted({ descending: direction === 'desc' });
     });
   }
 });

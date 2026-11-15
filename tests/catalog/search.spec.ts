@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { apiPath } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
@@ -30,7 +31,8 @@ test.describe('Search', () => {
     await expect(homePage.grid.cards).toHaveCount(0);
   });
 
-  test('clearing the search restores the full catalogue', async ({ homePage }) => {
+  test('clearing the search restores the full catalogue', async ({ homePage, api }) => {
+    const { per_page: pageSize } = await api.listProducts();
     await homePage.search.searchFor('qa-lab-no-such-product');
     await expect(homePage.grid.emptyState).toBeVisible();
 
@@ -38,17 +40,19 @@ test.describe('Search', () => {
 
     await expect(homePage.search.query).toHaveValue('');
     await expect(homePage.search.caption).toBeHidden();
-    await expect(homePage.grid.cards).toHaveCount(9);
+    await expect(homePage.grid.cards).toHaveCount(pageSize);
   });
 
-  test('a long search term is searched or explained', { tag: ['@negative', '@bug'] }, async ({ homePage, apiMock }) => {
+  test('a long search term is searched or explained', { tag: ['@negative', '@bug'] }, async ({ homePage }) => {
     knownBug('BUG-27', 'a search term over 40 characters is silently ignored: no request, no message.');
     const term = 'qa lab search term longer than forty chars';
-    const searched = apiMock.waitForRequest('QUERY', '/products/search');
+    const searched = homePage.page.waitForRequest((r) => r.method() === 'QUERY' && apiPath(r.url()) === '/products/search', { timeout: 3_000 });
     await homePage.search.query.fill(term);
     await homePage.search.submitButton.click();
 
-    await Promise.race([searched, homePage.page.waitForTimeout(3_000).then(() => Promise.reject(new Error('no search request was sent')))]);
+    const wasSearched = await searched.then(() => true, () => false);
+    const wasExplained = await homePage.shell.errorAlert.isVisible();
+    expect(wasSearched || wasExplained, 'BUG-27: a long term is searched, or the shopper is told why not').toBe(true);
   });
 
   test.describe('when the search API answers with no products', { tag: ['@mocked'] }, () => {
@@ -70,7 +74,7 @@ test.describe('Search', () => {
       await homePage.search.searchFor('hammer');
       await expect(homePage.search.caption).toHaveText('Searched for: hammer');
 
-      await expect(homePage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(homePage.shell.errorAlert, 'BUG-03: a failed search is reported as a failure').toBeVisible({ timeout: 5_000 });
     });
   });
 });

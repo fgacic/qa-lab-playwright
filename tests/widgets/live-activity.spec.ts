@@ -11,6 +11,8 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
       await expect(liveActivity.window).toBeVisible();
+      await expect(liveActivity.emptyState).toBeVisible();
+      await expect(liveActivity.items).toHaveCount(0);
       await expect(liveActivity.salesCount).toHaveText('0');
       await expect(liveActivity.revenue).toHaveText('$0.00');
 

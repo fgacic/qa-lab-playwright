@@ -4,8 +4,9 @@ import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
 test.describe('Pagination', () => {
-  test('Next shows the following page of products', async ({ homePage, apiMock }) => {
-    await expect(homePage.grid.cards).toHaveCount(9);
+  test('Next shows the following page of products', async ({ homePage, api, apiMock }) => {
+    const { per_page: pageSize } = await api.listProducts();
+    await expect(homePage.grid.cards).toHaveCount(pageSize);
     const pageTwo = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === '2');
 
     await homePage.pagination.goNext();
@@ -32,7 +33,7 @@ test.describe('Pagination', () => {
     await expect(homePage.grid.names).toHaveText((await pageThree).json.data.map((p) => p.name));
   });
 
-  test('the last page button shows the last page and leaves nothing after it', { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
+  test('the last page button shows the last page of products', { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
     const { pagination } = homePage;
     const lastPage = await pagination.pageCount();
     const last = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === String(lastPage));
@@ -47,9 +48,11 @@ test.describe('Pagination', () => {
   test('Previous on page 1 and Next on the last page are disabled for assistive tech too', { tag: ['@negative', '@a11y', '@bug'] }, async ({ homePage }) => {
     knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
     const { pagination } = homePage;
-    await expect(pagination.page(1)).toBeVisible();
+    const lastPage = await pagination.pageCount();
 
-    await expect(pagination.previous).toBeDisabled({ timeout: 5_000 });
+    await expect(pagination.previous, 'A11Y-03: Previous is disabled on page 1').toBeDisabled({ timeout: 5_000 });
+    await pagination.goTo(lastPage);
+    await expect(pagination.next, 'A11Y-03: Next is disabled on the last page').toBeDisabled({ timeout: 5_000 });
   });
 
   test.describe('when everything fits on one page', { tag: ['@mocked'] }, () => {

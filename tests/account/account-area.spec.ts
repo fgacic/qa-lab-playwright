@@ -1,11 +1,16 @@
+import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { fakeFavorite, fakeInvoice, fakeMessage, fakeUser, page as paged } from '@support/payloads';
+import { apiPath } from '@support/env';
+import { FAVORITE_ID, INVOICE_NUMBER, fakeFavorite, fakeInvoice, fakeMessage, fakeReply, fakeUser, page as paged } from '@support/payloads';
 
 /**
  * The signed-in area with a mocked session: a fake token and mocked account endpoints, so it
  * runs anywhere without an account. The real thing is covered in real-account.spec.ts.
  */
+const changePasswordRequests = async (page: Page) =>
+  (await page.requests()).filter((r) => r.method() === 'POST' && apiPath(r.url()) === '/users/change-password');
+
 test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   // An account with nothing in it. Any section the SPA opens needs its endpoint mocked: a real
   // 401 makes the SPA drop the session and redirect to login. Nested blocks replace this set.
@@ -40,7 +45,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
     await expect(page).toHaveURL('/auth/login');
     await expect(accountPage.header.userMenu).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('auth-token'))).toBeNull();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('auth-token')), { message: 'the stored token is gone' }).toBeNull();
   });
 
   test.describe('favorites', () => {
@@ -51,12 +56,14 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       },
     });
 
-    test('lists the favourite products and removes one', async ({ favoritesPage, catalog }) => {
+    test('lists the favourite products and removes one', async ({ favoritesPage, catalog, apiMock }) => {
       const product = await catalog.inStock();
       await expect(favoritesPage.favorite(product.name)).toBeVisible();
 
+      const removal = apiMock.waitForRequest('DELETE', /^\/favorites\/.+$/);
       await favoritesPage.remove(product.name);
 
+      expect(apiPath((await removal).url())).toBe(`/favorites/${FAVORITE_ID}`);
       await expect(favoritesPage.favorites).toHaveCount(0);
       await expect(favoritesPage.emptyState).toBeVisible();
     });
@@ -77,7 +84,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       knownBug('BUG-23', 'a failed favorites request says "There are no favorites yet", which is not true.');
       await expect(favoritesPage.title).toBeVisible();
 
-      await expect(favoritesPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(favoritesPage.shell.errorAlert, 'BUG-23: the customer is told the favorites could not be loaded').toBeVisible({ timeout: 5_000 });
     });
   });
 
@@ -91,12 +98,12 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
     test('lists the orders and opens one with its lines', async ({ invoicesPage, catalog }) => {
       const product = await catalog.inStock();
-      await expect(invoicesPage.invoice('INV-2026999999')).toContainText('$' + (product.price * 2).toFixed(2));
+      await expect(invoicesPage.invoice(INVOICE_NUMBER)).toContainText('$' + (product.price * 2).toFixed(2));
 
-      const details = await invoicesPage.openDetails('INV-2026999999');
+      const details = await invoicesPage.openDetails(INVOICE_NUMBER);
 
       await expect(details.downloadPdfButton).toBeVisible();
-      await expect(details.productLines.filter({ hasText: product.name })).toContainText('2');
+      await expect(details.productLines.filter({ hasText: product.name }).getByRole('cell').first()).toHaveText('2');
     });
   });
 
@@ -107,12 +114,17 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       knownBug('BUG-24', 'a failed invoices request shows the bare page title, no table and no message.');
       await expect(invoicesPage.title).toBeVisible();
 
-      await expect(invoicesPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(invoicesPage.shell.errorAlert, 'BUG-24: the customer is told the invoices could not be loaded').toBeVisible({ timeout: 5_000 });
     });
   });
 
   test.describe('messages', () => {
-    test.use(withMocks(mock.respond('GET', '/messages', paged([fakeMessage])), mock.respond('GET', `/messages/${fakeMessage.id}`, fakeMessage)));
+    const REPLY = 'A mocked reply from the qa-lab suite.';
+    // The page reloads the message after a reply, so the second answer lists it.
+    test.use(withMocks(
+      mock.respond('GET', '/messages', paged([fakeMessage])),
+      mock.sequence('GET', `/messages/${fakeMessage.id}`, { status: 200, json: fakeMessage }, { status: 200, json: { ...fakeMessage, replies: [fakeReply(REPLY)] } }),
+    ));
 
     test('lists the contact messages, opens one and replies to it', async ({ messagesPage, apiMock }) => {
       await apiMock.use(mock.respond('POST', `/messages/${fakeMessage.id}/reply`, { id: '01QALABFAKEREPLY', message: 'ok' }, 201));
@@ -123,8 +135,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect(details.repliesHeading).toBeVisible();
 
       const reply = apiMock.waitForRequest('POST', `/messages/${fakeMessage.id}/reply`);
-      await details.sendReply('A mocked reply from the qa-lab suite.');
-      expect((await reply).postDataJSON()).toEqual({ message: 'A mocked reply from the qa-lab suite.' });
+      await details.sendReply(REPLY);
+
+      expect((await reply).postDataJSON()).toEqual({ message: REPLY });
+      await expect(details.text(REPLY)).toBeVisible();
+      await expect(details.reply).toHaveValue('');
     });
   });
 
@@ -157,6 +172,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await profilePage.update();
 
       expect((await saved).postDataJSON()).toMatchObject({ first_name: 'Renamed', last_name: fakeUser.last_name });
+      await expect(profilePage.alerts.filter({ hasText: 'Your profile is successfully updated!' })).toBeVisible();
     });
 
     test('changing the password sends the current and the new one', async ({ profilePage, apiMock }) => {
@@ -171,15 +187,14 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       });
     });
 
-    test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
+    test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, page }) => {
       knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.');
-      const sent = apiMock.waitForRequest('POST', '/users/change-password');
+      await expect(profilePage.changePasswordButton).toBeVisible();
 
       await profilePage.changePasswordButton.click();
 
-      // It is sent (the defect), where the form should have said what is missing.
-      await sent;
-      await expect(profilePage.alerts.filter({ hasText: /required/i }).first()).toBeVisible({ timeout: 2_000 });
+      await expect(profilePage.alerts.filter({ hasText: /required/i }).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: 2_000 });
+      expect(await changePasswordRequests(page), 'BUG-26: no request is sent').toHaveLength(0);
     });
   });
 
@@ -188,6 +203,6 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     await accountPage.header.userMenu.click();
     await expect(accountPage.header.userMenuItem('Sign out')).toBeVisible();
 
-    await expect(accountPage.header.signOutControl).toBeVisible({ timeout: 2_000 });
+    await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toBeVisible({ timeout: 2_000 });
   });
 });

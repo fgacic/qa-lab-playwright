@@ -51,20 +51,39 @@ test.describe('Contact form', () => {
     await expect(contactPage.attachment.error).toHaveText('File should have a txt extension.');
   });
 
-  test('a complete message is sent and acknowledged', { tag: ['@smoke', '@flow'] }, async ({ contactPage, apiMock }) => {
+  const sentBody = (contact: ContactMessage) => ({
+    name: `${contact.from.firstName} ${contact.from.lastName}`,
+    email: contact.from.email,
+    subject: 'customer-service',
+    message: contact.message,
+  });
+
+  // The real submission lands in the shop's inbox, so it runs on our own Toolshop only.
+  test('a complete message is sent and acknowledged', { tag: ['@smoke', '@flow', '@self-hosted'] }, async ({ contactPage, apiMock }) => {
     const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
     const sent = apiMock.waitForRequest('POST', '/messages');
 
     await contactPage.send(contact);
 
-    expect((await sent).postDataJSON()).toMatchObject({
-      name: `${contact.from.firstName} ${contact.from.lastName}`,
-      email: contact.from.email,
-      subject: 'customer-service',
-      message: contact.message,
-    });
+    expect((await sent).postDataJSON()).toMatchObject(sentBody(contact));
     await expect(contactPage.successMessage).toBeVisible();
     await expect(contactPage.sendButton).toBeHidden();
+  });
+
+  test.describe('when the API accepts the message', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(mock.respond('POST', '/messages', { id: '01QALABFAKEMESSAGE0000000', status: 'NEW' }, 201)));
+
+    // The same journey with the write answered by a mock, so it also runs on the public site.
+    test('a complete message is sent and acknowledged', { tag: ['@smoke', '@flow'] }, async ({ contactPage, apiMock }) => {
+      const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
+      const sent = apiMock.waitForRequest('POST', '/messages');
+
+      await contactPage.send(contact);
+
+      expect((await sent).postDataJSON()).toMatchObject(sentBody(contact));
+      await expect(contactPage.successMessage).toBeVisible();
+      await expect(contactPage.sendButton).toBeHidden();
+    });
   });
 
   test.describe('when sending fails', { tag: ['@mocked'] }, () => {
@@ -84,9 +103,10 @@ test.describe('Contact form', () => {
     test('the validation message is readable', async ({ contactPage }) => {
       knownBug('BUG-21', 'a 422 from POST /messages is shown as "The given data was invalid. [object Object]".');
       await contactPage.send(message());
-      await expect(contactPage.statusMessage(/The given data was invalid/)).toBeVisible();
+      const reason = contactPage.statusMessage(/The given data was invalid/);
+      await expect(reason).toBeVisible();
 
-      await expect(contactPage.statusMessage(/\[object Object\]/)).toBeHidden({ timeout: 2_000 });
+      await expect(reason, 'BUG-21: the validation detail is readable').not.toContainText('[object Object]', { timeout: 2_000 });
     });
   });
 
@@ -98,7 +118,7 @@ test.describe('Contact form', () => {
       await contactPage.send(message());
       await expect(contactPage.sendButton).toBeVisible();
 
-      await expect(contactPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(contactPage.shell.errorAlert, 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
     });
   });
 });

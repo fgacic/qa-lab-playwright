@@ -1,7 +1,25 @@
+import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
+
+/**
+ * Every one-dollar step of the price slider sends its own QUERY /products, and the shop shows
+ * whichever answer arrives last (BUG-30). The slider tests below are about the filter, not that
+ * race, so they let the answers through in the order they were asked for: each one waits until
+ * the previous has been delivered. The race itself is pinned on its own, with a forced delay.
+ */
+async function answerProductQueriesInOrder(page: Page): Promise<void> {
+  let previous: Promise<unknown> = Promise.resolve();
+  await page.route(/\/products$/, async (route) => {
+    if (route.request().method() !== 'QUERY') return route.fallback();
+    const response = route.fetch();
+    const turn = previous.then(() => response).then((fetched) => route.fulfill({ response: fetched }));
+    previous = turn.catch(() => undefined);
+    await turn;
+  });
+}
 
 /**
  * Filtering happens on the server: every change re-sends QUERY /products with the filter in
@@ -16,6 +34,7 @@ test.describe('Product filters', () => {
 
     const { body, json: found } = await results;
     expect(body.by_category.split(',')).toHaveLength(1);
+    expect(found.total, 'the catalogue should contain pliers').toBeGreaterThan(0);
     expect(found.data.map((p) => p.category.name)).toEqual(found.data.map(() => 'Pliers'));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
@@ -74,24 +93,49 @@ test.describe('Product filters', () => {
     await expect(homePage.grid.names).toHaveText(all.data.map((p) => p.name));
   });
 
-  test('the price slider hides products above the maximum', async ({ homePage, apiMock }) => {
+  test('the price slider hides products above the maximum', async ({ homePage, apiMock, page }) => {
+    await answerProductQueriesInOrder(page);
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === 'price,1,20');
 
     await homePage.filters.setMaxPrice(20);
 
     const { json: found } = await results;
+    expect(found.total, 'the catalogue should contain products up to $20').toBeGreaterThan(0);
+    expect(found.data.every((p) => p.price <= 20)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
-    for (const price of await homePage.grid.priceValues()) expect(price).toBeLessThanOrEqual(20);
+    await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
   });
 
-  test('the price slider hides products below the minimum', async ({ homePage, apiMock }) => {
+  test('the price slider hides products below the minimum', async ({ homePage, apiMock, page }) => {
+    await answerProductQueriesInOrder(page);
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === 'price,15,100');
 
     await homePage.filters.setMinPrice(15);
 
     const { json: found } = await results;
+    expect(found.total, 'the catalogue should contain products from $15').toBeGreaterThan(0);
+    expect(found.data.every((p) => p.price >= 15)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
-    for (const price of await homePage.grid.priceValues()) expect(price).toBeGreaterThanOrEqual(15);
+    await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
+  });
+
+  test('the grid shows the last price step, even when an earlier answer arrives late', { tag: ['@bug'] }, async ({ homePage, apiMock, page }) => {
+    knownBug('BUG-30', 'each slider step sends its own request and the grid shows whichever answer arrives last, so a slow answer for an earlier step replaces the final filter.');
+    // The answer for $14 is held back until after the one for $15, as a slow network can do.
+    await page.route(/\/products$/, async (route) => {
+      if (route.request().method() === 'QUERY' && route.request().postDataJSON()?.between === 'price,14,100') {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+      await route.fallback();
+    });
+    const late = apiMock.waitForResponse('QUERY', '/products', (body) => body.between === 'price,14,100');
+    const final = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === 'price,15,100');
+
+    await homePage.filters.setMinPrice(15);
+
+    const { json: wanted } = await final;
+    await late;
+    await expect(homePage.grid.names, 'BUG-30: the grid shows the answer for the last step ($15 and up)').toHaveText(wanted.data.map((p) => p.name), { timeout: 3_000 });
   });
 
   test.describe('when the product list comes back empty', { tag: ['@mocked'] }, () => {
@@ -112,7 +156,7 @@ test.describe('Product filters', () => {
         knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.');
         await expect(homePage.filters.sort).toBeVisible();
 
-        await expect(homePage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+        await expect(homePage.shell.errorAlert, 'BUG-04: a failed product list is reported').toBeVisible({ timeout: 5_000 });
       });
     });
   }
@@ -120,7 +164,13 @@ test.describe('Product filters', () => {
   test.describe('when categories and brands come back empty', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('GET', '/categories/tree', []), mock.respond('GET', '/brands', [])));
 
-    test('the filter groups render without options', async ({ homePage }) => {
+    test('the filter groups render without options', async ({ homePage, apiMock }) => {
+      // Reload with the answers awaited: an empty group only means something once the data has arrived.
+      await Promise.all([
+        apiMock.waitForResponse('GET', '/categories/tree'),
+        apiMock.waitForResponse('GET', '/brands'),
+        homePage.page.reload({ waitUntil: 'domcontentloaded' }),
+      ]);
       await expect(homePage.grid.cards.first()).toBeVisible();
       await expect(homePage.filters.categories.getByRole('checkbox')).toHaveCount(0);
       await expect(homePage.filters.brands.getByRole('checkbox')).toHaveCount(0);
@@ -135,7 +185,7 @@ test.describe('Product filters', () => {
       knownBug('BUG-05', 'failed category and brand requests leave empty filter groups with no message.');
       await expect(homePage.grid.cards.first()).toBeVisible();
 
-      await expect(homePage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(homePage.shell.errorAlert, 'BUG-05: failed category and brand requests are reported').toBeVisible({ timeout: 5_000 });
     });
   });
 });

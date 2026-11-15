@@ -1,7 +1,6 @@
 import { PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { IS_SELF_HOSTED } from '@support/env';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
@@ -44,17 +43,24 @@ test.describe('Checkout: payment step', () => {
     await expect(checkout.payment.confirmButton).toBeEnabled();
   });
 
-  test('Buy Now Pay Later can be checked once an instalment plan is chosen', async ({ checkout }) => {
+  test('Buy Now Pay Later offers instalment plans of 3, 6, 9 and 12 months', async ({ checkout }) => {
     const { payment } = checkout;
     await payment.choose('buy-now-pay-later');
-    // The pinned build enables the check before a plan is chosen; the live deployment does not.
-    if (IS_SELF_HOSTED) knownBug('BUG-29', 'Buy Now Pay Later: "Check payment" is enabled before an instalment plan is chosen, and checking then answers "Unknown error" (self-hosted build; live disables it).');
-    await expect(payment.checkPaymentButton).toBeDisabled({ timeout: 5_000 });
 
     await payment.field('Monthly Installments').selectOption('6');
 
     await expect(payment.checkPaymentButton).toBeEnabled();
     await expect(payment.field('Monthly Installments').getByRole('option')).toHaveText(['Choose your monthly installments', '3 Monthly Installments', '6 Monthly Installments', '9 Monthly Installments', '12 Monthly Installments']);
+  });
+
+  // The pinned build enables the check before a plan is chosen; the live deployment does not,
+  // so the pin is scheduled on the self-hosted target only.
+  test('Buy Now Pay Later cannot be checked before an instalment plan is chosen', { tag: ['@negative', '@bug', '@self-hosted'] }, async ({ checkout }) => {
+    knownBug('BUG-29', 'Buy Now Pay Later: "Check payment" is enabled before an instalment plan is chosen, and checking then answers "Unknown error" (self-hosted build; live disables it).');
+    await checkout.payment.choose('buy-now-pay-later');
+    await expect(checkout.payment.field('Monthly Installments')).toHaveValue('');
+
+    await expect(checkout.payment.checkPaymentButton, 'BUG-29: Check payment stays disabled until a plan is chosen').toBeDisabled({ timeout: 5_000 });
   });
 
   const junk = {
@@ -89,11 +95,12 @@ test.describe('Checkout: payment step', () => {
     await checkout.payment.choose('credit-card');
     await expect(checkout.payment.field('Credit Card Number')).toBeEmpty();
 
-    await expect(checkout.payment.checkPaymentButton).toBeDisabled({ timeout: 5_000 });
+    await expect(checkout.payment.checkPaymentButton, 'BUG-16: Check payment stays disabled while every card field is empty').toBeDisabled({ timeout: 5_000 });
   });
 
   test.describe('when the payment check is declined', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('POST', '/payment/check', 400, { error: 'Payment declined' })));
+    test.beforeEach(({ apiMock }) => apiMock.blockUnmockedWrites());
 
     test('the reason is shown and the order cannot be confirmed', async ({ checkout }) => {
       await checkout.payment.choose('cash-on-delivery');
@@ -106,6 +113,7 @@ test.describe('Checkout: payment step', () => {
 
   test.describe('when the payment check fails', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('POST', '/payment/check', 500)));
+    test.beforeEach(({ apiMock }) => apiMock.blockUnmockedWrites());
 
     test('a generic error is shown and the order cannot be confirmed', async ({ checkout }) => {
       await checkout.payment.choose('cash-on-delivery');
@@ -122,14 +130,17 @@ test.describe('Checkout: payment step', () => {
   ];
   for (const { status, json } of orderFailures) {
     test.describe(`when placing the order answers ${status}`, { tag: ['@mocked', '@bug'] }, () => {
-      test.use(withMocks(mock.fail('POST', '/invoices/guest', status, json)));
+      // The check is answered by the mock and so is the order (refused): no real write can happen.
+      test.use(withMocks(mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.fail('POST', '/invoices/guest', status, json)));
+      test.beforeEach(({ apiMock }) => apiMock.blockUnmockedWrites());
 
-      test('the shopper is told the order was not placed', async ({ checkout }) => {
+      test('the shopper is told the order was not placed', async ({ checkout, apiMock }) => {
         knownBug('BUG-17', 'a rejected order leaves "Payment was successful" on screen with no error, so the shopper cannot tell it failed.');
         await checkout.payment.payWith('cash-on-delivery');
-        await expect(checkout.wizard.confirmation).toBeHidden();
+        expect(apiMock.blockedWrites, 'a write no mock answers (a gap in the mocks)').toEqual([]);
 
-        await expect(checkout.shell.errorAlert.or(checkout.payment.errorMessage)).toBeVisible({ timeout: 5_000 });
+        await expect(checkout.wizard.confirmation, 'BUG-17: a rejected order is not confirmed').toBeHidden();
+        await expect(checkout.shell.errorAlert.or(checkout.payment.errorMessage), 'BUG-17: the shopper is told the order failed').toBeVisible({ timeout: 5_000 });
       });
     });
   }

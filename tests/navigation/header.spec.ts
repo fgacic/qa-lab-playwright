@@ -56,6 +56,7 @@ test.describe('Header navigation', () => {
       await expect(checkout.header.cartLink).toHaveText('2');
 
       await checkout.header.goHomeViaLogo();
+      await expect(page).toHaveURL('/');
       await checkout.header.openCart();
 
       await expect(page).toHaveURL('/checkout');

@@ -31,15 +31,15 @@ test.describe('Registration form', () => {
   });
 
   const invalid = [
-    { field: 'dateOfBirth', value: '01/01/1990', message: 'Please enter a valid date in YYYY-MM-DD format.' },
-    { field: 'dateOfBirth', value: '2020-13-45', message: 'Please enter a valid date in YYYY-MM-DD format.' },
-    { field: 'phone', value: 'abc', message: 'Only numbers are allowed.' },
-    { field: 'email', value: 'not-an-email', message: 'Email format is invalid' },
-    { field: 'password', value: 'a', message: 'Password must be minimal 6 characters long. Password can not include invalid characters.' },
+    { field: 'dateOfBirth', label: 'date of birth', value: '01/01/1990', message: 'Please enter a valid date in YYYY-MM-DD format.' },
+    { field: 'dateOfBirth', label: 'date of birth', value: '2020-13-45', message: 'Please enter a valid date in YYYY-MM-DD format.' },
+    { field: 'phone', label: 'phone number', value: 'abc', message: 'Only numbers are allowed.' },
+    { field: 'email', label: 'email', value: 'not-an-email', message: 'Email format is invalid' },
+    { field: 'password', label: 'password', value: 'a', message: 'Password must be minimal 6 characters long. Password can not include invalid characters.' },
   ] as const;
 
-  for (const { field, value, message } of invalid) {
-    test(`${field} "${value}" is rejected`, { tag: ['@negative'] }, async ({ registerPage }) => {
+  for (const { field, label, value, message } of invalid) {
+    test(`a ${label} of "${value}" is rejected`, { tag: ['@negative'] }, async ({ registerPage }) => {
       await registerPage[field].input.fill(value);
       await registerPage.submit();
 
@@ -53,7 +53,7 @@ test.describe('Registration form', () => {
     await registerPage.submit();
     await expect(registerPage.firstName.error).toBeVisible();
 
-    await expect(registerPage.dateOfBirth.error).toBeVisible({ timeout: 5_000 });
+    await expect(registerPage.dateOfBirth.error, 'BUG-18: a future birth date is flagged').toBeVisible({ timeout: 5_000 });
   });
 
   test('the form lists the password rules and can reveal the password', async ({ registerPage }) => {

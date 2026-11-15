@@ -13,7 +13,7 @@ test.describe('Forgot password', () => {
     await forgotPasswordPage.requestReset('not-an-email');
     await expect(forgotPasswordPage.email.error).toBeAttached();
 
-    await expect(forgotPasswordPage.email.error).toHaveText('Email format is invalid', { timeout: 5_000 });
+    await expect(forgotPasswordPage.email.error, 'BUG-19: the email error names the problem').toHaveText('Email format is invalid', { timeout: 5_000 });
   });
 
   test('an unknown email is refused', { tag: ['@negative'] }, async ({ forgotPasswordPage }) => {
@@ -30,7 +30,7 @@ test.describe('Forgot password', () => {
       await forgotPasswordPage.requestReset('testy.mctestface@example.com');
 
       // The message fades out after three seconds, hence the short timeout.
-      await expect(forgotPasswordPage.statusMessage(/sent|check your (e-)?mail|instructions/i)).toBeVisible({ timeout: 2_500 });
+      await expect(forgotPasswordPage.statusMessage(/sent|check your (e-)?mail|instructions/i), 'BUG-20: the confirmation is readable').toBeVisible({ timeout: 2_500 });
     });
   });
 

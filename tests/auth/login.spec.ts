@@ -1,5 +1,7 @@
+import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
+import { apiPath } from '@support/env';
 import { fakeJwt, fakeUser } from '@support/payloads';
 
 /**
@@ -7,6 +9,9 @@ import { fakeJwt, fakeUser } from '@support/payloads';
  * Successful sign-ins are mocked end to end: no real account is touched.
  */
 test.describe('Login', () => {
+  const loginRequests = async (page: Page) =>
+    (await page.requests()).filter((r) => r.method() === 'POST' && apiPath(r.url()) === '/users/login');
+
   test('an empty form shows both required labels', { tag: ['@negative'] }, async ({ loginPage }) => {
     await loginPage.loginButton.click();
 
@@ -15,14 +20,12 @@ test.describe('Login', () => {
   });
 
   test('a malformed email and a too-short password are rejected before sending', { tag: ['@negative'] }, async ({ loginPage, page }) => {
-    let sent = false;
-    page.on('request', (r) => { if (r.url().endsWith('/users/login')) sent = true; });
-
     await loginPage.login('not-an-email', 'x');
 
     await expect(loginPage.email.error).toHaveText('Email format is invalid');
     await expect(loginPage.password.error).toHaveText('Password length is invalid');
-    expect(sent, 'invalid input must not reach the API').toBe(false);
+    // The labels show once the form has validated; any request would have left in the same click.
+    await expect.poll(async () => (await loginRequests(page)).length, { message: 'invalid input must not reach the API', timeout: 1_000 }).toBe(0);
   });
 
   test('unknown credentials are refused', { tag: ['@negative', '@smoke'] }, async ({ loginPage, page }) => {
@@ -105,7 +108,7 @@ test.describe('Login', () => {
     knownBug('A11Y-02', 'the eye button that shows the password has no accessible name (login, register, profile).');
     await expect(loginPage.showPasswordButton).toBeVisible();
 
-    await expect(loginPage.showPasswordButton).toHaveAccessibleName(/show|hide|password/i, { timeout: 2_000 });
+    await expect(loginPage.showPasswordButton, 'A11Y-02: the eye button has an accessible name').toHaveAccessibleName(/show|hide|password/i, { timeout: 2_000 });
   });
 
   test.describe('when the account is locked', { tag: ['@mocked'] }, () => {

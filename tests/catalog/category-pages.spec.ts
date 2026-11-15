@@ -40,7 +40,7 @@ test.describe('Category pages', () => {
     await expect(categoryPage.title).toHaveText(/^Category: Qa.lab.unknown$/i);
     await expect(categoryPage.grid.emptyState).toBeVisible();
 
-    await expect(categoryPage.notFoundMessage).toBeVisible({ timeout: 5_000 });
+    await expect(categoryPage.notFoundMessage, 'BUG-06: an unknown category says it does not exist').toBeVisible({ timeout: 5_000 });
   });
 
   test.describe('when the category products fail to load', { tag: ['@mocked', '@bug'] }, () => {
@@ -51,7 +51,7 @@ test.describe('Category pages', () => {
       await categoryPage.open('hand-tools');
       await expect(categoryPage.title).toHaveText('Category: Hand Tools');
 
-      await expect(categoryPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(categoryPage.shell.errorAlert, 'BUG-04: a failed product list is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 });

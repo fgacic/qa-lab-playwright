@@ -3,6 +3,8 @@ import { expect, test } from '@fixtures';
 /**
  * External links are checked by their href, target and rel rather than followed: following
  * them would test someone else's site, and a new tab would only prove the browser works.
+ * The documentation link has no rel: not pinned as a bug, because every current browser
+ * treats target=_blank as noopener already.
  */
 test.describe('Banners and footer', () => {
   test('the notification bar links to the documentation in a new tab', async ({ homePage }) => {
@@ -12,11 +14,12 @@ test.describe('Banners and footer', () => {
     await expect(link).toHaveAttribute('target', '_blank');
   });
 
-  test('the course promo links to the courses with campaign tracking', async ({ homePage }) => {
+  test('the course promo links to the courses with campaign tracking, without an opener', async ({ homePage }) => {
     const link = homePage.shell.banners.coursePromoLink;
 
     await expect(link).toHaveAttribute('href', /^https:\/\/onlinecourses\.testsmith\.io\/\?utm_source=pst&utm_medium=homepage&utm_campaign=app_promo$/);
     await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', /noopener/);
   });
 
   const footerLinks = [

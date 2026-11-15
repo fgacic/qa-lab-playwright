@@ -20,10 +20,7 @@ test.describe('Product comparison', () => {
     const comparison = await homePage.openComparison();
 
     await expect(page).toHaveURL('/comparison');
-    await expect(comparison.productColumns).toHaveText([
-      new RegExp(first),
-      new RegExp(second),
-    ]);
+    await expect(comparison.productColumns).toContainText([first, second]);
   });
 
   test('pressing Compare again takes a product back out', async ({ homePage }) => {
@@ -61,7 +58,7 @@ test.describe('Product comparison', () => {
 
     // The product page gives no feedback of its own (no bar, no toast), so check where it went.
     const comparison = await productPage.openComparison();
-    await expect(comparison.productColumns).toHaveText([new RegExp(product.name)]);
+    await expect(comparison.productColumns).toContainText([product.name]);
   });
 
   test.describe('on the comparison page', () => {
@@ -112,7 +109,7 @@ test.describe('Product comparison', () => {
 
       await comparisonPage.showDifferencesOnly.check();
 
-      await expect(comparisonPage.row('Brand')).toBeHidden({ timeout: 5_000 });
+      await expect(comparisonPage.row('Brand'), 'BUG-12: "Show differences only" hides the rows where both products agree').toBeHidden({ timeout: 5_000 });
     });
   });
 
@@ -145,8 +142,8 @@ test.describe('Product comparison', () => {
       knownBug('BUG-09', 'a failed comparison request says "No products selected", although one is.');
       await expect(comparisonPage.title).toBeVisible();
 
-      await expect(comparisonPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
-      await expect(comparisonPage.emptyState).toBeHidden();
+      await expect(comparisonPage.shell.errorAlert, 'BUG-09: a failed comparison request is reported').toBeVisible({ timeout: 5_000 });
+      await expect(comparisonPage.emptyState, 'BUG-09: a failed comparison is not shown as an empty one').toBeHidden();
     });
   });
 });

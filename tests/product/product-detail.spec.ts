@@ -32,6 +32,7 @@ test.describe('Product detail', () => {
     { typed: '0', clampedTo: '1' },
     { typed: '', clampedTo: '1' },
     { typed: '2.5', clampedTo: '2' },
+    { typed: '-1', clampedTo: '1' },
   ]) {
     test(`a typed quantity of "${typed}" is corrected to ${clampedTo}`, { tag: ['@negative'] }, async ({ productPage }) => {
       await productPage.typeQuantity(typed);
@@ -57,11 +58,12 @@ test.describe('Product detail', () => {
     await expect(productPage.header.cartLink).toHaveText('3');
   });
 
-  test('adding to favourites while signed out is refused', { tag: ['@negative'] }, async ({ productPage, page }) => {
+  test('adding to favourites while signed out is refused', { tag: ['@negative'] }, async ({ productPage, product, page }) => {
     await productPage.addToFavourites();
 
     await expect(productPage.toast.message('Unauthorized, can not add product to your favorite list.')).toBeVisible();
-    await expect(page).toHaveURL(/\/product\//);
+    // No redirect to the login page: the shopper stays on the product.
+    await expect(page).toHaveURL(`/product/${product.id}`);
   });
 
   test('a related product opens its own page', async ({ productPage, product, page }) => {
@@ -97,7 +99,7 @@ test.describe('Product detail', () => {
   });
 
   test.describe('when signed in (mocked session)', { tag: ['@mocked'] }, () => {
-    test('adding to favourites confirms it', async ({ signedIn: _, productPage, apiMock }) => {
+    test('adding to favourites confirms it', async ({ signedInProductPage: productPage, apiMock }) => {
       await apiMock.use(mock.respond('POST', '/favorites', { id: '01QALABFAKEFAVORITE000000' }, 201));
 
       await productPage.addToFavourites();
@@ -105,7 +107,7 @@ test.describe('Product detail', () => {
       await expect(productPage.toast.message('Product added to your favorites list.')).toBeVisible();
     });
 
-    test('adding a product twice says it is already a favourite', { tag: ['@negative'] }, async ({ signedIn: _, productPage, apiMock }) => {
+    test('adding a product twice says it is already a favourite', { tag: ['@negative'] }, async ({ signedInProductPage: productPage, apiMock }) => {
       await apiMock.use(mock.fail('POST', '/favorites', 422, { message: 'Duplicate Entry' }));
 
       await productPage.addToFavourites();
@@ -132,14 +134,19 @@ test.describe('Product detail', () => {
       knownBug('BUG-10', 'when the cart request fails at network level, Add to cart does nothing at all: no toast, no error.');
       await productPage.addToCart();
 
-      await expect(productPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(productPage.shell.errorAlert, 'BUG-10: a failed add to cart is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 
   test.describe('when there are no related products', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('GET', /^\/products\/[^/]+\/related$/, [])));
 
-    test('the related section is empty', async ({ productPage }) => {
+    test('the related section is empty', async ({ productPage, apiMock }) => {
+      // Reload with the answer awaited: an empty section only means something once the data has arrived.
+      await Promise.all([
+        apiMock.waitForResponse('GET', /^\/products\/[^/]+\/related$/),
+        productPage.page.reload({ waitUntil: 'domcontentloaded' }),
+      ]);
       await expect(productPage.name).toBeVisible();
       await expect(productPage.relatedProducts).toHaveCount(0);
     });
@@ -153,7 +160,7 @@ test.describe('Product detail', () => {
         knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".');
         await expect(productPage.relatedHeading).toBeVisible();
 
-        await expect(productPage.shell.errorAlert.or(productPage.unavailableMessage)).toBeVisible({ timeout: 5_000 });
+        await expect(productPage.shell.errorAlert.or(productPage.unavailableMessage), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: 5_000 });
       });
     });
   }

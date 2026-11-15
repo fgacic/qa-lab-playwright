@@ -66,8 +66,10 @@ test.describe('Real account', { tag: ['@account'] }, () => {
       await checkout.payment.payWith('cash-on-delivery');
 
       await expect(checkout.wizard.confirmation).toBeVisible();
+      await expect(checkout.wizard.confirmation).toContainText(/INV-\d+/);
       const invoiceNumber = await checkout.wizard.invoiceNumber();
-      expect(await api.invoiceNumbers((await workerAccount.get()).token)).toContain(invoiceNumber);
+      const { token } = await workerAccount.get();
+      await expect.poll(() => api.invoiceNumbers(token), { message: `invoice ${invoiceNumber} is on the account` }).toContain(invoiceNumber);
     });
   });
 });

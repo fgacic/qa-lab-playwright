@@ -28,7 +28,7 @@ test.describe('Rentals', () => {
       knownBug('BUG-07', 'an empty rentals list shows only the heading, no empty-state message.');
       await expect(rentalsPage.title).toBeVisible();
 
-      await expect(rentalsPage.grid.emptyState).toBeVisible({ timeout: 5_000 });
+      await expect(rentalsPage.grid.emptyState, 'BUG-07: an empty rentals list shows an empty-state message').toBeVisible({ timeout: 5_000 });
     });
   });
 
@@ -38,8 +38,8 @@ test.describe('Rentals', () => {
     test('the page still renders and explains the failure', async ({ rentalsPage }) => {
       knownBug('BUG-08', 'a failed rentals request blanks the whole page, heading included.');
 
-      await expect(rentalsPage.title).toBeVisible({ timeout: 5_000 });
-      await expect(rentalsPage.shell.errorAlert).toBeVisible({ timeout: 5_000 });
+      await expect(rentalsPage.title, 'BUG-08: a failed rentals request keeps the page heading').toBeVisible({ timeout: 5_000 });
+      await expect(rentalsPage.shell.errorAlert, 'BUG-08: a failed rentals request is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 });
