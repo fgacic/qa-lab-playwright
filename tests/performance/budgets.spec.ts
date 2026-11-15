@@ -1,90 +1,90 @@
 import { expect, test } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import type { Vitals } from '../../fixtures/performance';
+import type { Measurement, Vitals } from '@fixtures/performance';
 
 /**
  * Performance budgets per key page, measured on the self-hosted Toolshop (a production build
  * served by nginx, see docker/). Live numbers would measure Cloudflare, the network and other
  * people's load, not the shop.
  *
- * Thresholds are Google's Core Web Vitals "good" limits (web.dev/articles/vitals): LCP 2.5 s,
- * CLS 0.1, INP 200 ms; TBT, the lab stand-in for INP during load, uses Lighthouse's 200 ms
- * "good" limit. Measured values are attached to every test and listed in docs/COVERAGE.md.
+ * What a budget means here: the browser is slowed to 4x CPU and a 40 ms, 10 Mbps connection
+ * (THROTTLING in fixtures/performance.ts), and each number is the median of 3 fresh loads. The
+ * limits are Google's Core Web Vitals "good" limits (web.dev/articles/vitals): LCP 2.5 s, CLS 0.1,
+ * INP 200 ms; TBT, the lab stand-in for INP during load, uses Lighthouse's 200 ms "good" limit.
+ * So "within budget" reads: a mid-range phone on a good connection gets a good experience. It
+ * is not the speed of the container itself, which would be far inside any budget. Each test also
+ * asserts that its evidence exists (an LCP entry, an interaction), so a run that observed nothing
+ * fails instead of passing on zeros. Measured values are attached to every test and listed in
+ * docs/COVERAGE.md.
  *
- * Scoped in playwright.config.ts: @perf runs on Chromium only (LCP, layout-shift and longtask
- * entries are Chromium's), @self-hosted keeps it off the live site.
+ * Scoped in playwright.config.ts: @perf runs in its own Chromium project, one worker and no
+ * parallelism (LCP, layout-shift and longtask entries are Chromium's, and a busy CPU skews TBT
+ * and INP), @self-hosted keeps it off the live site.
  */
 test.use({ measureVitals: true });
 
 const BUDGET: Vitals = { lcp: 2_500, cls: 0.1, tbt: 200, inp: 200 };
 
-function expectResponsive(measured: Vitals) {
-  expect.soft(measured.lcp, 'LCP (ms)').toBeLessThanOrEqual(BUDGET.lcp);
-  expect.soft(measured.tbt, 'TBT (ms)').toBeLessThanOrEqual(BUDGET.tbt);
-  expect.soft(measured.inp, 'INP proxy (ms)').toBeLessThanOrEqual(BUDGET.inp);
+/** Speed and responsiveness: the page is loaded, used once, and judged by what that cost. */
+function expectResponsive({ median, observed }: Measurement) {
+  expect.soft(observed.lcpEntries, 'an LCP entry was observed').toBeGreaterThan(0);
+  expect.soft(observed.interactions, 'an interaction was observed').toBeGreaterThan(0);
+  expect.soft(median.lcp, 'LCP (ms)').toBeLessThanOrEqual(BUDGET.lcp);
+  expect.soft(median.tbt, 'TBT (ms)').toBeLessThanOrEqual(BUDGET.tbt);
+  expect.soft(median.inp, 'INP proxy (ms)').toBeLessThanOrEqual(BUDGET.inp);
 }
 
 /**
- * Speed and responsiveness at the container's normal speed. Layout stability is tested apart,
- * below: it depends on a race and needs a controlled network to measure reliably.
+ * Speed and responsiveness under throttling. Layout stability is tested apart, below: it depends
+ * on a race and needs a controlled API latency to measure reliably.
  */
 test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hosted'] }, () => {
-  test.describe('home: product grid, then a filter click', () => {
-    const visit = async (homePage: import('@pages/HomePage').HomePage) => {
+  test('home: product grid, then a filter click, stays within LCP, TBT and INP budgets', async ({ homePage, vitals }) => {
+    const visit = async () => {
       await expect(homePage.grid.cards.first()).toBeVisible();
       await homePage.filters.filterByCategory('Pliers');
       await expect(homePage.grid.cards.first()).toBeVisible();
     };
-    test('LCP, TBT and INP within budget', async ({ homePage, vitals }) => {
-      await visit(homePage);
-      expectResponsive(await vitals.read('home'));
-    });
+
+    expectResponsive(await vitals.measure('home', visit));
   });
 
-  test.describe('search: typing a term and submitting', () => {
-    const visit = async (homePage: import('@pages/HomePage').HomePage) => {
+  test('search: typing a term and submitting stays within LCP, TBT and INP budgets', async ({ homePage, vitals }) => {
+    const visit = async () => {
       await homePage.search.searchFor('hammer');
       await expect(homePage.grid.cards.first()).toBeVisible();
     };
-    test('LCP, TBT and INP within budget', async ({ homePage, vitals }) => {
-      await visit(homePage);
-      expectResponsive(await vitals.read('search'));
-    });
+
+    expectResponsive(await vitals.measure('search', visit));
   });
 
-  test.describe('product page: quantity up and add to cart', () => {
-    const visit = async (productPage: import('@pages/ProductPage').ProductPage) => {
+  test('product page: quantity up and add to cart stays within LCP, TBT and INP budgets', async ({ productPage, vitals }) => {
+    const visit = async () => {
       await productPage.increaseQuantityButton.click();
       await productPage.addToCart();
       await expect(productPage.toast.message('Product added to shopping cart.')).toBeVisible();
     };
-    test('LCP, TBT and INP within budget', async ({ productPage, vitals }) => {
-      await visit(productPage);
-      expectResponsive(await vitals.read('product'));
-    });
+
+    expectResponsive(await vitals.measure('product', visit));
   });
 
-  test.describe('cart: proceeding to sign in', () => {
-    const visit = async (checkout: import('@pages/CheckoutPage').CheckoutPage) => {
+  test('cart: proceeding to sign in stays within LCP, TBT and INP budgets', async ({ checkout, vitals }) => {
+    const visit = async () => {
       await expect(checkout.cart.table.rows.first()).toBeVisible();
       await checkout.cart.proceed();
       await expect(checkout.signIn.loginButton).toBeVisible();
     };
-    test('LCP, TBT and INP within budget', async ({ checkout, vitals }) => {
-      await visit(checkout);
-      expectResponsive(await vitals.read('cart'));
-    });
+
+    expectResponsive(await vitals.measure('cart', visit));
   });
 
-  test.describe('contact: submitting an empty form', () => {
-    const visit = async (contactPage: import('@pages/ContactPage').ContactPage) => {
+  test('contact: submitting an empty form stays within LCP, TBT and INP budgets', async ({ contactPage, vitals }) => {
+    const visit = async () => {
       await contactPage.submit();
       await expect(contactPage.firstName.error).toBeVisible();
     };
-    test('LCP, TBT and INP within budget', async ({ contactPage, vitals }) => {
-      await visit(contactPage);
-      expectResponsive(await vitals.read('contact'));
-    });
+
+    expectResponsive(await vitals.measure('contact', visit));
   });
 });
 
@@ -94,32 +94,40 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hoste
  * full speed it comes and goes (0 to 0.32 across repeats). With a realistic 500 ms API latency the
  * race is decided and the shift is measured every time, which makes it a stable budget.
  */
-test.describe('Layout stability on a 500 ms API (self-hosted)', { tag: ['@perf', '@self-hosted'] }, () => {
+test.describe('Layout stability on a 500 ms API (self-hosted)', { tag: ['@perf', '@self-hosted', '@bug'] }, () => {
   test.use({ apiLatencyMs: 500 });
 
   const SHIFTING_FOOTER = 'the footer renders at the top before the page content arrives, then jumps down (CLS 0.17 to 0.32).';
 
   test('home keeps its layout', async ({ homePage, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    await expect(homePage.grid.cards.first()).toBeVisible();
-    expect((await vitals.read('home-slow-api')).cls, 'CLS').toBeLessThanOrEqual(BUDGET.cls);
+    const { median, observed } = await vitals.measure('home-slow-api', () => expect(homePage.grid.cards.first()).toBeVisible(), { interactive: false });
+
+    expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expect(median.cls, 'PERF-01: CLS of home').toBeLessThanOrEqual(BUDGET.cls);
   });
 
   test('product page keeps its layout', async ({ productPage, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    await expect(productPage.addToCartButton).toBeVisible();
-    expect((await vitals.read('product-slow-api')).cls, 'CLS').toBeLessThanOrEqual(BUDGET.cls);
+    const { median, observed } = await vitals.measure('product-slow-api', () => expect(productPage.addToCartButton).toBeVisible(), { interactive: false });
+
+    expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expect(median.cls, 'PERF-01: CLS of the product page').toBeLessThanOrEqual(BUDGET.cls);
   });
 
   test('cart keeps its layout', async ({ checkout, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    await expect(checkout.cart.table.rows.first()).toBeVisible();
-    expect((await vitals.read('cart-slow-api')).cls, 'CLS').toBeLessThanOrEqual(BUDGET.cls);
+    const { median, observed } = await vitals.measure('cart-slow-api', () => expect(checkout.cart.table.rows.first()).toBeVisible(), { interactive: false });
+
+    expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expect(median.cls, 'PERF-01: CLS of the cart').toBeLessThanOrEqual(BUDGET.cls);
   });
 
   test('contact page keeps its layout', async ({ contactPage, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    await expect(contactPage.sendButton).toBeVisible();
-    expect((await vitals.read('contact-slow-api')).cls, 'CLS').toBeLessThanOrEqual(BUDGET.cls);
+    const { median, observed } = await vitals.measure('contact-slow-api', () => expect(contactPage.sendButton).toBeVisible(), { interactive: false });
+
+    expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expect(median.cls, 'PERF-01: CLS of the contact page').toBeLessThanOrEqual(BUDGET.cls);
   });
 });

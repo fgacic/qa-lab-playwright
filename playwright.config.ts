@@ -8,9 +8,10 @@ const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
  * Where a spec may run is decided here, by tag, never by a runtime skip: a test that cannot run
  * in a project is not scheduled there at all, so reports count only real results.
  */
-const ownProject = /@account|@admin|@visual/; // these have projects of their own
+const ownProject = /@account|@admin|@visual|@perf/; // these have projects of their own
 const phoneOnly = /@mobile/;
-const chromiumOnly = /@axe|@i18n|@perf/;
+const chromiumOnly = /@axe|@i18n/;
+const perfOnly = /@perf/; // measured alone, in the perf project
 const notOnThisTarget = IS_SELF_HOSTED ? /@live-only/ : /@self-hosted/;
 
 /**
@@ -21,7 +22,8 @@ const notOnThisTarget = IS_SELF_HOSTED ? /@live-only/ : /@self-hosted/;
  *
  * Projects by tag:
  * - chromium: everything not in a project of its own; firefox / webkit: the same minus the
- *   Chromium-only suites (@axe, @i18n, @perf);
+ *   Chromium-only suites (@axe, @i18n);
+ * - perf: @perf budgets, Chromium, one worker and no parallelism, so nothing else competes for the CPU;
  * - mobile: @smoke and @mobile on a Pixel 7;
  * - account / admin: real sign-ins from a setup project's storageState, when they may run;
  * - visual: screenshot comparisons, inside the Playwright Docker image only.
@@ -81,7 +83,7 @@ export default defineConfig({
         ]
       : []),
     { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: [ownProject, phoneOnly, notOnThisTarget] },
-    // axe, translations and performance are scoped to Chromium (reasons in their specs' headers).
+    // axe and translations are scoped to Chromium (reasons in their specs' headers).
     { name: 'firefox', use: { ...devices['Desktop Firefox'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },
     { name: 'webkit', use: { ...devices['Desktop Safari'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },
     {
@@ -91,6 +93,9 @@ export default defineConfig({
       grep: /@smoke|@mobile/,
       grepInvert: [ownProject, chromiumOnly, notOnThisTarget],
     },
+    // Budgets are measured alone: a project of its own with a single worker. `workers: 1` limits this
+    // project only, so it must also run in a pass of its own (`npm run test:perf`, its own CI job).
+    { name: 'perf', use: { ...devices['Desktop Chrome'] }, grep: perfOnly, grepInvert: notOnThisTarget, fullyParallel: false, workers: 1 },
     // Screenshots: only inside the Playwright image (scripts/visual.sh), against our own Toolshop.
     ...(IN_PLAYWRIGHT_IMAGE && IS_SELF_HOSTED
       ? [{ name: 'visual', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 }, grep: /@visual/ }]
