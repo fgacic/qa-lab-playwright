@@ -26,7 +26,10 @@ test.describe('Language switcher', () => {
     test(`switching to ${lang.toUpperCase()} translates the header`, async ({ homePage, page }) => {
       const { header } = homePage;
       // Start from a non-English language so switching to EN is a real change too.
-      if (lang === 'en') await header.language.switchTo('de');
+      if (lang === 'en') {
+        await header.language.switchTo('de');
+        await expect(header.navItem('home')).toHaveText(NAV_LABELS.de.home!);
+      }
 
       await header.language.switchTo(lang);
 
@@ -41,6 +44,8 @@ test.describe('Language switcher', () => {
   test('the chosen language survives a reload and a route change', async ({ homePage, page }) => {
     const { header } = homePage;
     await header.language.switchTo('de');
+    await expect(header.navItem('home')).toHaveText('Start');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await skipIfBotChallenge(page);
