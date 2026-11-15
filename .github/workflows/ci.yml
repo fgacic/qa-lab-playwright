@@ -1,9 +1,10 @@
 name: CI
 
-# The gate: the whole suite against the self-hosted Toolshop (TARGET=local), on every push and
-# pull request, nightly, and on demand. The public site is checked separately (live.yml).
+# The gate: the whole suite against the self-hosted Toolshop (TARGET=local), on pushes to main,
+# on pull requests (a branch with an open PR runs once, not twice), nightly, and on demand. The public site is checked separately (live.yml).
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: '17 3 * * *'
@@ -127,6 +128,9 @@ jobs:
           path: test-results/verify-bugs.json
           retention-days: 7
 
+  # Runs after failed e2e/visual jobs on purpose (`!cancelled()`, and the Pages publish below only
+  # needs this job to succeed): the Allure history and trend charts must record the red runs too,
+  # and the published report is how a failure gets investigated. The gate itself is the red e2e job.
   report:
     name: merge reports
     needs: [e2e, visual]

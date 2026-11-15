@@ -39,6 +39,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: isCI,
   retries: IS_SELF_HOSTED ? 1 : 2,
+  // On our own container a test that needed its retry is a flake to fix, not a green run.
+  failOnFlakyTests: isCI && IS_SELF_HOSTED,
   workers: IS_SELF_HOSTED ? (isCI ? 2 : 4) : 2,
   reporter: isCI
     ? // One blob per CI job (REPORT_ID), so shards of different projects never overwrite each other.
@@ -47,7 +49,7 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     testIdAttribute: 'data-test',
-    trace: 'on-first-retry',
+    trace: 'on',
     screenshot: 'only-on-failure',
     navigationTimeout: IS_SELF_HOSTED ? 30_000 : 90_000,
     actionTimeout: 15_000,
