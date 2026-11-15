@@ -37,7 +37,7 @@ export interface ApiWorkerFixtures {
 }
 
 export interface ApiFixtures {
-  /** Creates a cart through the API and makes the browser tab use it. Returns the cart id. */
+  /** Creates a cart through the API and makes the browser tab use it. Returns the cart id. A tab has one cart, so a second call in a test throws. */
   seedCart: (items: CartItem[]) => Promise<string>;
 }
 
@@ -53,7 +53,11 @@ export const test = base.extend<ApiFixtures, ApiWorkerFixtures>({
   ],
   catalog: [async ({ api }, use) => use(new Catalog(api)), { scope: 'worker' }],
   seedCart: async ({ api, page }, use) => {
+    let seeded = false;
     await use(async (items) => {
+      // The init script below runs once per tab, so a second cart would silently never be used.
+      if (seeded) throw new Error('seedCart was called twice: a browser tab holds one cart, so seed all the items in one call.');
+      seeded = true;
       const cartId = await api.createCart(items);
       const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
       // The SPA keeps its cart in sessionStorage. Seed it once per tab, so that a cart the

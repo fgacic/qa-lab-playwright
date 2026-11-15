@@ -3,7 +3,8 @@
 # or compared, so a Mac, a Linux laptop and CI all render the same pixels.
 #   npm run test:visual            compare against the committed baselines
 #   npm run test:visual:update     re-record the baselines (commit the result)
-# Needs the self-hosted Toolshop running (npm run toolshop:up).
+# Needs the self-hosted Toolshop running (npm run toolshop:up). Two workers, like every run
+# against the shared shop; a `--workers=N` of your own comes later and wins.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,4 +21,4 @@ docker run --rm --ipc=host "${NETWORK[@]}" \
   -v "$PWD":"$PWD" -w "$PWD" \
   -e CI -e REPORT_ID -e PLAYWRIGHT_DOCKER=1 -e TARGET=local \
   -e BASE_URL="http://${HOST}:4200" -e API_URL="http://${HOST}:4200/api" \
-  "$IMAGE" npx playwright test --project=visual "$@"
+  "$IMAGE" npx playwright test --project=visual --workers=2 "$@"

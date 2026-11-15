@@ -24,7 +24,8 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
   test('the admin menu reaches every back-office section', async ({ adminDashboard, page }) => {
     for (const section of ADMIN_SECTIONS) {
       await adminDashboard.shell.header.openAdminSection(section);
-      await expect(page).toHaveURL(`/admin/${section.toLowerCase()}`);
+      await expect(page, section).toHaveURL(`/admin/${section.toLowerCase()}`);
+      await expect(adminDashboard.sectionHeading(section), section).toBeVisible();
     }
   });
 
@@ -44,13 +45,14 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
       knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.');
       await expect(adminDashboard.salesHeading).toBeVisible();
 
-      await expect(adminDashboard.shell.errorAlert, 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: 5_000 });
+      // Any alert will do: the pin does not prescribe the wording. A healthy dashboard shows none.
+      await expect(adminDashboard.alerts.first(), 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: 5_000 });
     });
   });
 });
 
-test.describe('Admin access control', () => {
-  test('a signed-in customer cannot open the back office', { tag: ['@mocked', '@negative'] }, async ({ signedIn: _, page }) => {
+test.describe('Admin access control (mocked back office)', { tag: ['@mocked'] }, () => {
+  test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, page }) => {
     await page.goto('/admin/dashboard', { waitUntil: 'domcontentloaded' });
 
     await expect(page).toHaveURL('/auth/login');

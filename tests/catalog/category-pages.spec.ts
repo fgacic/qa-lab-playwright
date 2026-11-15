@@ -1,7 +1,13 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { API_URL } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
+
+interface CategoryNode {
+  slug: string;
+  sub_categories: { slug: string }[];
+}
 
 test.describe('Category pages', () => {
   const categories = [
@@ -11,7 +17,7 @@ test.describe('Category pages', () => {
   ];
 
   for (const { slug, title } of categories) {
-    test(`/category/${slug} lists that category's products`, async ({ categoryPage, apiMock }) => {
+    test(`/category/${slug} lists that category's products`, async ({ categoryPage, apiMock, request }) => {
       const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
 
       await categoryPage.open(slug);
@@ -19,6 +25,12 @@ test.describe('Category pages', () => {
       await expect(categoryPage.title).toHaveText(title);
       const { json: found } = await results;
       expect(found.total).toBeGreaterThan(0);
+      const tree = (await (await request.get(`${API_URL}/categories/tree`)).json()) as CategoryNode[];
+      // A parent category lists the products of its subcategories too: all of them, and nothing from elsewhere.
+      const parent = tree.find((node) => node.slug === slug);
+      expect(parent, `the category tree should contain "${slug}"`).toBeDefined();
+      const belonging = new Set(parent!.sub_categories.map((sub) => sub.slug));
+      expect(found.data.filter((p) => !belonging.has(p.category.slug)).map((p) => p.name), 'products outside the category').toEqual([]);
       await expect(categoryPage.grid.names).toHaveText(found.data.map((p) => p.name));
     });
   }
@@ -37,8 +49,6 @@ test.describe('Category pages', () => {
   test('an unknown category says it does not exist', { tag: ['@negative', '@bug'] }, async ({ categoryPage }) => {
     knownBug('BUG-06', '/category/<anything> invents a page titled after the slug, with an empty grid and no "not found".');
     await categoryPage.open('qa-lab-unknown');
-    await expect(categoryPage.title).toHaveText(/^Category: Qa.lab.unknown$/i);
-    await expect(categoryPage.grid.emptyState).toBeVisible();
 
     await expect(categoryPage.notFoundMessage, 'BUG-06: an unknown category says it does not exist').toBeVisible({ timeout: 5_000 });
   });

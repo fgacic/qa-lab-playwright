@@ -59,12 +59,16 @@ export const test = base.extend<A11yFixtures>({
   a11y: async ({ page }, use, testInfo) => {
     await use({
       scan: async (name, { only, within } = {}) => {
-        let builder = new AxeBuilder({ page }).withTags(WCAG_TAGS);
+        // Transitions and fades caught half way read as low contrast; the page is scanned at rest.
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        // Either the named rules or the whole WCAG set, never one narrowing the other.
+        let builder = only ? new AxeBuilder({ page }).withRules(only) : new AxeBuilder({ page }).withTags(WCAG_TAGS);
         for (const { selector } of EXCLUDED) builder = builder.exclude(selector);
-        if (only) builder = builder.withRules(only);
         if (within) builder = builder.include(within);
         const results = await builder.analyze();
         await testInfo.attach(`axe-${name}.json`, { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
+        // "Needs review" results are not violations and do not fail a scan, but a growing count is worth seeing in the report.
+        await testInfo.attach(`axe-${name}-incomplete.txt`, { body: `${results.incomplete.length} incomplete: ${results.incomplete.map((r) => r.id).join(', ') || 'none'}`, contentType: 'text/plain' });
         const byTarget = new Map<string, Finding>();
         for (const v of results.violations) {
           for (const n of v.nodes) {

@@ -26,7 +26,12 @@ export interface AuthOptions {
 }
 
 export interface AuthFixtures {
-  /** The customer the browser is signed in as. Account page fixtures depend on it. */
+  /**
+   * The customer the browser is signed in as. Account page fixtures depend on it.
+   * In `storage-state` the session is whatever tests/setup/account.setup.ts saved and is never
+   * refreshed (the JWT lives 300 s and cannot be renewed), so the `account` project has to run in
+   * a pass of its own, right after its setup. `worker-account` issues a fresh token per test.
+   */
   signedIn: { firstName: string; lastName: string; email: string };
   accountPage: AccountPage;
   favoritesPage: FavoritesPage;
@@ -38,7 +43,9 @@ export interface AuthFixtures {
 export interface AuthWorkerFixtures {
   /**
    * A real customer per worker, so parallel workers never share (and fight over) one account.
-   * Registered through the API on first use only, so mocked specs never trigger it.
+   * Registered through the API on first use only, so mocked specs never trigger it. The accounts are
+   * never deleted: the API has no customer delete, and the self-hosted database is created per CI job
+   * and reset locally by `npm run toolshop:reseed`, so they disappear with it. It registers on the self-hosted shop only.
    */
   workerAccount: { get: () => Promise<{ customer: Customer; token: string }> };
 }

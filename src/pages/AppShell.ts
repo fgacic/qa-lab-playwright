@@ -7,6 +7,8 @@ import { PromoBanners } from '@components/PromoBanners';
 import { Toast } from '@components/Toast';
 import { skipIfBotChallenge } from '@support/bot-challenge';
 import { API_URL, apiPath } from '@support/env';
+import { step } from '@support/step';
+import { PrivacyPage } from './PrivacyPage';
 
 /**
  * What every route shares: header, footer, banners, toasts and the two floating widgets.
@@ -41,6 +43,13 @@ export class AppShell {
   async goto(path: string): Promise<void> {
     await this.page.goto(path, { waitUntil: 'domcontentloaded' });
     await skipIfBotChallenge(this.page);
+  }
+
+  /** The privacy policy, reached through the footer link. */
+  @step('Open the privacy policy from the footer')
+  async openPrivacyPolicy(): Promise<PrivacyPage> {
+    await this.footer.openPrivacyPolicy();
+    return new PrivacyPage(this.page);
   }
 
   /**

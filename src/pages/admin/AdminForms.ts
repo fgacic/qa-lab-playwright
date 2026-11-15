@@ -172,12 +172,13 @@ export interface UserInput {
   lastName: string;
   dateOfBirth: string;
   street: string;
-  postalCode: string;
   city: string;
-  state: string;
   country: string;
-  phone: string;
   email: string;
+  /** Optional on the form: Postal code, State, Phone and Password may stay empty. */
+  postalCode?: string;
+  state?: string;
+  phone?: string;
   password?: string;
 }
 
@@ -220,11 +221,11 @@ export class AdminUserForm {
     await this.lastName.fill(user.lastName);
     await this.dateOfBirth.fill(user.dateOfBirth);
     await this.street.fill(user.street);
-    await this.postalCode.fill(user.postalCode);
+    if (user.postalCode) await this.postalCode.fill(user.postalCode);
     await this.city.fill(user.city);
-    await this.state.fill(user.state);
+    if (user.state) await this.state.fill(user.state);
     await this.country.selectOption(user.country);
-    await this.phone.fill(user.phone);
+    if (user.phone) await this.phone.fill(user.phone);
     await this.email.fill(user.email);
     if (user.password) await this.password.fill(user.password);
   }

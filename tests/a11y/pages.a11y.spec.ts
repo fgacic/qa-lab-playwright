@@ -7,9 +7,10 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
  * An axe scan (WCAG 2.2 A and AA) of every public page and key state, plus the account and
- * admin pages under their mocked sessions. A scan fails only on a violation that is not in the
- * known baseline (src/support/a11y-baseline.ts): it catches regressions; known-violations.a11y
- * pins each known one so it turns red when fixed.
+ * admin pages under their mocked sessions. A scan fails on a violation that is not in the known
+ * baseline (src/support/a11y-baseline.ts), and on a known one that spread, shrank or is gone from
+ * a page it was recorded on, so the baseline is a ratchet that moves with every fix;
+ * known-violations.a11y pins each known one so it turns red when fixed.
  *
  * @axe: Chromium only (playwright.config.ts). axe reads the accessibility tree the browser builds
  * and engines differ in edge cases (Firefox does not report AX-01), so the baseline is kept for one.
@@ -22,14 +23,22 @@ async function expectNoNewViolations(scan: A11yScan, page: string): Promise<void
     for (const finding of scan.findings) fs.appendFileSync(process.env.A11Y_RECORD, JSON.stringify({ page, ...finding }) + '\n');
     return;
   }
-  // A known violation is known on the pages it was recorded on, and for as many elements as it was recorded with.
+  // A known violation is known on the pages it was recorded on, and for exactly as many elements as it was recorded with:
+  // more is a spread (a new violation), fewer is a fix the baseline must record.
   const problems = scan.findings.flatMap((f) => {
     const known = KNOWN_VIOLATIONS.find((k) => k.rule === f.rule && k.target === f.target && k.pages.includes(page));
     if (!known) return [`${f.rule} (${f.impact}) on ${f.target}`];
-    return f.nodes > known.nodes ? [`${known.id} spreads: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}`] : [];
+    if (f.nodes > known.nodes) return [`${known.id} spreads: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}`];
+    if (f.nodes < known.nodes) return [`${known.id} shrank: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}: partly fixed, update the baseline`];
+    return [];
   });
+  // A known violation that was recorded on this page and is no longer found is fixed here.
+  const fixedHere = KNOWN_VIOLATIONS.filter((k) => k.pages.includes(page) && !scan.findings.some((f) => f.rule === k.rule && f.target === k.target)).map(
+    (k) => `${k.id} fixed here: ${k.rule} on ${k.target} is gone from ${page}, update the baseline`,
+  );
   // Soft, so a test that scans several states reports every state's violations, not just the first.
   expect.soft(problems, `new accessibility violations on ${page}`).toEqual([]);
+  expect.soft(fixedHere, `accessibility violations fixed on ${page}`).toEqual([]);
 }
 
 test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
@@ -107,6 +116,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     await checkout.billing.enterAddress(fakeAddress());
     await checkout.billing.proceed();
     await checkout.payment.choose('credit-card');
+    await expect(checkout.payment.field('Credit Card Number')).toBeVisible();
     await expectNoNewViolations(await a11y.scan('checkout-payment'), 'checkout payment');
   });
 

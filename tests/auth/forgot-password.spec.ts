@@ -28,6 +28,8 @@ test.describe('Forgot password', () => {
     test('a readable confirmation is shown', async ({ forgotPasswordPage }) => {
       knownBug('BUG-20', 'the success message is the raw translation key "page.forgot-password.confirm".');
       await forgotPasswordPage.requestReset('testy.mctestface@example.com');
+      // Whatever it says, the form answers the request with a message.
+      await expect(forgotPasswordPage.alert).toBeVisible();
 
       // The message fades out after three seconds, hence the short timeout.
       await expect(forgotPasswordPage.statusMessage(/sent|check your (e-)?mail|instructions/i), 'BUG-20: the confirmation is readable').toBeVisible({ timeout: 2_500 });

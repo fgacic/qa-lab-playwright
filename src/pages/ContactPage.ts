@@ -1,11 +1,9 @@
 import type { Locator, Page } from '@playwright/test';
 import { FormField } from '@components/FormField';
 import { step } from '@support/step';
+import type { ContactSubject } from '@support/payloads';
 import type { Person } from '@support/test-data';
 import { AppShell } from './AppShell';
-
-export const CONTACT_SUBJECTS = ['Customer service', 'Webmaster', 'Return', 'Payments', 'Warranty', 'Status of my order'] as const;
-export type ContactSubject = (typeof CONTACT_SUBJECTS)[number];
 
 export interface ContactMessage {
   from: Person;

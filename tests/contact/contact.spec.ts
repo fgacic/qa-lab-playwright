@@ -1,6 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { CONTACT_SUBJECTS, type ContactMessage } from '@pages/ContactPage';
+import type { ContactMessage } from '@pages/ContactPage';
+import { CONTACT_SUBJECTS, contactSubjectSlug } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
@@ -14,47 +15,61 @@ const textFile = (name: string, content: string) => ({ name, mimeType: 'text/pla
 test.describe('Contact form', () => {
   // The "Select a subject *" placeholder is disabled and hidden, so it is not an option to pick.
   test('offers the six subjects', async ({ contactPage }) => {
-    await expect(contactPage.subject.input.getByRole('option')).toHaveText([...CONTACT_SUBJECTS]);
+    await expect(contactPage.subject.input.getByRole('option')).toHaveText(CONTACT_SUBJECTS.map((subject) => subject.label));
   });
 
-  test('an empty form flags every required field', { tag: ['@negative'] }, async ({ contactPage }) => {
-    await contactPage.submit();
+  // The form's own validation must stop these. If it regresses, the guard refuses the write (so the real
+  // inbox stays clean) and the last assertion names it. A request would leave in the same click that renders
+  // the labels, ahead of them, so the guard has seen it by the time the labels are asserted.
+  test.describe('validation', () => {
+    test.beforeEach(async ({ apiMock }) => {
+      await apiMock.blockUnmockedWrites();
+    });
 
-    await expect(contactPage.firstName.error).toHaveText('First name is required');
-    await expect(contactPage.lastName.error).toHaveText('Last name is required');
-    await expect(contactPage.email.error).toHaveText('Email is required');
-    await expect(contactPage.subject.error).toHaveText('Subject is required');
-    await expect(contactPage.message.error).toHaveText('Message is required');
-  });
+    test('an empty form flags every required field', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      await contactPage.submit();
 
-  test('a malformed email is rejected', { tag: ['@negative'] }, async ({ contactPage }) => {
-    await contactPage.send(message({ from: { ...fakeGuest(), email: 'not-an-email' } }));
+      await expect(contactPage.firstName.error).toHaveText('First name is required');
+      await expect(contactPage.lastName.error).toHaveText('Last name is required');
+      await expect(contactPage.email.error).toHaveText('Email is required');
+      await expect(contactPage.subject.error).toHaveText('Subject is required');
+      await expect(contactPage.message.error).toHaveText('Message is required');
+      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+    });
 
-    await expect(contactPage.email.error).toHaveText('Email format is invalid');
-  });
+    test('a malformed email is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      await contactPage.send(message({ from: { ...fakeGuest(), email: 'not-an-email' } }));
 
-  test('a message under 50 characters is rejected', { tag: ['@negative'] }, async ({ contactPage }) => {
-    await contactPage.send(message({ message: 'Too short to be a useful message.' }));
+      await expect(contactPage.email.error).toHaveText('Email format is invalid');
+      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+    });
 
-    await expect(contactPage.message.error).toHaveText('Message must be minimal 50 characters');
-  });
+    test('a message under 50 characters is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      await contactPage.send(message({ message: 'Too short to be a useful message.' }));
 
-  test('an attachment with content is rejected: files must be empty', { tag: ['@negative'] }, async ({ contactPage }) => {
-    await contactPage.send(message({ attachment: textFile('notes.txt', 'not empty') }));
+      await expect(contactPage.message.error).toHaveText('Message must be minimal 50 characters');
+      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+    });
 
-    await expect(contactPage.attachment.error).toHaveText('File should be empty.');
-  });
+    test('an attachment with content is rejected: files must be empty', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      await contactPage.send(message({ attachment: textFile('notes.txt', 'not empty') }));
 
-  test('an attachment that is not .txt is rejected', { tag: ['@negative'] }, async ({ contactPage }) => {
-    await contactPage.send(message({ attachment: { name: 'image.png', mimeType: 'image/png', buffer: Buffer.alloc(0) } }));
+      await expect(contactPage.attachment.error).toHaveText('File should be empty.');
+      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+    });
 
-    await expect(contactPage.attachment.error).toHaveText('File should have a txt extension.');
+    test('an attachment that is not .txt is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      await contactPage.send(message({ attachment: { name: 'image.png', mimeType: 'image/png', buffer: Buffer.alloc(0) } }));
+
+      await expect(contactPage.attachment.error).toHaveText('File should have a txt extension.');
+      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+    });
   });
 
   const sentBody = (contact: ContactMessage) => ({
     name: `${contact.from.firstName} ${contact.from.lastName}`,
     email: contact.from.email,
-    subject: 'customer-service',
+    subject: contactSubjectSlug(contact.subject),
     message: contact.message,
   });
 
@@ -100,25 +115,28 @@ test.describe('Contact form', () => {
   test.describe('when the API rejects the message', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('POST', '/messages', 422, { message: 'The given data was invalid.', errors: { email: ['The email field must be a valid email address.'] } })));
 
-    test('the validation message is readable', async ({ contactPage }) => {
+    test('the validation message is readable', async ({ contactPage, apiMock }) => {
       knownBug('BUG-21', 'a 422 from POST /messages is shown as "The given data was invalid. [object Object]".');
+      const answered = apiMock.waitForResponse('POST', '/messages');
       await contactPage.send(message());
-      const reason = contactPage.statusMessage(/The given data was invalid/);
-      await expect(reason).toBeVisible();
+      expect((await answered).response.status()).toBe(422);
 
-      await expect(reason, 'BUG-21: the validation detail is readable').not.toContainText('[object Object]', { timeout: 2_000 });
+      await expect(contactPage.statusMessage(/valid email address/), 'BUG-21: the validation detail is readable').toBeVisible({ timeout: 2_000 });
+      await expect(contactPage.statusMessage('[object Object]'), 'BUG-21: no unrendered object in the message').toHaveCount(0);
     });
   });
 
   test.describe('when the API cannot be reached', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.abort('POST', '/messages')));
 
-    test('the shopper is told the message was not sent', async ({ contactPage }) => {
+    test('the shopper is told the message was not sent', async ({ contactPage, apiMock }) => {
       knownBug('BUG-22', 'a network failure on POST /messages shows the literal text "true" as the error.');
+      const attempted = apiMock.waitForRequest('POST', '/messages');
       await contactPage.send(message());
-      await expect(contactPage.sendButton).toBeVisible();
+      await attempted;
 
-      await expect(contactPage.shell.errorAlert, 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
+      // Any wording that says it failed will do.
+      await expect(contactPage.statusMessage(/not sent|could not|couldn.t|failed|unable|went wrong|error|try again/i), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
     });
   });
 });

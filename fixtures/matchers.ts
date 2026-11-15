@@ -19,23 +19,30 @@ export const collectionExpect = base.extend({
   },
 });
 
+/**
+ * The first amount in a text: a `$`-prefixed one when there is any, else the first number. "$28.30 (incl. 21% VAT)"
+ * is 28.3, not 28.3021. No number at all is NaN, never 0: an empty or placeholder text must not read as a zero amount.
+ */
+function parseAmount(text: string): number {
+  // The sign may stand before the "$", with or without a space, or after it ("-$4.00", "- $4.00", "$-4.00"), as a hyphen or a true minus sign.
+  const token = text.match(/[-−]?\s?\$\s?[-−]?\d[\d,]*(?:\.\d+)?/)?.[0] ?? text.match(/[-−]?\d[\d,]*(?:\.\d+)?/)?.[0];
+  return token ? Number(token.replace(/−/g, '-').replace(/[^0-9.-]/g, '')) : NaN;
+}
+
 /** Money matchers: `await expect(cart.total).toShowAmount(28.3)`, retried like any web-first assertion. */
 export const moneyExpect = base.extend({
   async toShowAmount(locator: Locator, expected: number, options?: { timeout?: number }) {
-    // No digits at all is NaN, never 0: an empty or placeholder text must not read as a zero amount.
-    const parse = (text: string) => {
-      const digits = text.replace(/[^0-9.-]/g, '');
-      return /\d/.test(digits) ? Number(digits) : NaN;
-    };
     let actual: number | undefined;
     let pass = false;
     try {
       await base
-        .poll(async () => (actual = parse(await locator.innerText())), { timeout: options?.timeout ?? this.timeout })
+        .poll(async () => (actual = parseAmount(await locator.innerText())), { timeout: options?.timeout ?? this.timeout })
         .toBeCloseTo(expected, 2);
       pass = true;
-    } catch {
-      pass = false;
+    } catch (error) {
+      // Only "the amount never matched" is a failed match. A strict-mode violation, a missing
+      // element or a closed page is a broken test and must surface as itself, not as "no amount".
+      if (!(error as { matcherResult?: unknown }).matcherResult) throw error;
     }
     return {
       pass,

@@ -8,13 +8,18 @@
  * BASE_URL / API_URL override either target's addresses.
  */
 export type Target = 'local' | 'live';
-export const TARGET: Target = process.env.TARGET === 'live' ? 'live' : 'local';
+const requestedTarget = process.env.TARGET || 'local';
+// A typo such as TARGET=prod must not quietly run the suite (and its writes) against the default.
+if (requestedTarget !== 'local' && requestedTarget !== 'live') {
+  throw new Error(`Unknown TARGET "${requestedTarget}": use "local" (the default, the self-hosted Toolshop) or "live".`);
+}
+export const TARGET: Target = requestedTarget;
 const ADDRESSES: Record<Target, { base: string; api: string }> = {
   local: { base: 'http://localhost:4200', api: 'http://localhost:4200/api' },
   live: { base: 'https://practicesoftwaretesting.com', api: 'https://api.practicesoftwaretesting.com' },
 };
-export const BASE_URL = process.env.BASE_URL ?? ADDRESSES[TARGET].base;
-export const API_URL = process.env.API_URL ?? ADDRESSES[TARGET].api;
+export const BASE_URL = process.env.BASE_URL || ADDRESSES[TARGET].base;
+export const API_URL = process.env.API_URL || ADDRESSES[TARGET].api;
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', 'host.docker.internal']);
 const isLocalHost = (url: string) => LOCAL_HOSTS.has(new URL(url).hostname);
@@ -40,8 +45,6 @@ const SEEDED = {
 
 /** Real-account specs: always on the self-hosted target, opt-in (RUN_ACCOUNT_TESTS=1) on live. */
 export const RUN_ACCOUNT_TESTS = IS_SELF_HOSTED || process.env.RUN_ACCOUNT_TESTS === '1';
-export const ACCOUNT_SKIP_REASON =
-  'Creates or signs in to a real account on the public shop. Set RUN_ACCOUNT_TESTS=1 to run on live.';
 export const CUSTOMER_STORAGE_STATE = '.auth/customer.json';
 /** An existing customer to sign in as. Unset, the account setup registers a fresh one. */
 export const CUSTOMER_CREDENTIALS = {
@@ -51,16 +54,11 @@ export const CUSTOMER_CREDENTIALS = {
 
 /** Real back-office journeys: always on the self-hosted target, opt-in (RUN_ADMIN_TESTS=1) on live. */
 export const RUN_ADMIN_TESTS = IS_SELF_HOSTED || process.env.RUN_ADMIN_TESTS === '1';
-export const ADMIN_SKIP_REASON =
-  'Signs in as an admin and changes data on the public shop. Set RUN_ADMIN_TESTS=1 with ADMIN_EMAIL / ADMIN_PASSWORD to run on live.';
 export const ADMIN_STORAGE_STATE = '.auth/admin.json';
 export const ADMIN_CREDENTIALS = {
-  email: process.env.ADMIN_EMAIL ?? (IS_SELF_HOSTED ? SEEDED.admin.email : undefined),
-  password: process.env.ADMIN_PASSWORD ?? (IS_SELF_HOSTED ? SEEDED.admin.password : undefined),
+  email: process.env.ADMIN_EMAIL || (IS_SELF_HOSTED ? SEEDED.admin.email : undefined),
+  password: process.env.ADMIN_PASSWORD || (IS_SELF_HOSTED ? SEEDED.admin.password : undefined),
 };
-
-/** Specs that submit attack payloads, measure performance or compare screenshots: ours only. */
-export const SELF_HOSTED_ONLY = 'Runs only against the self-hosted Toolshop (TARGET=local), never the public site.';
 
 /**
  * The API path of a request URL, without the API's own prefix: "/products" both for

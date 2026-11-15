@@ -34,8 +34,8 @@ export interface CartItem {
 export type ProductQuery = Partial<Record<'page' | 'sort' | 'between' | 'by_category' | 'by_brand' | 'eco_friendly' | 'is_rental' | 'by_category_slug', string>>;
 
 /** Writes that leave a persistent, user-visible record (an account, an order, a message) belong on our own shop. */
-function assertSelfHosted(what: string): void {
-  if (!IS_SELF_HOSTED) throw new Error(`Refusing to ${what} on ${API_URL}: it leaves a real record on a shop that is not self-hosted.`);
+function assertSelfHosted(what: string, hint = ''): void {
+  if (!IS_SELF_HOSTED) throw new Error(`Refusing to ${what} on ${API_URL}: it leaves a real record on a shop that is not self-hosted.${hint ? ` ${hint}` : ''}`);
 }
 
 /**
@@ -91,7 +91,10 @@ export class ToolshopApi {
   /** Not guarded by assertSelfHosted: a guest cart is anonymous and is how the live run arranges its read flows. */
   @step('API: create a cart')
   async createCart(items: CartItem[]): Promise<string> {
-    const { id } = await (await this.send(() => this.request.post(`${API_URL}/carts`, { data: {} }))).json();
+    // Creating a cart is safe to repeat (a failed attempt leaves at most an empty anonymous cart), and
+    // POST /carts is the call that answered 500 now and then, so it is retried like a read. Adding the
+    // lines is not: a repeated add after a lost answer could double a quantity.
+    const { id } = await (await this.send(() => this.request.post(`${API_URL}/carts`, { data: {} }), { idempotent: true })).json();
     for (const { product, quantity } of items) {
       await this.send(() => this.request.post(`${API_URL}/carts/${id}`, { data: { product_id: product.id, quantity } }));
     }
@@ -100,7 +103,8 @@ export class ToolshopApi {
 
   @step('API: register customer {0.email}')
   async registerCustomer(customer: Customer): Promise<void> {
-    assertSelfHosted('register an account');
+    // Reached by the account setup too: on live with RUN_ACCOUNT_TESTS=1 and no TOOLSHOP_EMAIL / TOOLSHOP_PASSWORD it fails here, before any request.
+    assertSelfHosted('register an account', 'To run the account tests on the live site, sign in as an existing customer: set TOOLSHOP_EMAIL and TOOLSHOP_PASSWORD.');
     await this.send(() =>
       this.request.post(`${API_URL}/users/register`, {
         data: {
@@ -183,9 +187,9 @@ export class ToolshopApi {
 
   /**
    * The shared backend fails now and then (POST /carts returned 500 once in three tries while this
-   * suite was written), so reads retry a 5xx up to three times, and a 429 once the server's
-   * Retry-After has passed. Writes are never retried: a repeated order or registration could
-   * duplicate, so they fail at once, with the response body in the message.
+   * suite was written), so reads (and the anonymous cart creation) retry a 5xx up to three times,
+   * and a 429 once the server's Retry-After has passed. Other writes are never retried: a repeated
+   * order or registration could duplicate, so they fail at once, with the response body in the message.
    */
   private async send(call: () => Promise<APIResponse>, { idempotent = false }: { idempotent?: boolean } = {}): Promise<APIResponse> {
     let response = await call();

@@ -1,5 +1,17 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { API_URL } from '@support/env';
 import { knownBug } from '@support/known-bug';
+
+/** What the shop tells the shopper, word for word. */
+const MESSAGES = {
+  added: 'Product added to shopping cart.',
+  atMost99: 'You can order at most 99 of this product.',
+  favouriteAdded: 'Product added to your favorites list.',
+  favouriteDuplicate: 'Product already in your favorites list.',
+  favouriteSignedOut: 'Unauthorized, can not add product to your favorite list.',
+} as const;
+/** A server message nobody would write by accident: seeing it in the toast proves the app shows what the server said. */
+const SERVER_MESSAGE = 'qa-lab: the cart service is down for maintenance';
 
 test.describe('Product detail', () => {
   test('shows the product as the API describes it', { tag: ['@smoke'] }, async ({ productPage, product }) => {
@@ -45,35 +57,49 @@ test.describe('Product detail', () => {
     await productPage.typeQuantity(150);
 
     await expect(productPage.quantity).toHaveValue('99');
-    await expect(productPage.toast.message('You can order at most 99 of this product.').first()).toBeVisible();
+    await expect(productPage.toast.message(MESSAGES.atMost99).first()).toBeVisible();
   });
 
+  test('the + button stops at 99 with the same warning', { tag: ['@negative'] }, async ({ productPage }) => {
+    await productPage.typeQuantity(99);
+
+    await productPage.increaseQuantityButton.click();
+
+    await expect(productPage.quantity).toHaveValue('99');
+    await expect(productPage.toast.message(MESSAGES.atMost99).first()).toBeVisible();
+  });
+
+  // Adding to the cart is a write on the live site too: an anonymous cart, the same one `seedCart`
+  // creates to arrange other specs. It holds no account, no order and no personal data, so the
+  // smoke test runs there for real instead of behind a mock that would prove nothing.
   test('Add to cart puts the chosen quantity in the cart', { tag: ['@smoke'] }, async ({ productPage, product, apiMock }) => {
     const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
 
     await productPage.addToCart(3);
 
     expect((await added).postDataJSON()).toEqual({ product_id: product.id, quantity: 3 });
-    await expect(productPage.toast.message('Product added to shopping cart.')).toBeVisible();
+    await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
     await expect(productPage.header.cartLink).toHaveText('3');
   });
 
   test('adding to favourites while signed out is refused', { tag: ['@negative'] }, async ({ productPage, product, page }) => {
     await productPage.addToFavourites();
 
-    await expect(productPage.toast.message('Unauthorized, can not add product to your favorite list.')).toBeVisible();
+    await expect(productPage.toast.message(MESSAGES.favouriteSignedOut)).toBeVisible();
     // No redirect to the login page: the shopper stays on the product.
     await expect(page).toHaveURL(`/product/${product.id}`);
   });
 
-  test('a related product opens its own page', async ({ productPage, product, page }) => {
+  test('a related product opens its own page', async ({ productPage, product, page, request }) => {
     await expect(productPage.relatedHeading).toBeVisible();
-    const [related] = await productPage.relatedNames();
+    const [relatedName] = await productPage.relatedNames();
+    const related = ((await (await request.get(`${API_URL}/products/${product.id}/related`)).json()) as { id: string; name: string }[]).find((p) => p.name === relatedName);
+    expect(related, `"${relatedName}" should be one of the product's related products`).toBeDefined();
 
-    await productPage.openRelated(related);
+    await productPage.openRelated(relatedName);
 
-    await expect(productPage.name).toHaveText(related);
-    await expect(page).not.toHaveURL(`/product/${product.id}`);
+    await expect(page).toHaveURL(`/product/${related!.id}`);
+    await expect(productPage.name).toHaveText(relatedName);
   });
 
   test.describe('an out-of-stock product', () => {
@@ -104,7 +130,7 @@ test.describe('Product detail', () => {
 
       await productPage.addToFavourites();
 
-      await expect(productPage.toast.message('Product added to your favorites list.')).toBeVisible();
+      await expect(productPage.toast.message(MESSAGES.favouriteAdded)).toBeVisible();
     });
 
     test('adding a product twice says it is already a favourite', { tag: ['@negative'] }, async ({ signedInProductPage: productPage, apiMock }) => {
@@ -112,17 +138,17 @@ test.describe('Product detail', () => {
 
       await productPage.addToFavourites();
 
-      await expect(productPage.toast.message('Product already in your favorites list.')).toBeVisible();
+      await expect(productPage.toast.message(MESSAGES.favouriteDuplicate)).toBeVisible();
     });
   });
 
   test.describe('when adding to the cart fails', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.fail('POST', /^\/carts(\/[^/]+)?$/, 500)));
+    test.use(withMocks(mock.fail('POST', /^\/carts(\/[^/]+)?$/, 500, { message: SERVER_MESSAGE })));
 
     test('the shopper is told and the cart stays empty', async ({ productPage }) => {
       await productPage.addToCart();
 
-      await expect(productPage.toast.message('Server Error')).toBeVisible();
+      await expect(productPage.toast.message(SERVER_MESSAGE)).toBeVisible();
       await expect(productPage.header.cartLink).toHaveCount(0);
     });
   });
@@ -158,7 +184,6 @@ test.describe('Product detail', () => {
 
       test('the page says the product is unavailable', async ({ productPage }) => {
         knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".');
-        await expect(productPage.relatedHeading).toBeVisible();
 
         await expect(productPage.shell.errorAlert.or(productPage.unavailableMessage), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: 5_000 });
       });

@@ -1,5 +1,11 @@
 name: Start the self-hosted Toolshop
 description: Build the Toolshop images with a GitHub Actions layer cache, start, seed and health-check them.
+inputs:
+  cache-write:
+    description: >-
+      "true" to write the Docker layer cache after the build. Every job reads it, but the layers are the
+      same in all of them, so one job per run (on main) writes it instead of eleven.
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -19,7 +25,7 @@ runs:
         load: true
         set: |
           *.cache-from=type=gha,scope=toolshop
-          *.cache-to=type=gha,scope=toolshop,mode=max
+          ${{ inputs.cache-write == 'true' && '*.cache-to=type=gha,scope=toolshop,mode=max' || '' }}
 
     - name: Start, seed and wait until healthy
       shell: bash

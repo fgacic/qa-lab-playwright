@@ -1,7 +1,5 @@
-import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { apiPath } from '@support/env';
 import { fakeJwt, fakeUser } from '@support/payloads';
 
 /**
@@ -9,9 +7,6 @@ import { fakeJwt, fakeUser } from '@support/payloads';
  * Successful sign-ins are mocked end to end: no real account is touched.
  */
 test.describe('Login', () => {
-  const loginRequests = async (page: Page) =>
-    (await page.requests()).filter((r) => r.method() === 'POST' && apiPath(r.url()) === '/users/login');
-
   test('an empty form shows both required labels', { tag: ['@negative'] }, async ({ loginPage }) => {
     await loginPage.loginButton.click();
 
@@ -19,13 +14,16 @@ test.describe('Login', () => {
     await expect(loginPage.password.error).toHaveText('Password is required');
   });
 
-  test('a malformed email and a too-short password are rejected before sending', { tag: ['@negative'] }, async ({ loginPage, page }) => {
+  test('a malformed email and a too-short password are rejected before sending', { tag: ['@negative'] }, async ({ loginPage, apiMock }) => {
+    // Nothing answers POST /users/login here, so the guard refuses (and records) a request that should never leave.
+    await apiMock.blockUnmockedWrites();
+
     await loginPage.login('not-an-email', 'x');
 
     await expect(loginPage.email.error).toHaveText('Email format is invalid');
     await expect(loginPage.password.error).toHaveText('Password length is invalid');
-    // The labels show once the form has validated; any request would have left in the same click.
-    await expect.poll(async () => (await loginRequests(page)).length, { message: 'invalid input must not reach the API', timeout: 1_000 }).toBe(0);
+    // A request would leave in the same click that renders the labels, ahead of them, so the guard has seen it by now.
+    expect(apiMock.blockedWrites, 'invalid input must not reach the API').toEqual([]);
   });
 
   test('unknown credentials are refused', { tag: ['@negative', '@smoke'] }, async ({ loginPage, page }) => {
@@ -121,8 +119,11 @@ test.describe('Login', () => {
     });
   });
 
-  for (const failure of [mock.fail('POST', '/users/login', 500), mock.abort('POST', '/users/login')]) {
-    const how = 'abort' in failure.responses[0] ? 'cannot be reached' : 'answers 500';
+  const apiFailures = [
+    { how: 'answers 500', failure: mock.fail('POST', '/users/login', 500) },
+    { how: 'cannot be reached', failure: mock.abort('POST', '/users/login') },
+  ];
+  for (const { how, failure } of apiFailures) {
     test.describe(`when the login API ${how}`, { tag: ['@mocked'] }, () => {
       test.use(withMocks(failure));
 

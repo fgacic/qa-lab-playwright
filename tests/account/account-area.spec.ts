@@ -1,16 +1,13 @@
-import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { apiPath } from '@support/env';
 import { FAVORITE_ID, INVOICE_NUMBER, fakeFavorite, fakeInvoice, fakeMessage, fakeReply, fakeUser, page as paged } from '@support/payloads';
+import { TOKEN_KEY } from '@support/session';
 
 /**
  * The signed-in area with a mocked session: a fake token and mocked account endpoints, so it
  * runs anywhere without an account. The real thing is covered in real-account.spec.ts.
  */
-const changePasswordRequests = async (page: Page) =>
-  (await page.requests()).filter((r) => r.method() === 'POST' && apiPath(r.url()) === '/users/change-password');
-
 test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   // An account with nothing in it. Any section the SPA opens needs its endpoint mocked: a real
   // 401 makes the SPA drop the session and redirect to login. Nested blocks replace this set.
@@ -40,12 +37,22 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     }
   });
 
-  test('signing out forgets the session and sends the customer to login', async ({ accountPage, page }) => {
-    await accountPage.header.openUserMenuItem('Sign out');
+  test.describe('sign out', () => {
+    test('signing out forgets the session and sends the customer to login', async ({ accountPage, page }) => {
+      await accountPage.header.openUserMenuItem('Sign out');
 
-    await expect(page).toHaveURL('/auth/login');
-    await expect(accountPage.header.userMenu).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('auth-token')), { message: 'the stored token is gone' }).toBeNull();
+      await expect(page).toHaveURL('/auth/login');
+      await expect(accountPage.header.userMenu).toHaveCount(0);
+      await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY), { message: 'the stored token is gone' }).toBeNull();
+    });
+
+    test('"Sign out" is a real link or button', { tag: ['@a11y', '@bug'] }, async ({ accountPage }) => {
+      knownBug('A11Y-04', '"Sign out" is an <a> without href: no link role, not reachable with Tab.');
+      await accountPage.header.userMenu.click();
+      await expect(accountPage.header.userMenuItem('Sign out')).toBeVisible();
+
+      await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toBeVisible({ timeout: 2_000 });
+    });
   });
 
   test.describe('favorites', () => {
@@ -185,24 +192,55 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
         new_password: 'Qa-lab-new-pass-2!',
         new_password_confirmation: 'Qa-lab-new-pass-2!',
       });
+      await expect(profilePage.alerts.filter({ hasText: 'Your password is successfully updated!' })).toBeVisible();
     });
 
-    test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, page }) => {
+    test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
       knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.');
       await expect(profilePage.changePasswordButton).toBeVisible();
 
       await profilePage.changePasswordButton.click();
 
       await expect(profilePage.alerts.filter({ hasText: /required/i }).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: 2_000 });
-      expect(await changePasswordRequests(page), 'BUG-26: no request is sent').toHaveLength(0);
+      await expect.poll(() => apiMock.requestsTo('POST', '/users/change-password'), { message: 'BUG-26: no request is sent' }).toBe(0);
     });
-  });
 
-  test('"Sign out" is a real link or button', { tag: ['@a11y', '@bug'] }, async ({ accountPage }) => {
-    knownBug('A11Y-04', '"Sign out" is an <a> without href: no link role, not reachable with Tab.');
-    await accountPage.header.userMenu.click();
-    await expect(accountPage.header.userMenuItem('Sign out')).toBeVisible();
+    // The email field is read-only on this page, so the profile's format check is exercised through the phone number.
+    test('an empty first name is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await profilePage.firstName.input.fill('');
 
-    await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toBeVisible({ timeout: 2_000 });
+      await profilePage.update();
+
+      await expect(profilePage.alerts.filter({ hasText: 'Please correct the highlighted fields before saving.' })).toBeVisible();
+      await expect.poll(() => apiMock.requestsTo('PUT', /^\/users\/[^/]+$/), { message: 'invalid input is not sent' }).toBe(0);
+    });
+
+    test('a malformed phone number is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await profilePage.phone.input.fill('abc');
+
+      await profilePage.update();
+
+      await expect(profilePage.alerts.filter({ hasText: 'Please enter a valid phone number (digits, spaces and ( ) + - only).' })).toBeVisible();
+      await expect.poll(() => apiMock.requestsTo('PUT', /^\/users\/[^/]+$/), { message: 'invalid input is not sent' }).toBe(0);
+    });
+
+    test('a profile the API rejects shows its reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await apiMock.use(mock.fail('PUT', /^\/users\/[^/]+$/, 422, { first_name: ['The first name field must not be greater than 40 characters.'] }));
+
+      await profilePage.update();
+
+      await expect(profilePage.alerts.filter({ hasText: 'The first name field must not be greater than 40 characters.' })).toBeVisible();
+      await expect(profilePage.alerts.filter({ hasText: 'successfully updated' })).toHaveCount(0);
+    });
+
+    test('a wrong current password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      // The real API answers 400 with this body.
+      await apiMock.use(mock.fail('POST', '/users/change-password', 400, { success: false, message: 'Your current password does not matches with the password.' }));
+
+      await profilePage.changePassword('Qa-lab-wrong-pass-1!', 'Qa-lab-new-pass-2!');
+
+      await expect(profilePage.alerts.filter({ hasText: 'Your current password does not matches with the password.' })).toBeVisible();
+      await expect(profilePage.alerts.filter({ hasText: 'successfully updated' })).toHaveCount(0);
+    });
   });
 });

@@ -1,4 +1,5 @@
 import type { Locator } from '@playwright/test';
+import { apiPath } from '@support/env';
 import { step } from '@support/step';
 
 export const SORT_OPTIONS = {
@@ -22,7 +23,7 @@ export class FilterPanel {
   /** On phones the whole sidebar, search included, folds behind this button. */
   readonly toggle: Locator;
 
-  constructor(root: Locator) {
+  constructor(private readonly root: Locator) {
     this.toggle = root.getByRole('button', { name: 'Filters', exact: true });
     this.sort = root.getByRole('combobox', { name: 'sort' });
     // Each parent category nests a group of its own, also named "Categories": take the outer one.
@@ -55,13 +56,13 @@ export class FilterPanel {
   @step('Filter by category "{0}"')
   async filterByCategory(name: string): Promise<void> {
     await this.expand();
-    await this.category(name).check();
+    await this.refiltering(() => this.category(name).check());
   }
 
   @step('Filter by brand "{0}"')
   async filterByBrand(name: string): Promise<void> {
     await this.expand();
-    await this.brand(name).check();
+    await this.refiltering(() => this.brand(name).check());
   }
 
   @step('Show only eco-friendly products')
@@ -81,6 +82,18 @@ export class FilterPanel {
   async setMaxPrice(max: number): Promise<void> {
     await this.expand();
     await this.moveHandle(this.maxPrice, max);
+  }
+
+  /**
+   * Runs a change that re-sends QUERY /products and returns once the shop has the answer, so the
+   * next filter starts from a settled list instead of racing this one (the shop shows whichever
+   * answer arrives last, BUG-30).
+   */
+  private async refiltering(change: () => Promise<void>): Promise<void> {
+    await Promise.all([
+      this.root.page().waitForResponse((r) => r.request().method() === 'QUERY' && apiPath(r.url()) === '/products'),
+      change(),
+    ]);
   }
 
   private async moveHandle(handle: Locator, to: number): Promise<void> {

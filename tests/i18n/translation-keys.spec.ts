@@ -17,6 +17,16 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
     ]);
   });
 
+  test('keys with digits, camelCase or a capital are flagged too', () => {
+    expect(untranslatedKeys(['errors.404.title', 'page.forgotPassword', 'nav.Home', 'Oops: errors.404.title.', 'cart.items.2'])).toEqual([
+      'errors.404.title',
+      'page.forgotPassword',
+      'nav.Home',
+      'errors.404.title',
+      'cart.items.2',
+    ]);
+  });
+
   test('real page text holds no key', () => {
     const real = [
       'Have at least one special symbol (e.g., @, #, $, etc.)',
@@ -29,6 +39,11 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
       'Attachment: only .txt files (max. 250 KB), e.g. notes.txt',
       'Effective Date: Nov. 4, 2026. Thank you.',
       'Greek (π.χ. αυτό) and German (d.h. dies, z. B. das)',
+      // The footer's build line, a version, a decimal, an ordinal date and a sentence run into the next without a space.
+      'vdev | Built 2026-07-07 | Angular 20.0.5',
+      'Running v5.3.1 on port 4200',
+      'Order no. 12.345, weight 2.5kg, Error 404.',
+      'Open Mon.-Fri. 9.00-17.00 or call 0800.123.456',
     ];
 
     expect(untranslatedKeys(real)).toEqual([]);

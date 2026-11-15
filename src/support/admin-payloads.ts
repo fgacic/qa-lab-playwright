@@ -5,11 +5,11 @@ import type { Product } from './toolshop-api';
  * (https://api.practicesoftwaretesting.com/api/documentation). Every record is invented:
  * the names say so ("Qa Lab ..."), emails are on example.com.
  */
-export const paginated = <T>(data: T[], perPage = 15) => ({
-  current_page: 1,
+export const paginated = <T>(data: T[], perPage = 15, { page = 1, lastPage = 1 } = {}) => ({
+  current_page: page,
   data,
   from: data.length ? 1 : null,
-  last_page: 1,
+  last_page: lastPage,
   per_page: perPage,
   to: data.length || null,
   total: data.length,
@@ -45,6 +45,9 @@ export const category = { id: '01QALABCATEGORY0000000000', parent_id: null, name
 /** The payment of the mocked order: the API's method code and the label the order page shows for it. */
 export const orderPayment = { method: 'cash-on-delivery', label: 'Cash on Delivery' };
 
+/** The one line of the mocked order: fixed numbers, so no spec computes its expectation with the arithmetic it checks. */
+export const orderLine = { unitPrice: 9.99, quantity: 2, total: 19.98 };
+
 export const order = (product: Product) => ({
   id: '01QALABORDER0000000000000',
   user_id: customer.id,
@@ -57,15 +60,15 @@ export const order = (product: Product) => ({
   billing_postal_code: '1234 AB',
   additional_discount_percentage: null,
   additional_discount_amount: null,
-  subtotal: product.price * 2,
-  total: product.price * 2,
+  subtotal: orderLine.total,
+  total: orderLine.total,
   status: 'AWAITING_FULFILLMENT',
   status_message: null,
   created_at: '2026-11-01 10:00:00',
   payment: { id: '01QALABPAYMENT', payment_method: orderPayment.method, payment_details: {} },
   user: customer,
   invoicelines: [
-    { id: '01QALABLINE0', invoice_id: '01QALABORDER0000000000000', product_id: product.id, unit_price: product.price, discount_percentage: null, discounted_price: null, quantity: 2, product },
+    { id: '01QALABLINE0', invoice_id: '01QALABORDER0000000000000', product_id: product.id, unit_price: orderLine.unitPrice, discount_percentage: null, discounted_price: null, quantity: orderLine.quantity, product: { ...product, price: orderLine.unitPrice } },
   ],
 });
 
@@ -80,6 +83,16 @@ export const contactMessage = {
   user: customer,
   replies: [],
 };
+
+/** An answer of an admin the message detail shows as a card under "Replies": the author's name, then the text. */
+export const messageReply = (text: string) => ({
+  id: '01QALABREPLY0000000000000',
+  message: text,
+  message_id: contactMessage.id,
+  user_id: adminUser.id,
+  created_at: '2026-11-02 09:00:00',
+  user: adminUser,
+});
 
 export const reports = {
   totalSalesOfYears: [{ year: 2025, total: 1234.5 }, { year: 2026, total: 2345.75 }],

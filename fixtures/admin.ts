@@ -1,10 +1,10 @@
-import { expect, mergeTests, type Page } from '@playwright/test';
+import { mergeTests, type Page } from '@playwright/test';
 import { AdminBrandForm, AdminCategoryForm, AdminProductForm, AdminUserForm } from '@pages/admin/AdminForms';
 import { AdminListPage } from '@pages/admin/AdminListPage';
 import { ADMIN_LISTS, type AdminListName } from '@pages/admin/admin-lists';
 import { AdminDashboardPage, AdminMessagePage, AdminOrderPage, AdminSalesReportPage, AdminSettingsPage, AdminStatisticsPage } from '@pages/admin/AdminPages';
 import * as A from '@support/admin-payloads';
-import { mock, type HttpMethod, type MockRoute } from '@support/api-mock';
+import { mock } from '@support/api-mock';
 import { ADMIN_CREDENTIALS, apiPath } from '@support/env';
 import { fakeJwt } from '@support/payloads';
 import { installToken } from '@support/session';
@@ -25,24 +25,20 @@ export interface MockedBackOffice {
   order: ReturnType<typeof A.order>;
 }
 
-/** The API requests of one kind the page has sent since `sentRequests` was called. */
-export interface RequestCount {
-  readonly count: number;
-}
-
-/** Products a real back-office journey created, deleted by id when the test ends (even when it failed). */
+/**
+ * Products the page created through the real API, watched from the responses themselves (a
+ * timed-out wait in the test cannot leak one) and deleted by id when the test ends, pass or
+ * fail. A product the UI deleted is dropped from the list as soon as its DELETE succeeds.
+ */
 export interface CreatedProducts {
-  track(id: string | undefined): void;
-  /** For a product the test itself deleted, so teardown does not delete it twice. */
-  forget(id: string): void;
+  /** The ids created and not yet deleted. */
+  pending(): string[];
 }
 
 export interface AdminFixtures {
-  /** A real admin API token, for arranging and cleaning up in the real back-office journeys. */
-  adminToken: string;
+  /** Signs the real admin in through the API (once per test, on first use) and returns a fresh token, for arranging and cleaning up. */
+  adminToken: () => Promise<string>;
   createdProducts: CreatedProducts;
-  /** Starts counting the requests to an endpoint, to prove after the fact that none was sent. */
-  sentRequests: (method: HttpMethod, path: MockRoute['path']) => RequestCount;
   adminSession: AdminSession;
   /** Which list `adminList` opens, for specs that run the same case over every list. */
   adminListName: AdminListName;
@@ -118,36 +114,44 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
   // No runtime skip here: specs that need a real admin carry @admin, and the `admin` project that
   // runs them is only scheduled where a real admin may be used (playwright.config.ts).
   adminToken: async ({ api }, use) => {
-    await use(await api.login(ADMIN_CREDENTIALS.email ?? '', ADMIN_CREDENTIALS.password ?? ''));
+    const { email, password } = ADMIN_CREDENTIALS;
+    if (!email || !password) throw new Error('No admin credentials: set ADMIN_EMAIL and ADMIN_PASSWORD (the self-hosted shop is seeded with its own admin).');
+    // Lazy, so mocked specs never sign in; one login per test.
+    let token: Promise<string> | undefined;
+    await use(() => (token ??= api.login(email, password)));
   },
-  createdProducts: async ({ api, adminToken }, use) => {
-    const ids = new Set<string>();
-    await use({
-      track: (id) => {
-        if (!id) throw new Error('The create response carried no product id, so the product could not be cleaned up.');
-        ids.add(id);
-      },
-      forget: (id) => void ids.delete(id),
+  createdProducts: async ({ page, api, adminToken }, use) => {
+    const pending = new Set<string>();
+    const reads: Promise<void>[] = [];
+    page.on('response', (response) => {
+      const method = response.request().method();
+      const pathname = apiPath(response.url());
+      if (!response.ok()) return;
+      if (method === 'POST' && pathname === '/products') {
+        // Read at once: the id is the only handle teardown has on the product.
+        const read = response.json().then((body: { id?: string }) => {
+          if (!body.id) throw new Error('A create response carried no product id, so the product could not be cleaned up.');
+          pending.add(body.id);
+        });
+        read.catch(() => undefined); // reported in teardown; this only keeps the rejection from going unhandled meanwhile
+        reads.push(read);
+      } else if (method === 'DELETE' && /^\/products\/[^/]+$/.test(pathname)) {
+        pending.delete(pathname.split('/').pop()!);
+      }
     });
-    for (const id of ids) await api.deleteProduct(adminToken, id);
-  },
-  sentRequests: async ({ page }, use) => {
-    await use((method, path) => {
-      const seen = { count: 0 };
-      page.on('request', (request) => {
-        const pathname = apiPath(request.url());
-        if (request.method() === method && (typeof path === 'string' ? pathname === path : path.test(pathname))) seen.count++;
-      });
-      return seen;
-    });
+    await use({ pending: () => [...pending] });
+    const unread = (await Promise.allSettled(reads)).filter((r) => r.status === 'rejected');
+    for (const id of pending) await api.deleteProduct(await adminToken(), id);
+    // Cleaned up what was known first; an id that could not be read is still a failure to report.
+    if (unread.length) throw unread[0].reason;
   },
   adminListName: ['products', { option: true }],
 
-  backOffice: async ({ page, adminSession, apiMock, api, catalog }, use) => {
+  backOffice: async ({ page, adminSession, apiMock, adminToken, catalog }, use) => {
     if (adminSession === 'storage-state') {
       // The storageState from admin.setup.ts carries the session, but Toolshop's JWT lives 300 s
       // and cannot be refreshed (/users/refresh answers 500), so a fresh token is put in place.
-      await installToken(page, await api.login(ADMIN_CREDENTIALS.email ?? '', ADMIN_CREDENTIALS.password ?? ''));
+      await installToken(page, await adminToken());
       const product = await catalog.inStock();
       await use({ product, order: A.order(product) });
       return;
@@ -160,8 +164,8 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
     // Defaults: a describe-level `withMocks()` or a test's `apiMock.use()` overrides any of them.
     await apiMock.useDefaults(...backOfficeMocks(product, order));
     await apiMock.blockUnmockedWrites();
+    // Any write no mock answered is refused, and the `page` fixture fails the test that sent it.
     await use({ product, order });
-    expect(apiMock.blockedWrites, 'writes that reached no mock (refused, never sent)').toEqual([]);
   },
 
   adminDashboard: async ({ page, backOffice: _ }, use) => {

@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { step } from '@support/step';
 
 export type ChatAction = 'Find a product' | 'Order a product' | 'Checkout' | 'Create support ticket';
@@ -27,6 +27,11 @@ export class ChatWidget {
     return this.window.getByText(text).last();
   }
 
+  /** A line the visitor typed, echoed in the transcript. */
+  said(text: string): Locator {
+    return this.window.getByText(text, { exact: true });
+  }
+
   action(name: ChatAction): Locator {
     return this.window.getByRole('button', { name, exact: true }).last();
   }
@@ -35,7 +40,7 @@ export class ChatWidget {
   @step('Open the chat')
   async open(): Promise<void> {
     await this.openButton.click();
-    await this.window.page().waitForFunction((el) => el !== null && getComputedStyle(el).opacity === '1', await this.window.elementHandle());
+    await expect(this.window).toHaveCSS('opacity', '1');
   }
 
   @step('Close the chat')

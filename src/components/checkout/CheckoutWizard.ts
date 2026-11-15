@@ -27,10 +27,10 @@ export class CheckoutWizard {
     this.confirmation = root.getByText(/^Thanks for your order! Your invoice number is INV-\d+\.$/);
   }
 
+  /** The invoice number in the confirmation, once it is shown. */
   async invoiceNumber(): Promise<string> {
-    await expect(this.confirmation).toHaveText(/INV-\d+/);
-    const found = /INV-\d+/.exec(await this.confirmation.innerText());
-    if (!found) throw new Error('The confirmation names no invoice number');
-    return found[0];
+    let found: string | undefined;
+    await expect.poll(async () => (found = /INV-\d+/.exec(await this.confirmation.innerText().catch(() => ''))?.[0]), { message: 'the confirmation should name an invoice number' }).toBeDefined();
+    return found!;
   }
 }

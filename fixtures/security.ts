@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { ContactPage } from '@pages/ContactPage';
 
 /**
  * Injection payloads, typed into forms as plain text; the specs then check the text comes back as
@@ -13,6 +14,18 @@ export const XSS_PAYLOADS = {
   'svg onload, breaking out of an attribute': `"><svg onload=__qaLabXssHit(3)>`,
 } as const;
 export type XssPayload = (typeof XSS_PAYLOADS)[keyof typeof XSS_PAYLOADS];
+
+/**
+ * The same three attacks, for the address bar. They call the hook as a tagged template
+ * (a name followed by a backtick string) instead of with parentheses: Angular's router reads
+ * `(...)` in a URL as a secondary outlet, so a payload with a call in it is redirected home before
+ * the page ever sees it. The number it passes still says which one ran.
+ */
+export const ROUTE_XSS_PAYLOADS = {
+  'img onerror': '<img src=x onerror=__qaLabXssHit`4`>',
+  'script tag': '<script>__qaLabXssHit`5`</script>',
+  'svg onload, breaking out of an attribute': '"><svg onload=__qaLabXssHit`6`>',
+} as const;
 
 /**
  * How long a negative result is observed before it is believed. "Nothing ran" cannot be polled
@@ -31,9 +44,11 @@ declare global {
 
 /**
  * Records every sign that page script ran: a call to `__qaLabXssHit` (what the payloads do) and
- * any alert, confirm or prompt (what a payload written by hand would reach for). Installed
- * before the first navigation, in every frame, and kept on the Node side, so a hit survives the
- * page navigating away.
+ * any alert, confirm or prompt (what a payload written by hand would reach for). Installed on
+ * the whole browser context before the first navigation, so it covers every frame, popup and tab
+ * the page opens, and kept on the Node side, so a hit survives the page navigating away.
+ * `executions()` reports what ran anywhere in the context; the DOM checks look at the page the
+ * test drives.
  */
 export class XssSentinel {
   private readonly hits: string[] = [];
@@ -41,8 +56,9 @@ export class XssSentinel {
   constructor(private readonly page: Page, private readonly watching: boolean) {}
 
   async install(): Promise<void> {
-    await this.page.exposeFunction('__qaLabXssHit', (kind: string) => void this.hits.push(String(kind)));
-    await this.page.addInitScript(() => {
+    const context = this.page.context();
+    await context.exposeFunction('__qaLabXssHit', (kind: string) => void this.hits.push(String(kind)));
+    await context.addInitScript(() => {
       for (const name of ['alert', 'confirm', 'prompt'] as const) {
         window[name] = ((message?: unknown) => {
           window.__qaLabXssHit(`${name}: ${String(message)}`);
@@ -51,7 +67,7 @@ export class XssSentinel {
       }
     });
     // A dialog the wrapper missed (opened by a frame created before it, say) must not hang the page.
-    this.page.on('dialog', async (dialog) => {
+    context.on('dialog', async (dialog) => {
       this.hits.push(`${dialog.type()}: ${dialog.message()}`);
       await dialog.dismiss();
     });
@@ -74,7 +90,11 @@ export class XssSentinel {
     });
   }
 
-  /** The negative check: nothing a payload could do has been seen, after the observation window. */
+  /**
+   * The negative check: nothing a payload could do has been seen, after the observation window.
+   * This is the one that waits; `expectNoInjectedElements` is a snapshot, so call it first and
+   * this last.
+   */
   async expectNotExecuted(): Promise<void> {
     expect(this.watching, 'the sentinel is not installed: add test.use({ xssWatch: true }) to the spec').toBe(true);
     await this.settle();
@@ -98,6 +118,7 @@ export class XssSentinel {
     );
   }
 
+  /** A snapshot: it passes the instant the DOM holds no parsed payload and says nothing about what is still to run. */
   async expectNoInjectedElements(): Promise<void> {
     await expect.poll(() => this.injectedCount(), { message: 'a payload was parsed into elements' }).toBe(0);
   }
@@ -111,6 +132,8 @@ export interface SecurityFixtures {
    */
   xssWatch: boolean;
   xss: XssSentinel;
+  /** The contact page, opened by somebody else: a browser context of their own with nobody signed in. */
+  visitorContactPage: ContactPage;
 }
 
 export const test = base.extend<SecurityFixtures>({
@@ -123,4 +146,11 @@ export const test = base.extend<SecurityFixtures>({
     },
     { auto: true },
   ],
+  visitorContactPage: async ({ browser, baseURL }, use) => {
+    const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+    const contactPage = new ContactPage(await visitor.newPage());
+    await contactPage.open();
+    await use(contactPage);
+    await visitor.close();
+  },
 });

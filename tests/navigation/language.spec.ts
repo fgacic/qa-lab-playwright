@@ -3,7 +3,11 @@ import type { NavKey } from '@components/Header';
 import { expect, test } from '@fixtures';
 import { skipIfBotChallenge } from '@support/bot-challenge';
 
-/** What the header says in each language (as shipped on the site, typos included). */
+/**
+ * What the header says in each language (as shipped on the site, typos included). Dutch "Home" and
+ * Dutch and French "Contact" equal the English word: those languages use it as is, so they are not
+ * untranslated strings.
+ */
 const NAV_LABELS: Record<Language, Partial<Record<NavKey, string>>> = {
   de: { home: 'Start', categories: 'Kategorien', contact: 'Kontakt', 'sign-in': 'Einloggen' },
   el: { home: 'Αρχική', categories: 'Κατηγορίες', contact: 'Επικοινωνία', 'sign-in': 'Σύνδεση' },
@@ -53,6 +57,6 @@ test.describe('Language switcher', () => {
 
     await expect(page).toHaveURL('/contact');
     await expect(header.navItem('home')).toHaveText('Start');
-    await expect(page.getByRole('heading', { name: 'Kontakt' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Kontakt', exact: true })).toBeVisible();
   });
 });

@@ -6,6 +6,8 @@ export class LiveActivityPanel {
   readonly openButton: Locator;
   readonly window: Locator;
   readonly closeButton: Locator;
+  /** The connection dot: its title is "Live" while the stream is open and "Reconnecting" otherwise. */
+  readonly connection: Locator;
   readonly salesCount: Locator;
   readonly revenue: Locator;
   readonly emptyState: Locator;
@@ -15,6 +17,7 @@ export class LiveActivityPanel {
     this.openButton = page.getByRole('button', { name: 'Show live shop activity' });
     this.window = page.getByTestId('live-activity-window');
     this.closeButton = this.window.getByRole('button', { name: 'Close' });
+    this.connection = this.window.getByTestId('live-activity-status');
     this.salesCount = this.window.getByTestId('live-activity-count');
     this.revenue = this.window.getByTestId('live-activity-revenue');
     this.emptyState = this.window.getByTestId('live-activity-empty');

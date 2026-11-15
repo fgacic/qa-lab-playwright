@@ -21,6 +21,14 @@ async function answerProductQueriesInOrder(page: Page): Promise<void> {
   });
 }
 
+/** The upper price limit the slider test sets. */
+const MAX_PRICE = 80;
+
+/** How long the answer for an earlier price step is held back in the BUG-30 test. */
+const LATE_ANSWER_MS = 2_000;
+/** Time the grid gets, once every answer is in, to show the last one: the late answer plus a margin. */
+const LATE_ANSWER_SETTLE_MS = LATE_ANSWER_MS + 1_000;
+
 /**
  * Filtering happens on the server: every change re-sends QUERY /products with the filter in
  * the body. Each test checks both halves: the request carries the filter, the API's answer
@@ -33,14 +41,15 @@ test.describe('Product filters', () => {
     await homePage.filters.filterByCategory('Pliers');
 
     const { body, json: found } = await results;
-    expect(body.by_category.split(',')).toHaveLength(1);
+    expect(String(body.by_category).split(',')).toHaveLength(1);
     expect(found.total, 'the catalogue should contain pliers').toBeGreaterThan(0);
     expect(found.data.map((p) => p.category.name)).toEqual(found.data.map(() => 'Pliers'));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
-  test('ticking a parent category ticks all of its subcategories', async ({ homePage }) => {
+  test('ticking a parent category ticks all of its subcategories and queries them all', async ({ homePage, apiMock }) => {
     const { filters } = homePage;
+    const results = apiMock.waitForResponse('QUERY', '/products', (body) => !!body.by_category);
 
     await filters.filterByCategory('Power Tools');
 
@@ -48,6 +57,11 @@ test.describe('Product filters', () => {
       await expect(filters.category(child)).toBeChecked();
     }
     await expect(filters.category('Hammer')).not.toBeChecked();
+    // The request must carry every ticked box (the parent and its four children), not only the one clicked.
+    const ticked = await Promise.all((await filters.categories.getByRole('checkbox', { checked: true }).all()).map((box) => box.inputValue()));
+    const { body } = await results;
+    expect(ticked).toHaveLength(5);
+    expect(String(body.by_category).split(',').sort()).toEqual(ticked.sort());
   });
 
   test('a brand shows only products of that brand', async ({ homePage, apiMock }) => {
@@ -95,13 +109,16 @@ test.describe('Product filters', () => {
 
   test('the price slider hides products above the maximum', async ({ homePage, apiMock, page }) => {
     await answerProductQueriesInOrder(page);
-    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === 'price,1,20');
+    // The handle starts at $100 and moves one dollar per key press, each press its own request, so a
+    // far target costs a long run of requests (80 for $20). $80 keeps it to 20 and still leaves the
+    // dearest products (up to about $90) above the limit.
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,1,${MAX_PRICE}`);
 
-    await homePage.filters.setMaxPrice(20);
+    await homePage.filters.setMaxPrice(MAX_PRICE);
 
     const { json: found } = await results;
-    expect(found.total, 'the catalogue should contain products up to $20').toBeGreaterThan(0);
-    expect(found.data.every((p) => p.price <= 20)).toBe(true);
+    expect(found.total, `the catalogue should contain products up to $${MAX_PRICE}`).toBeGreaterThan(0);
+    expect(found.data.every((p) => p.price <= MAX_PRICE)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
   });
@@ -124,7 +141,7 @@ test.describe('Product filters', () => {
     // The answer for $14 is held back until after the one for $15, as a slow network can do.
     await page.route(/\/products$/, async (route) => {
       if (route.request().method() === 'QUERY' && route.request().postDataJSON()?.between === 'price,14,100') {
-        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await new Promise((resolve) => setTimeout(resolve, LATE_ANSWER_MS));
       }
       await route.fallback();
     });
@@ -135,7 +152,7 @@ test.describe('Product filters', () => {
 
     const { json: wanted } = await final;
     await late;
-    await expect(homePage.grid.names, 'BUG-30: the grid shows the answer for the last step ($15 and up)').toHaveText(wanted.data.map((p) => p.name), { timeout: 3_000 });
+    await expect(homePage.grid.names, 'BUG-30: the grid shows the answer for the last step ($15 and up)').toHaveText(wanted.data.map((p) => p.name), { timeout: LATE_ANSWER_SETTLE_MS });
   });
 
   test.describe('when the product list comes back empty', { tag: ['@mocked'] }, () => {

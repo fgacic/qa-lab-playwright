@@ -22,12 +22,21 @@ test.describe('Registration form', () => {
     Password: 'Password is required Password must be minimal 6 characters long. Password can not include invalid characters.',
   } as const;
 
-  test('an empty form flags every required field', { tag: ['@negative'] }, async ({ registerPage }) => {
+  // The form's own validation must stop the negative tests below. Nothing answers POST /users/register in
+  // them, so the guard refuses (and records) a submission that should never leave, and the real shop gets
+  // no account. A request would leave in the same click that renders the labels, ahead of them, so the
+  // guard has seen it by the time the labels are asserted.
+  const expectNothingSent = (blockedWrites: string[]) => expect(blockedWrites, 'invalid input is not sent').toEqual([]);
+
+  test('an empty form flags every required field', { tag: ['@negative'] }, async ({ registerPage, apiMock }) => {
+    await apiMock.blockUnmockedWrites();
+
     await registerPage.submit();
 
     for (const [field, message] of Object.entries(required)) {
       await expect(registerPage.fields[field as keyof typeof required].error, field).toHaveText(message);
     }
+    expectNothingSent(apiMock.blockedWrites);
   });
 
   const invalid = [
@@ -39,16 +48,20 @@ test.describe('Registration form', () => {
   ] as const;
 
   for (const { field, label, value, message } of invalid) {
-    test(`a ${label} of "${value}" is rejected`, { tag: ['@negative'] }, async ({ registerPage }) => {
+    test(`a ${label} of "${value}" is rejected`, { tag: ['@negative'] }, async ({ registerPage, apiMock }) => {
+      await apiMock.blockUnmockedWrites();
+
       await registerPage[field].input.fill(value);
       await registerPage.submit();
 
       await expect(registerPage[field].error).toHaveText(message);
+      expectNothingSent(apiMock.blockedWrites);
     });
   }
 
-  test('a birth date in the future is rejected', { tag: ['@negative', '@bug'] }, async ({ registerPage }) => {
+  test('a birth date in the future is rejected', { tag: ['@negative', '@bug'] }, async ({ registerPage, apiMock }) => {
     knownBug('BUG-18', 'the form accepts a date of birth in the future (2099-01-01) without a validation label.');
+    await apiMock.blockUnmockedWrites();
     await registerPage.dateOfBirth.input.fill('2099-01-01');
     await registerPage.submit();
     await expect(registerPage.firstName.error).toBeVisible();
@@ -56,17 +69,38 @@ test.describe('Registration form', () => {
     await expect(registerPage.dateOfBirth.error, 'BUG-18: a future birth date is flagged').toBeVisible({ timeout: 5_000 });
   });
 
-  test('the form lists the password rules and can reveal the password', async ({ registerPage }) => {
+  test('the form lists the password rules', async ({ registerPage }) => {
     await expect(registerPage.passwordRules).toHaveText([
       'Be at least 8 characters long',
       'Contain both uppercase and lowercase letters',
       'Include at least one number',
       'Have at least one special symbol (e.g., @, #, $, etc.)',
     ]);
+  });
 
+  test('the eye button reveals the password', async ({ registerPage }) => {
     await registerPage.password.input.fill('Qa-lab-visible-1!');
+    await expect(registerPage.password.input).toHaveAttribute('type', 'password');
+
     await registerPage.showPasswordButton.click();
+
     await expect(registerPage.password.input).toHaveAttribute('type', 'text');
+  });
+
+  test('the password rules and the validation message ask for the same minimum length', { tag: ['@negative', '@bug'] }, async ({ registerPage, apiMock }) => {
+    knownBug('BUG-31', 'the page lists "at least 8 characters" for the password but the validation message says "minimal 6 characters long".');
+    await apiMock.blockUnmockedWrites();
+    const minimumIn = (text: string) => Number(/(\d+) characters/.exec(text)?.[1]);
+    await registerPage.password.input.fill('a');
+    await registerPage.submit();
+    // Both statements exist, whichever number a fix settles on.
+    await expect(registerPage.passwordRules.first()).toContainText(/\d+ characters/);
+    await expect(registerPage.password.error).toContainText(/\d+ characters/);
+
+    const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+    const [rule, message] = [oneLine(await registerPage.passwordRules.first().innerText()), oneLine(await registerPage.password.error.innerText())];
+
+    expect(minimumIn(message), `BUG-31: the message ("${message}") names the minimum the rules list ("${rule}")`).toBe(minimumIn(rule));
   });
 
   test.describe('when the postcode lookup knows the address', { tag: ['@mocked'] }, () => {

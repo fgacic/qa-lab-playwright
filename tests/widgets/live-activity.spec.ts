@@ -32,10 +32,43 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
 
-      await expect(liveActivity.items).toHaveCount(2);
-      await expect(liveActivity.items.first()).toContainText('Qa Lab Saw');
+      // The newest sale is listed first.
+      await expect(liveActivity.items).toHaveText([/Qa Lab Saw/, /Qa Lab Hammer/]);
       await expect(liveActivity.salesCount).toHaveText('2');
       await expect(liveActivity.revenue).toHaveText('$50.50');
+    });
+  });
+
+  test.describe('when the feed cannot be reached', { tag: ['@mocked', '@negative'] }, () => {
+    test.use(withMocks(mock.abort('GET', '/sales-stream')));
+
+    // The panel does not fail silently: it stays in its "connecting" state and the dot says it is retrying.
+    test('the panel says it is still connecting and lists nothing', async ({ homePage }) => {
+      const { liveActivity } = homePage.shell;
+
+      await liveActivity.open();
+
+      await expect(liveActivity.emptyState).toHaveText('Connecting to the live feed…');
+      await expect(liveActivity.connection).toHaveAttribute('title', 'Reconnecting');
+      await expect(liveActivity.items).toHaveCount(0);
+      await expect(liveActivity.salesCount).toHaveText('0');
+    });
+  });
+
+  test.describe('when the feed drops and comes back', { tag: ['@mocked'] }, () => {
+    // An established stream that ends is a dropped connection: every browser reconnects after the stream's own retry delay,
+    // which is what the second answer serves. (A request that never connects is not retried by Firefox, so it would not be a drop.)
+    test.use(withMocks(mock.sequence('GET', '/sales-stream',
+      { status: 200, contentType: 'text/event-stream', body: salesStream([], 300) },
+      { status: 200, contentType: 'text/event-stream', body: salesStream([{ name: 'Qa Lab Hammer', quantity: 1, unit_price: 10.5, buyer: 'Testy', city: 'Testville' }]) })));
+
+    test('the sales that arrive after the reconnect are listed', async ({ homePage }) => {
+      const { liveActivity } = homePage.shell;
+
+      await liveActivity.open();
+
+      await expect(liveActivity.items).toHaveText([/Qa Lab Hammer/]);
+      await expect(liveActivity.salesCount).toHaveText('1');
     });
   });
 });

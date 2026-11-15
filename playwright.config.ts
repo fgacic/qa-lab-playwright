@@ -8,11 +8,14 @@ const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
  * Where a spec may run is decided here, by tag, never by a runtime skip: a test that cannot run
  * in a project is not scheduled there at all, so reports count only real results.
  */
-const ownProject = /@account|@admin|@visual|@perf/; // these have projects of their own
-const phoneOnly = /@mobile/;
-const chromiumOnly = /@axe|@i18n/;
-const perfOnly = /@perf/; // measured alone, in the perf project
-const notOnThisTarget = IS_SELF_HOSTED ? /@live-only/ : /@self-hosted/;
+// Playwright greps "title + tags", so a tag must end at a word edge: a title that merely contains
+// "@perf" or "@admin-panel" must not be rescheduled. Tags are declared in `{ tag }`, never typed into a title.
+const tagged = (...names: string[]) => new RegExp(`@(?:${names.join('|')})(?![\\w-])`);
+const ownProject = tagged('account', 'admin', 'visual', 'perf'); // these have projects of their own
+const phoneOnly = tagged('mobile');
+const chromiumOnly = tagged('axe', 'i18n');
+const perfOnly = tagged('perf'); // measured alone, in the perf project
+const notOnThisTarget = IS_SELF_HOSTED ? tagged('live-only') : tagged('self-hosted');
 
 /**
  * Two targets (src/support/env.ts): the self-hosted Toolshop (`TARGET=local`, the default and
@@ -31,7 +34,8 @@ const notOnThisTarget = IS_SELF_HOSTED ? /@live-only/ : /@self-hosted/;
  */
 export default defineConfig({
   testDir: './tests',
-  timeout: 90_000,
+  // Our own container answers fast, so a hung test fails early there; the shared live site gets the long budget.
+  timeout: IS_SELF_HOSTED ? 45_000 : 90_000,
   expect: {
     timeout: 15_000,
     toHaveScreenshot: { animations: 'disabled', caret: 'hide', scale: 'css', maxDiffPixels: 150 },
@@ -44,10 +48,16 @@ export default defineConfig({
   // On our own container a test that needed its retry is a flake to fix, not a green run.
   failOnFlakyTests: isCI && IS_SELF_HOSTED,
   workers: IS_SELF_HOSTED ? (isCI ? 2 : 4) : 2,
-  reporter: isCI
-    ? // One blob per CI job (REPORT_ID), so shards of different projects never overwrite each other.
-      [['list'], ['blob', { fileName: `report-${process.env.REPORT_ID ?? 'ci'}.zip` }], ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false, environmentInfo: { target: TARGET, baseURL: BASE_URL } }]]
-    : [['list'], ['html', { open: 'never' }], ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false, environmentInfo: { target: TARGET, baseURL: BASE_URL } }]],
+  reporter: [
+    ['list'],
+    isCI
+      ? // One blob per CI job (REPORT_ID), so shards of different projects never overwrite each other.
+        ['blob', { fileName: `report-${process.env.REPORT_ID ?? 'ci'}.zip` }]
+      : ['html', { open: 'never' }],
+    ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false, environmentInfo: { target: TARGET, baseURL: BASE_URL } }],
+    // Refuses perf next to other projects, and fails a live run that a bot challenge skipped too much of.
+    ['./src/support/run-guard-reporter.ts'],
+  ],
   use: {
     baseURL: BASE_URL,
     testIdAttribute: 'data-test',
@@ -94,7 +104,8 @@ export default defineConfig({
       grepInvert: [ownProject, chromiumOnly, notOnThisTarget],
     },
     // Budgets are measured alone: a project of its own with a single worker. `workers: 1` limits this
-    // project only, so it must also run in a pass of its own (`npm run test:perf`, its own CI job).
+    // project only, so it must also run in a pass of its own (`npm run test:perf`, its own CI job);
+    // the run-guard reporter refuses a run that schedules it next to another project.
     { name: 'perf', use: { ...devices['Desktop Chrome'] }, grep: perfOnly, grepInvert: notOnThisTarget, fullyParallel: false, workers: 1 },
     // Screenshots: only inside the Playwright image (scripts/visual.sh), against our own Toolshop.
     ...(IN_PLAYWRIGHT_IMAGE && IS_SELF_HOSTED

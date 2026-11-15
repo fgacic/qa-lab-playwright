@@ -9,6 +9,7 @@ import { LoginPage } from '@pages/LoginPage';
 import { ProductPage } from '@pages/ProductPage';
 import { RegisterPage } from '@pages/RegisterPage';
 import { RentalsPage } from '@pages/RentalsPage';
+import { installToken } from '@support/session';
 import type { CartItem, Product } from '@support/toolshop-api';
 import { test as apiTest } from './api';
 import { test as authTest } from './auth';
@@ -99,7 +100,11 @@ export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions 
     await comparisonPage.open();
     await use(comparisonPage);
   },
-  checkout: async ({ page, cartItems, seedCart }, use) => {
+  checkout: async ({ page, cartItems, seedCart, session, workerAccount }, use) => {
+    // A real customer's session must be in place before /checkout loads (the step after the cart
+    // differs for a signed-in customer), whatever order a spec lists its fixtures in. The mocked
+    // session is not installed here: checkout specs are guests unless they ask for `signedIn`.
+    if (session === 'worker-account') await installToken(page, (await workerAccount.get()).token);
     if (cartItems.length) await seedCart(cartItems);
     const checkout = new CheckoutPage(page);
     await checkout.open();

@@ -47,8 +47,13 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
     knownBug('SEC-02', 'no X-Frame-Options (or CSP frame-ancestors): the shop can be framed (clickjacking)');
     const headers = await shopHeaders({ request, page }, testInfo);
 
-    const framing = `${headers['x-frame-options'] ?? ''} ${headers['content-security-policy'] ?? ''}`;
-    expect(framing, 'SEC-02: neither X-Frame-Options nor CSP frame-ancestors restricts framing').toMatch(/\b(deny|sameorigin)\b|frame-ancestors\s+(?!\*)\S/i);
+    const frameOptions = (headers['x-frame-options'] ?? '').trim();
+    const policy = headers['content-security-policy'] ?? '';
+    // Either header is enough, and each is judged on its own value: a "deny" inside a CSP is not an X-Frame-Options.
+    const byFrameOptions = /^(deny|sameorigin)$/i.test(frameOptions);
+    const byPolicy = /(?:^|;)\s*frame-ancestors\s+(?!\*)\S/i.test(policy);
+
+    expect(byFrameOptions || byPolicy, `SEC-02: neither X-Frame-Options ("${frameOptions}") nor CSP frame-ancestors ("${policy}") restricts framing`).toBe(true);
   });
 
   test('the API does not disclose its server version', async ({ request }) => {

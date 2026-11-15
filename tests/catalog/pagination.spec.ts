@@ -1,51 +1,112 @@
+import type { ApiMock } from '@support/api-mock';
 import { expect, mock, test } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
+const CURRENT_PAGE = /\bactive\b/;
+
+/** The answer for one page of the product list (page numbers are 1-based in the request). */
+const pageAnswer = (apiMock: ApiMock, n: number) => apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === String(n));
+
 test.describe('Pagination', () => {
   test('Next shows the following page of products', async ({ homePage, api, apiMock }) => {
     const { per_page: pageSize } = await api.listProducts();
     await expect(homePage.grid.cards).toHaveCount(pageSize);
-    const pageTwo = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === '2');
+    await expect(homePage.pagination.item(1)).toHaveClass(CURRENT_PAGE);
+    const pageTwo = pageAnswer(apiMock, 2);
 
     await homePage.pagination.goNext();
 
     const { json } = await pageTwo;
     expect(json.current_page).toBe(2);
     await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+    await expect(homePage.pagination.item(2)).toHaveClass(CURRENT_PAGE);
+    await expect(homePage.pagination.item(1)).not.toHaveClass(CURRENT_PAGE);
   });
 
   test('Previous goes back to the page before', async ({ homePage, apiMock }) => {
-    await homePage.pagination.goTo(2);
-    const pageOne = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === '1');
+    const pageThree = pageAnswer(apiMock, 3);
+    await homePage.pagination.goTo(3);
+    await pageThree;
+    const pageTwo = pageAnswer(apiMock, 2);
 
     await homePage.pagination.goPrevious();
 
-    await expect(homePage.grid.names).toHaveText((await pageOne).json.data.map((p) => p.name));
+    const { json } = await pageTwo;
+    expect(json.current_page).toBe(2);
+    await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+    await expect(homePage.pagination.item(2)).toHaveClass(CURRENT_PAGE);
+  });
+
+  test('Next from a middle page goes on to the page after', async ({ homePage, apiMock }) => {
+    const pageThree = pageAnswer(apiMock, 3);
+    await homePage.pagination.goTo(3);
+    await pageThree;
+    const pageFour = pageAnswer(apiMock, 4);
+
+    await homePage.pagination.goNext();
+
+    const { json } = await pageFour;
+    expect(json.current_page).toBe(4);
+    await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+    await expect(homePage.pagination.item(4)).toHaveClass(CURRENT_PAGE);
   });
 
   test('a numbered page button jumps straight to that page', async ({ homePage, apiMock }) => {
-    const pageThree = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === '3');
+    const pageThree = pageAnswer(apiMock, 3);
 
     await homePage.pagination.goTo(3);
 
-    await expect(homePage.grid.names).toHaveText((await pageThree).json.data.map((p) => p.name));
+    const { json } = await pageThree;
+    expect(json.current_page).toBe(3);
+    await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+    await expect(homePage.pagination.item(3)).toHaveClass(CURRENT_PAGE);
   });
 
-  test('the last page button shows the last page of products', { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
+  test('the last page button shows the last page of products', async ({ homePage, apiMock }) => {
     const { pagination } = homePage;
     const lastPage = await pagination.pageCount();
-    const last = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === String(lastPage));
+    const last = pageAnswer(apiMock, lastPage);
 
     await pagination.goTo(lastPage);
 
     const { json } = await last;
     expect(json.current_page).toBe(json.last_page);
     await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+    await expect(pagination.item(lastPage)).toHaveClass(CURRENT_PAGE);
   });
 
-  test('Previous on page 1 and Next on the last page are disabled for assistive tech too', { tag: ['@negative', '@a11y', '@bug'] }, async ({ homePage }) => {
+  test('changing a filter on a later page shows the first page of the new result', async ({ homePage, apiMock }) => {
+    const pageThree = pageAnswer(apiMock, 3);
+    await homePage.pagination.goTo(3);
+    await pageThree;
+    // The eco-friendly list is shorter than the catalogue but still runs to more than one page.
+    const filtered = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.eco_friendly === 'true');
+
+    await homePage.filters.showOnlyEcoFriendly();
+
+    const { json } = await filtered;
+    expect(json.current_page).toBe(1);
+    expect(json.last_page, 'the eco-friendly list should span more than one page').toBeGreaterThan(1);
+    await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+  });
+
+  test('changing the sort on a later page marks page 1 as the current one', { tag: ['@bug'] }, async ({ homePage, apiMock }) => {
+    knownBug('BUG-33', 'after a sort or filter change from a later page the list restarts at page 1 but the pager still marks the old page (or none) as current.');
+    const pageThree = pageAnswer(apiMock, 3);
+    await homePage.pagination.goTo(3);
+    await pageThree;
+    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'name,desc');
+
+    await homePage.filters.sortBy('Name (Z - A)');
+
+    const { json } = await sorted;
+    await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+    await expect(homePage.pagination.item(1), 'BUG-33: the pager marks page 1 as current once the list restarts there').toHaveClass(CURRENT_PAGE, { timeout: 5_000 });
+  });
+
+  test('Previous on page 1 and Next on the last page are disabled for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {
     knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
     const { pagination } = homePage;
     const lastPage = await pagination.pageCount();

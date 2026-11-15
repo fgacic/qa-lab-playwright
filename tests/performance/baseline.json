@@ -1,0 +1,32 @@
+{
+  "local": {
+    "home": {
+      "lcp": 1228,
+      "tbt": 0,
+      "inp": 16
+    },
+    "search": {
+      "lcp": 1224,
+      "tbt": 0,
+      "inp": 24
+    },
+    "product": {
+      "lcp": 1264,
+      "tbt": 0,
+      "inp": 16
+    },
+    "cart": {
+      "lcp": 1052,
+      "tbt": 0,
+      "inp": 16
+    },
+    "contact": {
+      "lcp": 1044,
+      "tbt": 0,
+      "inp": 16
+    },
+    "cart-slow-api": {
+      "cls": 0.107
+    }
+  }
+}

@@ -1,5 +1,14 @@
+import { CHECKOUT_STEPS } from '@components/checkout/StepIndicator';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
+
+/** What the shop tells the shopper, word for word. */
+const MESSAGES = {
+  quantityUpdated: 'Product quantity updated.',
+  lineDeleted: 'Product deleted.',
+  atMost99: 'You can order at most 99 of this product.',
+  serverError: 'Server Error',
+} as const;
 
 /** Every cart here is created through the API, so each test starts from a known cart. */
 test.describe('Cart', () => {
@@ -31,7 +40,7 @@ test.describe('Cart', () => {
 
       await checkout.cart.table.setQuantity(first.product.name, 4);
 
-      await expect(checkout.toast.message('Product quantity updated.')).toBeVisible();
+      await expect(checkout.toast.message(MESSAGES.quantityUpdated)).toBeVisible();
       await expect(checkout.cart.table.row(first.product.name).linePrice).toShowAmount(first.product.price * 4);
       await expect(checkout.cart.table.total).toShowAmount(first.product.price * 4 + second.product.price);
       await expect(checkout.header.cartLink).toHaveText('5');
@@ -42,7 +51,7 @@ test.describe('Cart', () => {
 
       await checkout.cart.table.remove(first.product.name);
 
-      await expect(checkout.toast.message('Product deleted.')).toBeVisible();
+      await expect(checkout.toast.message(MESSAGES.lineDeleted)).toBeVisible();
       await expect(checkout.cart.table.rows).toHaveCount(1);
       await expect(checkout.cart.table.row(second.product.name).title).toBeVisible();
       await expect(checkout.cart.table.total).toShowAmount(second.product.price);
@@ -73,7 +82,7 @@ test.describe('Cart', () => {
 
     expect(saved.response.status()).toBe(200);
     await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('99');
-    await expect(checkout.toast.message('You can order at most 99 of this product.').first()).toBeVisible();
+    await expect(checkout.toast.message(MESSAGES.atMost99).first()).toBeVisible();
     await checkout.page.reload();
     await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('99');
   });
@@ -168,7 +177,7 @@ test.describe('Cart', () => {
 
     test('the cart page says the cart is empty', { tag: ['@negative', '@bug'] }, async ({ checkout }) => {
       knownBug('BUG-13', 'a visitor without a cart sees only the step header, not "The cart is empty".');
-      await expect(checkout.wizard.indicator.steps).toHaveCount(4);
+      await expect(checkout.wizard.indicator.steps).toHaveCount(CHECKOUT_STEPS.length);
 
       await expect(checkout.cart.emptyMessage, 'BUG-13: a visitor without a cart is told the cart is empty').toBeVisible({ timeout: 5_000 });
     });
@@ -187,10 +196,10 @@ test.describe('Cart', () => {
     test.use(withMocks(mock.fail('GET', /^\/carts\/[^/]+$/, 500)));
 
     test('the shopper is told the cart could not be loaded', async ({ checkout }) => {
-      knownBug('BUG-13', 'a failed cart request shows only the step header: no lines, no message.');
-      await expect(checkout.wizard.indicator.steps).toHaveCount(4);
+      knownBug('BUG-32', 'a failed cart request shows only the step header: no lines, no message.');
+      await expect(checkout.wizard.indicator.steps).toHaveCount(CHECKOUT_STEPS.length);
 
-      await expect(checkout.shell.errorAlert, 'BUG-13: a failed cart request is reported').toBeVisible({ timeout: 5_000 });
+      await expect(checkout.shell.errorAlert, 'BUG-32: a failed cart request is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 
@@ -203,7 +212,7 @@ test.describe('Cart', () => {
 
       await checkout.cart.table.setQuantity(product.name, 3);
 
-      await expect(checkout.toast.message('Server Error')).toBeVisible();
+      await expect(checkout.toast.message(MESSAGES.serverError)).toBeVisible();
       await expect(checkout.cart.table.row(product.name).linePrice, 'BUG-14: the line keeps the total of the saved quantity').toShowAmount(product.price, { timeout: 5_000 });
     });
   });
@@ -211,11 +220,15 @@ test.describe('Cart', () => {
   test.describe('when removing a line fails', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('DELETE', /^\/carts\/[^/]+\/product\/[^/]+$/, 500)));
 
-    test('the shopper is told the line was not removed', async ({ checkout, cartItems }) => {
+    test('the shopper is told the line was not removed', async ({ checkout, cartItems, apiMock }) => {
       knownBug('BUG-15', 'a failed remove does nothing visible: no toast, the line just stays.');
 
-      await checkout.cart.table.remove(cartItems[0].product.name);
+      const [{ response }] = await Promise.all([
+        apiMock.waitForResponse('DELETE', /^\/carts\/[^/]+\/product\/[^/]+$/),
+        checkout.cart.table.remove(cartItems[0].product.name),
+      ]);
 
+      expect(response.status()).toBe(500);
       await expect(checkout.cart.table.rows).toHaveCount(1);
       await expect(checkout.shell.errorAlert, 'BUG-15: a failed remove is reported').toBeVisible({ timeout: 5_000 });
     });

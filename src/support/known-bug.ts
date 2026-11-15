@@ -6,10 +6,13 @@ import { test } from '@playwright/test';
  * red ("expected to fail, but passed") the day the site is fixed.
  *
  * Contract: the pin asserts the desired behaviour, and the bug assertion's message starts with
- * the id (`expect(locator, 'BUG-26: the form names the missing fields')`). `VERIFY_BUGS=1`
- * (scripts/verify-bugs.mjs) runs these as ordinary tests and counts a pin as reproducing only
- * if it failed and its error message contains its id; a failure without the id (a precondition,
- * a locator, a timeout) is reported as "fails for another reason", and a pass as fixed.
+ * the id (`expect(locator, 'BUG-26: the form names the missing fields')`). Everything before it is
+ * a precondition that holds whether or not the bug is fixed and never names the id. `test.fail`
+ * alone accepts any failure, a fixture teardown error included, so the pin is only as good as
+ * `VERIFY_BUGS=1` (scripts/verify-bugs.mjs), which runs these as ordinary tests and counts a pin as
+ * reproducing only if it failed in the test body, with every error naming its id, assertion-shaped
+ * and raised from the spec itself. A precondition, a locator, a timeout or a teardown failure is
+ * reported as "fails for another reason", and a pass as fixed.
  */
 export function knownBug(id: string, summary: string): void {
   test.info().annotations.push({ type: 'known bug', description: `${id}: ${summary} (docs/COVERAGE.md)` });

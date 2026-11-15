@@ -16,6 +16,10 @@ test.describe('Product comparison', () => {
     const [first, second] = await homePage.grid.productNames();
     await homePage.grid.compare(first);
     await homePage.grid.compare(second);
+    // The link only carries the selection the app has stored: check that before leaving the page.
+    await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('compare_ids') ?? '[]').length), 'compare_ids in the session').toBe(2);
 
     const comparison = await homePage.openComparison();
 
@@ -127,7 +131,10 @@ test.describe('Product comparison', () => {
       ...withMocks(mock.respond('POST', '/graphql', { data: {} })),
     });
 
-    test('the empty state is shown', async ({ comparisonPage }) => {
+    test('the empty state is shown', async ({ comparisonPage, apiMock }) => {
+      // Reload with the mocked answer awaited: an empty state only means something once the data has arrived.
+      await Promise.all([apiMock.waitForResponse('POST', '/graphql'), comparisonPage.page.reload({ waitUntil: 'domcontentloaded' })]);
+
       await expect(comparisonPage.emptyState).toBeVisible();
     });
   });

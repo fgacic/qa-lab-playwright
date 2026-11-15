@@ -81,6 +81,26 @@ export function fakeJwt(role: 'user' | 'admin' = 'user'): string {
   return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: fakeUser.id, role, iat: now, exp: now + 3600 })}.qa-lab-unsigned`;
 }
 
+/** When a JWT stops being valid, in epoch seconds: the counterpart of `fakeJwt`, for any token the SPA stores. */
+export function jwtExpiry(token: string): number {
+  const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as { exp?: number };
+  if (typeof payload.exp !== 'number') throw new Error('The token has no numeric "exp" claim.');
+  return payload.exp;
+}
+
+/** The contact form's subjects: the label shown in the dropdown and the slug the API stores. */
+export const CONTACT_SUBJECTS = [
+  { label: 'Customer service', slug: 'customer-service' },
+  { label: 'Webmaster', slug: 'webmaster' },
+  { label: 'Return', slug: 'return' },
+  { label: 'Payments', slug: 'payments' },
+  { label: 'Warranty', slug: 'warranty' },
+  { label: 'Status of my order', slug: 'status-of-order' },
+] as const;
+export type ContactSubject = (typeof CONTACT_SUBJECTS)[number]['label'];
+
+export const contactSubjectSlug = (label: ContactSubject): string => CONTACT_SUBJECTS.find((subject) => subject.label === label)!.slug;
+
 export interface SaleEvent {
   name: string;
   quantity: number;
@@ -90,14 +110,17 @@ export interface SaleEvent {
   sold_out?: boolean;
 }
 
-/** A finite Server-Sent Events body for GET /sales-stream. */
-export function salesStream(sales: SaleEvent[]): string {
+/**
+ * A finite Server-Sent Events body for GET /sales-stream. When the body ends the browser reconnects after `retryMs`
+ * (the default is long enough that a test never sees it; a short one makes a dropped connection reconnect at once).
+ */
+export function salesStream(sales: SaleEvent[], retryMs = 600_000): string {
   const events = sales.map((sale, i) => {
     const amount = Math.round(sale.unit_price * sale.quantity * 100) / 100;
     const data = { seq: i + 1, at: '2026-11-03T20:00:00+00:00', product_id: `01QALABSALE${i}`, amount, remaining_stock: sale.sold_out ? 0 : 10, sold_out: false, ...sale };
     return `id: ${i + 1}\nevent: sale\ndata: ${JSON.stringify(data)}\n\n`;
   });
-  return `retry: 600000\n\nid: 0\nevent: open\ndata: {"limit":${sales.length}}\n\n${events.join('')}`;
+  return `retry: ${retryMs}\n\nid: 0\nevent: open\ndata: {"limit":${sales.length}}\n\n${events.join('')}`;
 }
 
 /** A reply to a contact message, as GET /messages/:id lists it. */

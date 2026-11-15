@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      record_perf_baseline:
+        description: Record the `ci` performance baseline on a runner and upload it as an artifact (committing it is a human step, see README)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,6 +36,13 @@ jobs:
         with:
           browsers: none
       - run: npm run typecheck
+      # The visual baselines are only valid in the image of the installed Playwright version, and the
+      # tag in scripts/visual.sh is typed by hand: a bump of @playwright/test must not leave it behind.
+      - name: The visual image matches @playwright/test
+        run: |
+          version=$(node -p "require('@playwright/test/package.json').version")
+          grep -q "mcr.microsoft.com/playwright:v${version}-" scripts/visual.sh \
+            || { echo "::error file=scripts/visual.sh::the pinned Playwright image is not v${version}, the installed @playwright/test"; exit 1; }
 
   e2e:
     name: e2e (${{ matrix.id }})
@@ -58,6 +70,9 @@ jobs:
         with:
           browsers: ${{ matrix.browsers }}
       - uses: ./.github/actions/toolshop
+        with:
+          # One job per run writes the image cache (and only on main); every job reads it.
+          cache-write: ${{ github.ref == 'refs/heads/main' && matrix.id == 'chromium-1' }}
       - name: Run the suite
         run: npx playwright test ${{ matrix.projects }} --shard=${{ matrix.shard }}
         env:
@@ -88,8 +103,8 @@ jobs:
         with:
           browsers: none
       - uses: ./.github/actions/toolshop
-      # Baselines are recorded in mcr.microsoft.com/playwright:v1.64.1-noble; comparing in the
-      # same image means the same fonts and the same rendering.
+      # Baselines are recorded in the Playwright image scripts/visual.sh pins (the typecheck job checks
+      # it matches @playwright/test); comparing in the same image means the same fonts and rendering.
       - name: Compare screenshots in the Playwright image
         run: npm run test:visual
         env:
@@ -120,7 +135,8 @@ jobs:
         with:
           browsers: chromium
       - uses: ./.github/actions/toolshop
-      # Every knownBug() spec runs as a plain test and must fail; one that passes is a fix to record.
+      # Every knownBug() spec runs as a plain test and must fail as pinned; one that passes is a fix to
+      # record. The script runs the perf pins in a pass of their own (the perf project is measured alone).
       - run: npm run test:verify-bugs
       - name: Upload the result
         if: ${{ !cancelled() }}
@@ -130,13 +146,41 @@ jobs:
           path: test-results/verify-bugs.json
           retention-days: 7
 
+  # Manual only: measures the perf project on a runner with UPDATE_PERF_BASELINE=1 and uploads
+  # tests/performance/baseline.json. The `ci` entries in it are what the runner is held to; a person
+  # downloads the artifact, reviews the diff and commits the file. Not part of the gate.
+  record-perf-baseline:
+    name: record the ci performance baseline
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline }}
+    needs: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-suite
+        with:
+          browsers: chromium
+      - uses: ./.github/actions/toolshop
+      - name: Measure and record
+        run: npx playwright test --project=perf --workers=1
+        env:
+          UPDATE_PERF_BASELINE: '1'
+          REPORT_ID: record-perf-baseline
+      - name: Upload the baseline
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: perf-baseline-ci
+          path: tests/performance/baseline.json
+          retention-days: 30
+
   # Runs after failed e2e/visual jobs on purpose (`!cancelled()`, and the Pages publish below only
   # needs this job to succeed): the Allure history and trend charts must record the red runs too,
-  # and the published report is how a failure gets investigated. The gate itself is the red e2e job.
+  # and the published report is how a failure gets investigated. The gate itself is the `gate` job below.
   report:
     name: merge reports
-    needs: [e2e, visual]
-    if: ${{ !cancelled() }}
+    needs: [typecheck, e2e, visual]
+    # Not after a failed typecheck: e2e and visual never ran then, so there would be no blob to merge.
+    if: ${{ !cancelled() && needs.typecheck.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -175,7 +219,8 @@ jobs:
         run: |
           mkdir -p site/history site/playwright
           cp -r allure-report/. site/
-          cp allure-history/history.jsonl site/history/history.jsonl
+          # The very first run starts the history: tolerate a generation that wrote none.
+          if [ -f allure-history/history.jsonl ]; then cp allure-history/history.jsonl site/history/history.jsonl; else echo "no history file was written; publishing without one"; fi
           cp -r playwright-report/. site/playwright/
           touch site/.nojekyll
 
@@ -184,12 +229,29 @@ jobs:
         with:
           name: playwright-report
           path: playwright-report/
-          retention-days: 14
+          retention-days: 7
       - name: Upload the Pages site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: site
+
+  # The one check for branch protection to require: red when any of the gating jobs is red, skipped or cancelled.
+  gate:
+    name: gate
+    needs: [typecheck, e2e, visual, verify-bugs]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every gating job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || { echo "::error::a gating job finished as '$result'"; exit 1; }
+          done
 
   deploy-pages:
     name: publish to GitHub Pages

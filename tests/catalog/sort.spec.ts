@@ -25,4 +25,19 @@ test.describe('Sorting', () => {
       if (field === 'price') await expect.poll(() => homePage.grid.priceValues()).toBeSorted({ descending: direction === 'desc' });
     });
   }
+
+  test('page 2 continues the order of page 1', async ({ homePage, apiMock }) => {
+    const first = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc');
+    await homePage.filters.sortBy('Price (Low - High)');
+    const pageOne = (await first).json;
+    const second = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc' && body.page === '2');
+
+    await homePage.pagination.goTo(2);
+
+    const pageTwo = (await second).json;
+    expect(pageTwo.current_page).toBe(2);
+    expect([...pageOne.data, ...pageTwo.data].map(sortKey.price)).toBeSorted();
+    await expect(homePage.grid.names).toHaveText(pageTwo.data.map((p) => p.name));
+    await expect.poll(() => homePage.grid.priceValues()).toEqual(pageTwo.data.map((p) => p.price));
+  });
 });

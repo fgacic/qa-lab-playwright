@@ -7,11 +7,13 @@ import { fakeGuest, uniqueEmail } from '@support/test-data';
  * Real back-office journeys against the real admin API, signed in from the `admin` project's
  * storageState (the seeded admin on the self-hosted Toolshop). They create, change and delete
  * data, so on the live site they only run with RUN_ADMIN_TESTS=1 and ADMIN_EMAIL / ADMIN_PASSWORD.
- * Every product a test creates carries a unique "QaLab" name, and its id is taken from the
- * create response and deleted by id in teardown (`createdProducts`), pass or fail. The API
- * cannot delete a guest order or a contact message (DELETE /invoices/{id} and /messages/{id}
- * answer 405), so those two tests leave one uniquely named record each behind: harmless on the
- * throwaway database of the self-hosted target, which is rebuilt for every CI run.
+ * Every product a test creates carries a unique "QaLab" name. `createdProducts` takes its id from
+ * the create response as it arrives and deletes it by id in teardown, pass or fail, so even a
+ * test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
+ * message (DELETE /invoices/{id} and /messages/{id} answer 405), so those two tests leave one
+ * uniquely named record each behind: they are tagged @self-hosted, never run on the live site,
+ * and are harmless on the throwaway database of the self-hosted target, which is rebuilt for
+ * every CI run. (Arranging them through the API is also refused on a shop that is not ours.)
  */
 test.use({ adminSession: 'storage-state' });
 
@@ -21,15 +23,13 @@ const unique = () => randomUUID().slice(0, 8);
 test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   // No word under three letters in this name: search requires every word, and MariaDB's full-text
   // index ignores short ones (BUG-28, pinned below).
-  test('a product created in the back office is sold in the shop, repriced, then deleted', { tag: ['@flow'] }, async ({ adminProducts, shop, apiMock, createdProducts }) => {
+  test('a product created in the back office is sold in the shop, repriced, then deleted', { tag: ['@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
     const name = `QaLab Product ${unique()}`;
     const form = await adminProducts.add();
     await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '3', price: '12.34' });
-    const created = apiMock.waitForResponse<{ id: string }>('POST', '/products');
     await form.chrome.save();
-    const { id } = (await created).json;
-    createdProducts.track(id);
     await expect(form.chrome.alert('Product saved!')).toBeVisible();
+    await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
     await shop.home.open();
     await shop.home.search.searchFor(name);
@@ -56,21 +56,20 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await adminProducts.search.searchFor(name);
     await adminProducts.table.delete(name);
     await expect(adminProducts.feedback.filter({ hasText: 'Product deleted.' })).toBeVisible();
-    createdProducts.forget(id);
+    await expect.poll(() => createdProducts.pending(), 'the UI delete really removed the product').toHaveLength(0);
     await shop.home.open();
     await shop.home.search.searchFor(name);
     await expect(shop.home.grid.emptyState).toBeVisible();
   });
 
-  test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, apiMock, createdProducts }) => {
+  test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, createdProducts }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
     const name = `Set of QaLab Pliers ${unique()}`;
     const form = await adminProducts.add();
     await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '1', price: '5.00' });
-    const created = apiMock.waitForResponse<{ id: string }>('POST', '/products');
     await form.chrome.save();
-    createdProducts.track((await created).json.id);
     await expect(form.chrome.alert('Product saved!')).toBeVisible();
+    await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
     await shop.home.open();
     await shop.home.search.searchFor(name);
@@ -78,7 +77,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(shop.home.grid.card(name).root, 'BUG-28: a full-name search finds the product').toBeVisible({ timeout: 5_000 });
   });
 
-  test('an order placed by a guest can be marked as shipped', async ({ api, catalog, adminOrders }) => {
+  test('an order placed by a guest can be marked as shipped', { tag: ['@self-hosted'] }, async ({ api, catalog, adminOrders }) => {
     const { invoice_number } = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], fakeGuest());
 
     await adminOrders.search.searchFor(invoice_number);
@@ -90,7 +89,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(order.status).toHaveValue('SHIPPED');
   });
 
-  test('a contact message arrives in the inbox and can be taken in progress', async ({ api, adminMessages, apiMock }) => {
+  test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock }) => {
     const sender = `Qa Lab Sender ${unique()}`;
     const text = `Sent by the qa-lab suite at ${new Date().toISOString()}, long enough to be a real message.`;
     await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: 'webmaster', message: text });
@@ -107,12 +106,25 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(message.status).toHaveValue('IN_PROGRESS');
   });
 
-  test('the statistics render from real data', async ({ adminStatistics }) => {
+  test('the statistics list the real top-selling products', async ({ adminStatistics, apiMock }) => {
+    // The fixture opened the page already; open it again to catch the answer for this check.
+    const answered = apiMock.waitForResponse<{ name: string; count: number }[]>('GET', '/reports/top10-purchased-products');
+    await adminStatistics.open();
+    const { json: purchased } = await answered;
+
+    expect(purchased.length, 'the seeded shop has sales to report').toBeGreaterThan(0);
     await expect(adminStatistics.heading).toBeVisible();
-    await expect(adminStatistics.report('Top 10 Most Purchased Products').first()).toBeVisible();
+    await expect(adminStatistics.report('Top 10 Most Purchased Products')).toHaveCount(purchased.length);
+    await expect(adminStatistics.report('Top 10 Most Purchased Products').first()).toContainText(purchased[0].name);
   });
 
-  test('the monthly sales chart renders from real data', async ({ adminMonthlySales }) => {
+  test('the monthly sales report loads its twelve months and shows its chart', async ({ adminMonthlySales, apiMock }) => {
+    // A <canvas> has nothing to read, so the data is checked on the answer that feeds it.
+    const answered = apiMock.waitForResponse<unknown[]>('GET', '/reports/average-sales-per-month');
+    await adminMonthlySales.open();
+    const { json: months } = await answered;
+
+    expect(months, 'one entry per month').toHaveLength(12);
     await expect(adminMonthlySales.heading).toBeVisible();
     await expect(adminMonthlySales.chart).toBeVisible();
   });

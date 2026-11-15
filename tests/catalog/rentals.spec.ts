@@ -5,6 +5,8 @@ import { emptyProductPage } from '@support/payloads';
 test.describe('Rentals', () => {
   test('lists every rental the shop offers', async ({ api, rentalsPage }) => {
     const rentals = await api.listProducts({ is_rental: 'true' });
+    // The page shows one page of rentals and no pager: if the list outgrows a page, fail here rather than compare a partial list.
+    expect(rentals.last_page, 'the rentals should fit on one page').toBe(1);
 
     await expect(rentalsPage.title).toBeVisible();
     await expect(rentalsPage.grid.names).toHaveText(rentals.data.map((p) => p.name));

@@ -1,5 +1,20 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@fixtures';
+import { CUSTOMER_STORAGE_STATE } from '@support/env';
+import { jwtExpiry } from '@support/payloads';
+import { TOKEN_KEY } from '@support/session';
 import { fakeAddress, fakeCustomer } from '@support/test-data';
+
+/** The token tests/setup/account.setup.ts saved, read from the file: the SPA drops an expired one as soon as a page opens. */
+function savedToken(): string {
+  const state = JSON.parse(readFileSync(CUSTOMER_STORAGE_STATE, 'utf8')) as { origins: { localStorage: { name: string; value: string }[] }[] };
+  const token = state.origins.flatMap((origin) => origin.localStorage).find((item) => item.name === TOKEN_KEY)?.value;
+  if (!token) throw new Error(`${CUSTOMER_STORAGE_STATE} holds no "${TOKEN_KEY}": the account setup did not save a session.`);
+  return token;
+}
+
+/** A saved session that is about to lapse would show up as a redirect to the login page, far from its cause. */
+const MIN_SESSION_LEFT_SECONDS = 60;
 
 /**
  * Against the real auth API: real registration, real sign-in, real account data. Runs on the
@@ -36,6 +51,9 @@ test.describe('Real account', { tag: ['@account'] }, () => {
     test.use({ session: 'storage-state' });
 
     test('opens the account area without signing in again', async ({ accountPage }) => {
+      const secondsLeft = jwtExpiry(savedToken()) - Date.now() / 1000;
+      expect(secondsLeft, 'saved session expired: run the session projects in their own pass (npm test does)').toBeGreaterThan(MIN_SESSION_LEFT_SECONDS);
+
       await expect(accountPage.title).toHaveText('My account');
       await expect(accountPage.header.userMenu).toBeVisible();
     });
@@ -56,9 +74,7 @@ test.describe('Real account', { tag: ['@account'] }, () => {
       await expect(favoritesPage.favorite(product.name)).toHaveCount(0);
     });
 
-    test('a signed-in purchase skips the guest step and lands on the account', { tag: ['@flow'] }, async ({ signedIn: _, api, workerAccount, checkout }) => {
-      // Reopen so the page is loaded with the session in place, whatever order fixtures ran in.
-      await checkout.open();
+    test('a signed-in purchase skips the guest step and lands on the account', { tag: ['@flow'] }, async ({ api, workerAccount, checkout }) => {
       await checkout.cart.proceed();
       await checkout.signIn.proceedSignedInButton.click();
       await checkout.billing.enterAddress(fakeAddress());

@@ -7,8 +7,8 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     await expect(adminStatistics.heading).toBeVisible();
     await expect(adminStatistics.report('Top 10 Best Selling Categories')).toContainText(reports.bestSellingCategories[0].category_name);
     await expect(adminStatistics.report('Top 10 Most Purchased Products')).toContainText(reports.purchasedProducts[0].name);
-    await expect(adminStatistics.report('Customers By Country')).toContainText('The Netherlands');
-    await expect(adminStatistics.report('Total Sales Per Country')).toContainText('$4321');
+    await expect(adminStatistics.report('Customers By Country')).toContainText(reports.customersByCountry[0].country);
+    await expect(adminStatistics.report('Total Sales Per Country')).toContainText(`$${reports.salesPerCountry[0].total_sales}`);
   });
 
   test.describe('with no sales yet', () => {
@@ -28,22 +28,23 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     });
   });
 
-  test('average sales per month draws a chart and reloads for another year', async ({ adminMonthlySales, apiMock }) => {
+  // A <canvas> has nothing to read, so what is proved is its presence, and that the picked year is asked for.
+  test('average sales per month shows its chart area and reloads for another year', async ({ adminMonthlySales }) => {
     await expect(adminMonthlySales.chart).toBeVisible();
-    const reloaded = apiMock.waitForRequest('GET', '/reports/average-sales-per-month');
 
-    await adminMonthlySales.showYear('2020');
+    const reloaded = await adminMonthlySales.showYear('2020');
 
-    expect(new URL((await reloaded).url()).searchParams.get('year')).toBe('2020');
+    expect(new URL(reloaded.url()).searchParams.get('year')).toBe('2020');
+    await expect(adminMonthlySales.year).toHaveValue('2020');
   });
 
-  test('average sales per week draws a chart and reloads for another year', async ({ adminWeeklySales, apiMock }) => {
+  test('average sales per week shows its chart area and reloads for another year', async ({ adminWeeklySales }) => {
     await expect(adminWeeklySales.chart).toBeVisible();
-    const reloaded = apiMock.waitForRequest('GET', '/reports/average-sales-per-week');
 
-    await adminWeeklySales.showYear('2020');
+    const reloaded = await adminWeeklySales.showYear('2020');
 
-    expect(new URL((await reloaded).url()).searchParams.get('year')).toBe('2020');
+    expect(new URL(reloaded.url()).searchParams.get('year')).toBe('2020');
+    await expect(adminWeeklySales.year).toHaveValue('2020');
   });
 
   test('the year picker offers the current year', { tag: ['@bug'] }, async ({ adminMonthlySales }) => {
@@ -57,6 +58,7 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
 
 test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () => {
   test('saving stores the settings in the browser and confirms', async ({ adminSettings }) => {
+    await expect(adminSettings.ecoBadge, 'the badge starts switched on').toBeChecked();
     await adminSettings.paymentEndpoint.fill('https://payments.example.com/check');
     await adminSettings.ecoBadge.uncheck();
 
@@ -67,7 +69,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect.poll(() => adminSettings.storedSetting('ECO_BADGE_ENABLED')).toBe('false');
   });
 
-  test('Clear storage forgets the settings but keeps the admin signed in', async ({ adminSettings, page }) => {
+  test('Clear storage forgets the settings but keeps the admin signed in', async ({ adminSettings }) => {
     await adminSettings.paymentEndpoint.fill('https://payments.example.com/check');
     await adminSettings.save();
     await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT'), 'the setting was saved before it is cleared').toBe('https://payments.example.com/check');
@@ -75,19 +77,22 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await adminSettings.clearStorage();
 
     await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT')).toBeNull();
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('auth-token'))).not.toBeNull();
+    await expect.poll(() => adminSettings.storedToken()).not.toBeNull();
   });
 
-  test.describe('when sustainability features are switched off', () => {
-    test('the shop hides the CO₂ sorting', async ({ adminSettings, page }) => {
-      await adminSettings.co2Features.uncheck();
-      await adminSettings.save();
+  test('switching the CO₂ features off hides the CO₂ sorting in the shop', async ({ adminSettings, shop }) => {
+    const sort = shop.home.filters.sort;
+    await expect(adminSettings.co2Features, 'the features start switched on').toBeChecked();
+    await shop.home.open();
+    await expect(sort.getByRole('option', { name: /CO₂/ }).first(), 'the shop offers CO₂ sorting while the features are on').toBeAttached();
+    await adminSettings.open();
 
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await adminSettings.co2Features.uncheck();
+    await adminSettings.save();
+    await expect(adminSettings.feedback.filter({ hasText: 'Settings saved!' })).toBeVisible();
+    await shop.home.open();
 
-      const sort = page.getByRole('combobox', { name: 'sort' });
-      await expect(sort.getByRole('option', { name: 'Name (A - Z)' })).toBeAttached();
-      await expect(sort.getByRole('option', { name: /CO₂/ })).toHaveCount(0);
-    });
+    await expect(sort.getByRole('option', { name: 'Name (A - Z)' })).toBeAttached();
+    await expect(sort.getByRole('option', { name: /CO₂/ })).toHaveCount(0);
   });
 });

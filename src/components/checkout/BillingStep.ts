@@ -1,8 +1,14 @@
-import type { Locator, Response } from '@playwright/test';
+import { expect, type Locator, type Response } from '@playwright/test';
 import { settleRequests } from '@support/settle';
 import { step } from '@support/step';
 import type { Address } from '@support/test-data';
 import { FormField } from '../FormField';
+
+/** What the postcode lookup answered: the status of its last answer and the address parts it suggested. */
+export interface LookupAnswer {
+  status: number;
+  suggested: Partial<Pick<Address, 'street' | 'city' | 'state'>>;
+}
 
 export class BillingStep {
   readonly heading: Locator;
@@ -31,14 +37,15 @@ export class BillingStep {
 
   /**
    * Country, postcode and house number trigger GET /postcode-lookup, which fills the rest.
-   * Returns the status of the last answer, so a caller that needs the lookup to work can say so.
+   * Returns the status of the last answer and what it suggested, so a caller that needs the
+   * lookup to work can say so and knows which fields the page is about to fill.
    */
   @step('Look up the address for {0.postalCode} {0.houseNumber}')
-  async lookUp(address: Pick<Address, 'country' | 'postalCode' | 'houseNumber'>): Promise<number> {
+  async lookUp(address: Pick<Address, 'country' | 'postalCode' | 'houseNumber'>): Promise<LookupAnswer> {
     const page = this.root.page();
-    let status = 0;
+    let last: Response | undefined;
     const answered = (response: Response) => {
-      if (response.url().includes('/postcode-lookup')) status = response.status();
+      if (response.url().includes('/postcode-lookup')) last = response;
     };
     page.on('response', answered);
     try {
@@ -50,21 +57,27 @@ export class BillingStep {
     } finally {
       page.off('response', answered);
     }
-    return status;
+    const status = last?.status() ?? 0;
+    const body = last?.ok() ? ((await last.json().catch(() => ({}))) as Partial<Record<'street' | 'city' | 'state', string>>) : {};
+    return { status, suggested: { street: body.street, city: body.city, state: body.state } };
   }
 
   /**
    * Enter an address: look it up, keep what the lookup suggests, and type only what it left
    * empty. Keeping the suggestion matters: the API refuses an order whose city does not belong
    * to the country (422), so an invented city cannot be typed over a real one. A lookup that
-   * failed throws: typing the whole address by hand would hide a broken lookup.
+   * failed throws: typing the whole address by hand would hide a broken lookup. What the lookup
+   * suggested is awaited in the field (web-first) rather than read once, so the address is
+   * complete, and the page done filling it, when this returns.
    */
   @step('Enter the billing address')
   async enterAddress(address: Address): Promise<void> {
-    const status = await this.lookUp(address);
+    const { status, suggested } = await this.lookUp(address);
     if (status < 200 || status >= 300) throw new Error(`The postcode lookup for ${address.postalCode} ${address.houseNumber} answered ${status || 'nothing'}`);
-    for (const [field, value] of [[this.street, address.street], [this.city, address.city], [this.state, address.state]] as const) {
-      if (!(await field.input.inputValue())) await field.input.fill(value);
+    for (const [field, key] of [[this.street, 'street'], [this.city, 'city'], [this.state, 'state']] as const) {
+      const fromLookup = suggested[key];
+      if (fromLookup) await expect(field.input).toHaveValue(fromLookup);
+      else await field.input.fill(address[key]);
     }
   }
 

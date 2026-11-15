@@ -14,6 +14,11 @@ export class Pagination {
     return this.root.getByRole('button', { name: `Page-${n}`, exact: true });
   }
 
+  /** The list item around a page button: the shop marks the current page with an `active` class on it. */
+  item(n: number): Locator {
+    return this.root.getByRole('listitem').filter({ has: this.root.page().getByRole('button', { name: `Page-${n}`, exact: true }) });
+  }
+
   /** How many numbered page buttons there are, i.e. the number of pages. */
   async pageCount(): Promise<number> {
     await this.page(1).waitFor();

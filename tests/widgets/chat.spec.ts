@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { emptyProductPage } from '@support/payloads';
+import { contactSubjectSlug, emptyProductPage } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 test.describe('Chat assistant', () => {
@@ -82,10 +82,11 @@ test.describe('Chat assistant', () => {
       const sent = apiMock.waitForRequest('POST', '/messages');
       await chat.pick('Skip');
 
+      await expect(chat.reply("Your support ticket has been submitted successfully! We'll get back to you soon.")).toBeVisible();
       expect((await sent).postDataJSON()).toMatchObject({
         name: `${guest.firstName} ${guest.lastName}`,
         email: guest.email,
-        subject: 'webmaster',
+        subject: contactSubjectSlug('Webmaster'),
         message: CONTACT_MESSAGE,
       });
     });
@@ -107,12 +108,17 @@ test.describe('Chat assistant', () => {
   test.describe('when the search fails', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('QUERY', '/products/search', 500)));
 
-    test('the assistant says it could not search', async ({ homePage }) => {
+    test('the assistant says it could not search', async ({ homePage, apiMock }) => {
       knownBug('BUG-25', 'a failed chat search answers "No products found", as if nothing matched.');
       const { chat } = homePage.shell;
       await chat.open();
 
+      const searched = apiMock.waitForResponse('QUERY', '/products/search');
       await chat.findProduct('hammer');
+
+      // Evidence that the failure path ran, whatever the chat then says: the search was refused and the question stayed in the transcript.
+      expect((await searched).response.status()).toBe(500);
+      await expect(chat.said('hammer')).toBeVisible();
 
       await expect(chat.reply(/could not|went wrong|error|try again later/i), 'BUG-25: the assistant says the search failed').toBeVisible({ timeout: 5_000 });
     });

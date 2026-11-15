@@ -1,8 +1,22 @@
-import type { Locator, Page } from '@playwright/test';
+import type { Locator, Page, Request } from '@playwright/test';
 import { AdminTable } from '@components/admin/AdminTable';
+import type { AdminSection } from '@components/Header';
 import { apiPath } from '@support/env';
+import { TOKEN_KEY } from '@support/session';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
+
+/** The heading each back-office section opens on (the dashboard has none of its own; the orders list says "Order"). */
+const SECTION_HEADINGS: Record<AdminSection, string> = {
+  Dashboard: 'Sales over the years',
+  Brands: 'Brands',
+  Categories: 'Categories',
+  Products: 'Products',
+  Orders: 'Order',
+  Users: 'Users',
+  Messages: 'Messages',
+  Settings: 'Settings',
+};
 
 export class AdminDashboardPage {
   readonly shell: AppShell;
@@ -11,14 +25,22 @@ export class AdminDashboardPage {
   readonly latestOrders: AdminTable;
   /** Shown instead of the table when there is nothing to list. */
   readonly noOrders: Locator;
+  /** Any alert: a healthy dashboard shows none. */
+  readonly alerts: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
+    this.alerts = page.getByRole('alert');
     this.noOrders = page.getByText('No recent invoices.');
     this.salesHeading = page.getByRole('heading', { name: 'Sales over the years' });
     // A <canvas> chart: no role or name to reach it by, and nothing inside it to read.
     this.salesChart = page.locator('canvas');
     this.latestOrders = new AdminTable(page.getByRole('table'));
+  }
+
+  /** The heading a section of the admin menu opens on. */
+  sectionHeading(section: AdminSection): Locator {
+    return this.page.getByRole('heading', { name: SECTION_HEADINGS[section], exact: true });
   }
 
   @step('Open the admin dashboard')
@@ -142,22 +164,31 @@ export class AdminSalesReportPage {
   readonly heading: Locator;
   readonly year: Locator;
   readonly chart: Locator;
+  private readonly feed: string;
 
   constructor(readonly page: Page, readonly period: 'month' | 'week') {
+    this.feed = `/reports/average-sales-per-${period}`;
     this.shell = new AppShell(page);
     this.heading = page.getByRole('heading', { name: `Average sales per ${period}` });
     this.year = page.getByRole('combobox', { name: 'Select year' });
     this.chart = page.locator('canvas');
   }
 
+  /** Returns once the report's data has been answered, so a later wait cannot catch this first load. */
   @step('Open the average sales report')
   async open(): Promise<void> {
+    const answered = this.page.waitForResponse((r) => r.request().method() === 'GET' && apiPath(r.url()) === this.feed);
+    answered.catch(() => undefined); // a failed navigation is reported by goto; this only keeps the rejection from going unhandled
     await this.shell.goto(`/admin/reports/average-sales-per-${this.period}`);
+    await answered;
   }
 
+  /** Picks a year and returns the request the page sent for it (the one carrying `?year=`). */
   @step('Show the year {0}')
-  async showYear(year: string): Promise<void> {
+  async showYear(year: string): Promise<Request> {
+    const reloaded = this.page.waitForRequest((r) => r.method() === 'GET' && apiPath(r.url()) === this.feed && new URL(r.url()).searchParams.get('year') === year);
     await this.year.selectOption(year);
+    return reloaded;
   }
 }
 
@@ -195,6 +226,11 @@ export class AdminSettingsPage {
   @step('Clear the stored settings')
   async clearStorage(): Promise<void> {
     await this.clearStorageButton.click();
+  }
+
+  /** The admin's session token: what "Clear storage" must leave alone. */
+  storedToken(): Promise<string | null> {
+    return this.page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY);
   }
 
   /** The settings live in localStorage; reading them back is how a save is verified. */
