@@ -70,6 +70,7 @@ npx playwright install --with-deps chromium firefox webkit
 npm run toolshop:up                  # build, start, seed and health-check the shop
 
 npm test                             # everything against the self-hosted shop
+npm run test:parallel                # the browsers pass only, with more workers; self-hosted shop only (TARGET=local)
 npx playwright test --project=webkit # one browser
 npm run test:smoke | test:a11y | test:i18n | test:security | test:perf
 npm run test:account                 # real customer journeys (setup project signs in)

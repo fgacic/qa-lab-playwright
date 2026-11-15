@@ -4,6 +4,7 @@
   "description": "Playwright UI suite for the Toolshop practice web shop",
   "scripts": {
     "test": "playwright test",
+    "test:parallel": "TARGET=local playwright test --project=chromium --project=firefox --project=webkit --project=mobile --workers=6",
     "test:chromium": "playwright test --project=chromium",
     "test:smoke": "playwright test --grep @smoke",
     "test:mocked": "playwright test --grep @mocked",
