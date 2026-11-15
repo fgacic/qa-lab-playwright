@@ -1,7 +1,7 @@
 /**
  * Where the suite runs. Two targets:
  * - `local` (the default, and what CI gates on): the self-hosted Toolshop from docker-compose.yml,
- *   pinned to tag 2.5 and seeded fresh. It is ours, so specs may register accounts, sign in with
+ *   built from the commit in .env.toolshop and seeded fresh. It is ours, so specs may register accounts, sign in with
  *   the seeded accounts (admin included), and submit attack payloads.
  * - `live`: the public practicesoftwaretesting.com. Shared with everyone, so real accounts, real
  *   sign-ins and submitted payloads stay off unless explicitly enabled, and workers stay at two.
@@ -9,8 +9,6 @@
  */
 export type Target = 'local' | 'live';
 export const TARGET: Target = process.env.TARGET === 'live' ? 'live' : 'local';
-export const IS_SELF_HOSTED = TARGET === 'local';
-
 const ADDRESSES: Record<Target, { base: string; api: string }> = {
   local: { base: 'http://localhost:4200', api: 'http://localhost:4200/api' },
   live: { base: 'https://practicesoftwaretesting.com', api: 'https://api.practicesoftwaretesting.com' },
@@ -18,8 +16,22 @@ const ADDRESSES: Record<Target, { base: string; api: string }> = {
 export const BASE_URL = process.env.BASE_URL ?? ADDRESSES[TARGET].base;
 export const API_URL = process.env.API_URL ?? ADDRESSES[TARGET].api;
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', 'host.docker.internal']);
+const isLocalHost = (url: string) => LOCAL_HOSTS.has(new URL(url).hostname);
+
+// Self-hosted means the target says so AND both resolved addresses are ours: a BASE_URL or
+// API_URL override can never turn the live site into a target that may register accounts,
+// sign in as the admin or submit attack payloads.
+if (TARGET === 'local' && !(isLocalHost(BASE_URL) && isLocalHost(API_URL))) {
+  throw new Error(
+    `TARGET=local (the default) runs real sign-ins, the seeded admin and attack payloads, but BASE_URL=${BASE_URL} / API_URL=${API_URL} are not local. ` +
+      'Point both at the self-hosted Toolshop, or set TARGET=live to run the live-safe subset.',
+  );
+}
+export const IS_SELF_HOSTED = TARGET === 'local' && isLocalHost(BASE_URL) && isLocalHost(API_URL);
+
 /**
- * Accounts the self-hosted shop is seeded with (database/seeders/UserSeeder.php at tag 2.5).
+ * Accounts the self-hosted shop is seeded with (database/seeders/UserSeeder.php at the commit in .env.toolshop).
  * Test values of our own environment, never used against the live site.
  */
 const SEEDED = {
