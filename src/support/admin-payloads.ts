@@ -42,6 +42,9 @@ export const brand = { id: '01QALABBRAND0000000000000', name: 'Qa Lab Tools', sl
 
 export const category = { id: '01QALABCATEGORY0000000000', parent_id: null, name: 'Qa Lab Category', slug: 'qa-lab-category', sub_categories: [] };
 
+/** The payment of the mocked order: the API's method code and the label the order page shows for it. */
+export const orderPayment = { method: 'cash-on-delivery', label: 'Cash on Delivery' };
+
 export const order = (product: Product) => ({
   id: '01QALABORDER0000000000000',
   user_id: customer.id,
@@ -59,7 +62,7 @@ export const order = (product: Product) => ({
   status: 'AWAITING_FULFILLMENT',
   status_message: null,
   created_at: '2026-11-01 10:00:00',
-  payment: { id: '01QALABPAYMENT', payment_method: 'cash-on-delivery', payment_details: {} },
+  payment: { id: '01QALABPAYMENT', payment_method: orderPayment.method, payment_details: {} },
   user: customer,
   invoicelines: [
     { id: '01QALABLINE0', invoice_id: '01QALABORDER0000000000000', product_id: product.id, unit_price: product.price, discount_percentage: null, discounted_price: null, quantity: 2, product },

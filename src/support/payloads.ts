@@ -26,16 +26,20 @@ export const fakeUser = {
   address: { street: 'Test Street 1', city: 'Testville', state: 'Teststate', country: 'NL', postal_code: '1234 AB' },
 };
 
+export const FAVORITE_ID = '01QALABFAKEFAVORITE000000';
+
 export const fakeFavorite = (product: Product) => ({
-  id: '01QALABFAKEFAVORITE000000',
+  id: FAVORITE_ID,
   user_id: fakeUser.id,
   product_id: product.id,
   product,
 });
 
+export const INVOICE_NUMBER = 'INV-2026999999';
+
 export const fakeInvoice = (product: Product) => ({
   id: '01QALABFAKEINVOICE0000000',
-  invoice_number: 'INV-2026999999',
+  invoice_number: INVOICE_NUMBER,
   invoice_date: '2026-11-01 10:00:00',
   billing_street: 'Test Street 1',
   billing_city: 'Testville',
@@ -95,3 +99,12 @@ export function salesStream(sales: SaleEvent[]): string {
   });
   return `retry: 600000\n\nid: 0\nevent: open\ndata: {"limit":${sales.length}}\n\n${events.join('')}`;
 }
+
+/** A reply to a contact message, as GET /messages/:id lists it. */
+export const fakeReply = (message: string) => ({
+  id: '01QALABFAKEREPLY',
+  message,
+  user_id: fakeUser.id,
+  created_at: '2026-11-01 11:00:00',
+  user: { first_name: fakeUser.first_name, last_name: fakeUser.last_name },
+});
