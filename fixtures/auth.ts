@@ -5,7 +5,7 @@ import { InvoicesPage } from '@pages/account/InvoicesPage';
 import { MessagesPage } from '@pages/account/MessagesPage';
 import { ProfilePage } from '@pages/account/ProfilePage';
 import { mock } from '@support/api-mock';
-import { ACCOUNT_SKIP_REASON, CUSTOMER_CREDENTIALS, RUN_ACCOUNT_TESTS } from '@support/env';
+import { CUSTOMER_CREDENTIALS } from '@support/env';
 import { fakeJwt, fakeUser } from '@support/payloads';
 import { installToken } from '@support/session';
 import { fakeCustomer, type Customer } from '@support/test-data';
@@ -16,8 +16,8 @@ import { test as mocksTest } from './mocks';
  * How the browser is signed in:
  * - `mocked`: a fake token plus a mocked GET /users/me. Nothing reaches the real auth API,
  *   so these specs run everywhere. The spec mocks the data endpoints it needs.
- * - `storage-state`: the token saved by tests/setup/account.setup.ts (gated, `account` project).
- * - `worker-account`: a real customer of this worker's own (gated).
+ * - `storage-state`: the token saved by tests/setup/account.setup.ts (`account` project only).
+ * - `worker-account`: a real customer of this worker's own (`account` project only).
  */
 export type Session = 'mocked' | 'storage-state' | 'worker-account';
 
@@ -66,14 +66,15 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
     { scope: 'worker' },
   ],
 
-  signedIn: async ({ page, session, apiMock, workerAccount }, use, testInfo) => {
+  signedIn: async ({ page, session, apiMock, workerAccount }, use) => {
     if (session === 'mocked') {
       await installToken(page, fakeJwt());
       await apiMock.use(mock.respond('GET', '/users/me', fakeUser));
       await use({ firstName: fakeUser.first_name, lastName: fakeUser.last_name, email: fakeUser.email });
       return;
     }
-    testInfo.skip(!RUN_ACCOUNT_TESTS, ACCOUNT_SKIP_REASON);
+    // No runtime skip for the real sessions: playwright.config.ts schedules @account specs only
+    // in the `account` project, which exists only where real accounts may be created.
     if (session === 'worker-account') {
       const { customer, token } = await workerAccount.get();
       await installToken(page, token);

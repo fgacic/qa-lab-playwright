@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { BillingStep } from './BillingStep';
 import { CartStep } from './CartStep';
 import { PaymentStep } from './PaymentStep';
@@ -28,7 +28,9 @@ export class CheckoutWizard {
   }
 
   async invoiceNumber(): Promise<string> {
-    const text = await this.confirmation.innerText();
-    return /INV-\d+/.exec(text)![0];
+    await expect(this.confirmation).toHaveText(/INV-\d+/);
+    const found = /INV-\d+/.exec(await this.confirmation.innerText());
+    if (!found) throw new Error('The confirmation names no invoice number');
+    return found[0];
   }
 }

@@ -22,12 +22,16 @@ export const collectionExpect = base.extend({
 /** Money matchers: `await expect(cart.total).toShowAmount(28.3)`, retried like any web-first assertion. */
 export const moneyExpect = base.extend({
   async toShowAmount(locator: Locator, expected: number, options?: { timeout?: number }) {
-    const parse = (text: string) => Number(text.replace(/[^0-9.-]/g, ''));
+    // No digits at all is NaN, never 0: an empty or placeholder text must not read as a zero amount.
+    const parse = (text: string) => {
+      const digits = text.replace(/[^0-9.-]/g, '');
+      return /\d/.test(digits) ? Number(digits) : NaN;
+    };
     let actual: number | undefined;
     let pass = false;
     try {
       await base
-        .poll(async () => (actual = parse(await locator.innerText())), { timeout: options?.timeout ?? 15_000 })
+        .poll(async () => (actual = parse(await locator.innerText())), { timeout: options?.timeout ?? this.timeout })
         .toBeCloseTo(expected, 2);
       pass = true;
     } catch {
@@ -38,7 +42,7 @@ export const moneyExpect = base.extend({
       name: 'toShowAmount',
       expected,
       actual,
-      message: () => `expected ${locator} to show $${expected.toFixed(2)}, it shows ${actual === undefined ? 'nothing' : `$${actual.toFixed(2)}`}`,
+      message: () => `expected ${locator} to show $${expected.toFixed(2)}, it shows ${actual === undefined || Number.isNaN(actual) ? 'no amount' : `$${actual.toFixed(2)}`}`,
     };
   },
 });

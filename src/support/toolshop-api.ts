@@ -1,5 +1,5 @@
-import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
-import { API_URL } from './env';
+import { type APIRequestContext, type APIResponse } from '@playwright/test';
+import { API_URL, IS_SELF_HOSTED } from './env';
 import { step } from './step';
 import type { Customer } from './test-data';
 
@@ -33,6 +33,11 @@ export interface CartItem {
 /** The product list and search use the HTTP method QUERY with a JSON body. */
 export type ProductQuery = Partial<Record<'page' | 'sort' | 'between' | 'by_category' | 'by_brand' | 'eco_friendly' | 'is_rental' | 'by_category_slug', string>>;
 
+/** Writes that leave a persistent, user-visible record (an account, an order, a message) belong on our own shop. */
+function assertSelfHosted(what: string): void {
+  if (!IS_SELF_HOSTED) throw new Error(`Refusing to ${what} on ${API_URL}: it leaves a real record on a shop that is not self-hosted.`);
+}
+
 /**
  * Thin client for arranging state through the API (the "arrange through the API, act through
  * the UI" rule). It never asserts on business behaviour: that is the UI specs' job.
@@ -42,7 +47,7 @@ export class ToolshopApi {
 
   @step('API: list products {0}')
   async listProducts(query: ProductQuery = {}): Promise<ProductPage> {
-    const response = await this.send(() =>
+    const response = await this.read(() =>
       this.request.fetch(`${API_URL}/products`, { method: 'QUERY', data: { page: '1', ...query } }),
     );
     return response.json();
@@ -80,9 +85,10 @@ export class ToolshopApi {
 
   @step('API: get product {0}')
   async product(id: string): Promise<Product> {
-    return (await this.send(() => this.request.get(`${API_URL}/products/${id}`))).json();
+    return (await this.read(() => this.request.get(`${API_URL}/products/${id}`))).json();
   }
 
+  /** Not guarded by assertSelfHosted: a guest cart is anonymous and is how the live run arranges its read flows. */
   @step('API: create a cart')
   async createCart(items: CartItem[]): Promise<string> {
     const { id } = await (await this.send(() => this.request.post(`${API_URL}/carts`, { data: {} }))).json();
@@ -94,6 +100,7 @@ export class ToolshopApi {
 
   @step('API: register customer {0.email}')
   async registerCustomer(customer: Customer): Promise<void> {
+    assertSelfHosted('register an account');
     await this.send(() =>
       this.request.post(`${API_URL}/users/register`, {
         data: {
@@ -128,7 +135,7 @@ export class ToolshopApi {
 
   @step('API: list invoices')
   async invoiceNumbers(token: string): Promise<string[]> {
-    const response = await this.send(() => this.request.get(`${API_URL}/invoices`, { headers: { authorization: `Bearer ${token}` } }));
+    const response = await this.read(() => this.request.get(`${API_URL}/invoices`, { headers: { authorization: `Bearer ${token}` } }));
     return ((await response.json()).data as { invoice_number: string }[]).map((i) => i.invoice_number);
   }
 
@@ -139,7 +146,7 @@ export class ToolshopApi {
 
   @step('API (admin): find the product named "{1}"')
   async findProductByName(token: string, name: string): Promise<Product | undefined> {
-    const response = await this.send(() =>
+    const response = await this.read(() =>
       this.request.fetch(`${API_URL}/products/search`, { method: 'QUERY', data: { q: name }, headers: { authorization: `Bearer ${token}` } }),
     );
     return ((await response.json()).data as Product[]).find((p) => p.name === name);
@@ -148,8 +155,9 @@ export class ToolshopApi {
   /** A real guest order paid cash on delivery, billed to the address the postcode lookup returns. */
   @step('API: place a guest order')
   async placeGuestOrder(items: CartItem[], guest: { email: string; firstName: string; lastName: string }): Promise<{ invoice_number: string; id: string }> {
+    assertSelfHosted('place an order');
     const cartId = await this.createCart(items);
-    const lookup = await (await this.send(() => this.request.get(`${API_URL}/postcode-lookup`, { params: { country: 'NL', postcode: '1234 AB', house_number: '1' } }))).json();
+    const lookup = await (await this.read(() => this.request.get(`${API_URL}/postcode-lookup`, { params: { country: 'NL', postcode: '1234 AB', house_number: '1' } }))).json();
     const response = await this.send(() =>
       this.request.post(`${API_URL}/invoices/guest`, {
         data: {
@@ -164,21 +172,33 @@ export class ToolshopApi {
 
   @step('API: send a contact message')
   async sendContactMessage(message: { name: string; email: string; subject: string; message: string }): Promise<void> {
+    assertSelfHosted('send a contact message');
     await this.send(() => this.request.post(`${API_URL}/messages`, { data: message }));
   }
 
+  /** A read: retried on a 5xx or a 429 (see `send`). */
+  private read(call: () => Promise<APIResponse>): Promise<APIResponse> {
+    return this.send(call, { idempotent: true });
+  }
+
   /**
-   * Arrange calls retry a 5xx up to three times: the shared backend fails now and then
-   * (POST /carts returned 500 once in three tries while this suite was written), and a
-   * flaky precondition should not fail a test about something else.
+   * The shared backend fails now and then (POST /carts returned 500 once in three tries while this
+   * suite was written), so reads retry a 5xx up to three times, and a 429 once the server's
+   * Retry-After has passed. Writes are never retried: a repeated order or registration could
+   * duplicate, so they fail at once, with the response body in the message.
    */
-  private async send(call: () => Promise<APIResponse>): Promise<APIResponse> {
+  private async send(call: () => Promise<APIResponse>, { idempotent = false }: { idempotent?: boolean } = {}): Promise<APIResponse> {
     let response = await call();
-    for (let attempt = 1; attempt < 3 && response.status() >= 500; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    for (let attempt = 1; idempotent && attempt < 3 && (response.status() >= 500 || response.status() === 429); attempt++) {
+      const retryAfter = Number(response.headers()['retry-after']);
+      const waitMs = response.status() === 429 && retryAfter > 0 ? Math.min(retryAfter, 30) * 1000 : 500 * attempt;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
       response = await call();
     }
-    expect(response, `${response.url()} answered ${response.status()}`).toBeOK();
+    if (!response.ok()) {
+      const body = (await response.text().catch(() => '')).slice(0, 500);
+      throw new Error(`${response.url()} answered ${response.status()}${body ? `: ${body}` : ''}`);
+    }
     return response;
   }
 }

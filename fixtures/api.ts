@@ -18,8 +18,16 @@ export class Catalog {
   rental = () => this.memo('rental', () => this.api.rentalProduct());
 
   private memo(key: string, load: () => Promise<Product>): Promise<Product> {
-    if (!this.cache.has(key)) this.cache.set(key, load());
-    return this.cache.get(key)!;
+    let cached = this.cache.get(key);
+    if (!cached) {
+      cached = load();
+      this.cache.set(key, cached);
+      // A failed lookup must not stay cached for the rest of the worker: the next test retries it.
+      cached.catch(() => {
+        if (this.cache.get(key) === cached) this.cache.delete(key);
+      });
+    }
+    return cached;
   }
 }
 

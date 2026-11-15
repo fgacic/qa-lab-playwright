@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import type { Locator, Response } from '@playwright/test';
 import { settleRequests } from '@support/settle';
 import { step } from '@support/step';
 import type { Address } from '@support/test-data';
@@ -29,24 +29,40 @@ export class BillingStep {
     this.proceedButton = root.getByTestId('proceed-3');
   }
 
-  /** Country, postcode and house number trigger GET /postcode-lookup, which fills the rest. */
+  /**
+   * Country, postcode and house number trigger GET /postcode-lookup, which fills the rest.
+   * Returns the status of the last answer, so a caller that needs the lookup to work can say so.
+   */
   @step('Look up the address for {0.postalCode} {0.houseNumber}')
-  async lookUp(address: Pick<Address, 'country' | 'postalCode' | 'houseNumber'>): Promise<void> {
-    await settleRequests(this.root.page(), '/postcode-lookup', async () => {
-      await this.country.input.selectOption(address.country);
-      await this.postalCode.input.fill(address.postalCode);
-      await this.houseNumber.input.fill(address.houseNumber);
-    });
+  async lookUp(address: Pick<Address, 'country' | 'postalCode' | 'houseNumber'>): Promise<number> {
+    const page = this.root.page();
+    let status = 0;
+    const answered = (response: Response) => {
+      if (response.url().includes('/postcode-lookup')) status = response.status();
+    };
+    page.on('response', answered);
+    try {
+      await settleRequests(page, '/postcode-lookup', async () => {
+        await this.country.input.selectOption(address.country);
+        await this.postalCode.input.fill(address.postalCode);
+        await this.houseNumber.input.fill(address.houseNumber);
+      });
+    } finally {
+      page.off('response', answered);
+    }
+    return status;
   }
 
   /**
    * Enter an address: look it up, keep what the lookup suggests, and type only what it left
    * empty. Keeping the suggestion matters: the API refuses an order whose city does not belong
-   * to the country (422), so an invented city cannot be typed over a real one.
+   * to the country (422), so an invented city cannot be typed over a real one. A lookup that
+   * failed throws: typing the whole address by hand would hide a broken lookup.
    */
   @step('Enter the billing address')
   async enterAddress(address: Address): Promise<void> {
-    await this.lookUp(address);
+    const status = await this.lookUp(address);
+    if (status < 200 || status >= 300) throw new Error(`The postcode lookup for ${address.postalCode} ${address.houseNumber} answered ${status || 'nothing'}`);
     for (const [field, value] of [[this.street, address.street], [this.city, address.city], [this.state, address.state]] as const) {
       if (!(await field.input.inputValue())) await field.input.fill(value);
     }

@@ -24,8 +24,9 @@ export class LoginPage {
     this.heading = page.getByRole('heading', { name: 'Login', level: 3 });
     this.email = new FormField(form, 'Email address *', 'email-error');
     this.password = new FormField(form, 'Password *', 'password-error');
-    // The eye icon button has no accessible name (A11Y-02); it is the form's only unnamed button.
-    this.showPasswordButton = form.getByRole('button', { name: '', exact: true });
+    // The eye icon button has no accessible name (A11Y-02), so it is found as the form's button
+    // that is not the submit one: that still holds once the button gets its name.
+    this.showPasswordButton = form.getByRole('button').filter({ hasNotText: 'Login' });
     this.loginButton = form.getByRole('button', { name: 'Login' });
     this.googleButton = page.getByRole('button', { name: 'Sign in with Google' });
     this.error = page.getByTestId('login-error');

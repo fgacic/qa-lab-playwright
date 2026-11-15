@@ -5,6 +5,7 @@ import { AppShell } from './AppShell';
 
 export class ForgotPasswordPage {
   readonly shell: AppShell;
+  readonly form: Locator;
   readonly heading: Locator;
   readonly email: FormField;
   readonly submitButton: Locator;
@@ -13,14 +14,16 @@ export class ForgotPasswordPage {
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
     const form = page.getByTestId('forgot-password-form');
+    this.form = form;
     this.heading = page.getByRole('heading', { name: 'Forgot Password' });
     this.email = new FormField(form, 'Email address *', 'email-error');
     this.submitButton = form.getByRole('button', { name: 'Set New Password' });
     this.alert = form.getByRole('alert');
   }
 
+  /** The result message the form shows (success or error): an alert inside the form. */
   statusMessage(text: string | RegExp): Locator {
-    return this.page.getByText(text);
+    return this.form.getByRole('alert').filter({ hasText: text });
   }
 
   @step('Open the forgot-password page')

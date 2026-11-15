@@ -21,7 +21,7 @@ export type MockResponse =
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': '*',
-  'access-control-allow-methods': 'GET,POST,PUT,DELETE,QUERY,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,QUERY,OPTIONS',
 };
 
 /**
@@ -62,6 +62,8 @@ export class ApiMock {
   private readonly routes: MockRoute[] = [];
   private readonly defaults: MockRoute[] = [];
   private installed = false;
+  /** How many answers each route has served in this page. The routes themselves stay untouched, so a describe-level sequence replays from the start in every test. */
+  private readonly served = new WeakMap<MockRoute, number>();
   private guardWrites = false;
   /** Writes the guard refused (see `blockUnmockedWrites`). */
   readonly blockedWrites: string[] = [];
@@ -73,7 +75,7 @@ export class ApiMock {
   async install(): Promise<void> {
     if (this.installed) return;
     this.installed = true;
-    await this.page.route((url) => url.href.startsWith(API_URL), (route) => this.handle(route));
+    await this.page.route((url) => url.href === API_URL || url.href.startsWith(`${API_URL}/`), (route) => this.handle(route));
   }
 
   async use(...routes: MockRoute[]): Promise<void> {
@@ -119,7 +121,9 @@ export class ApiMock {
       body = (request.postDataJSON() as Record<string, string> | null) ?? {};
       return bodyMatches(body);
     });
-    return { response, body, json: (await response.json()) as T };
+    // A mocked error may answer with no JSON body: hand that back as undefined instead of throwing.
+    const json = (await response.json().catch(() => undefined)) as T;
+    return { response, body, json };
   }
 
   private async handle(route: Route): Promise<void> {
@@ -135,7 +139,9 @@ export class ApiMock {
       }
       return route.fallback();
     }
-    const response = match.responses.length > 1 ? match.responses.shift()! : match.responses[0];
+    const index = this.served.get(match) ?? 0;
+    this.served.set(match, index + 1);
+    const response = match.responses[Math.min(index, match.responses.length - 1)];
     if ('abort' in response) return route.abort(response.abort);
     return route.fulfill({
       status: response.status,

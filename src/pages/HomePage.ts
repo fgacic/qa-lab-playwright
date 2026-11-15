@@ -45,13 +45,15 @@ export class HomePage {
     return new ProductPage(this.page);
   }
 
-  /** Opens the first product in the grid that can be bought, and returns its name too. */
+  /** Opens the first product in the grid that can be bought, and returns its name and id too. */
   @step('Open the first product that is in stock')
-  async openFirstInStockProduct(): Promise<{ name: string; productPage: ProductPage }> {
+  async openFirstInStockProduct(): Promise<{ id: string; name: string; productPage: ProductPage }> {
     const card = this.grid.firstInStock();
     const name = await card.name.innerText();
     await card.root.click();
-    return { name, productPage: new ProductPage(this.page) };
+    await this.page.waitForURL(/\/product\/[^/]+$/);
+    const id = new URL(this.page.url()).pathname.split('/').pop() ?? '';
+    return { id, name, productPage: new ProductPage(this.page) };
   }
 
   @step('Open the comparison from the bar')

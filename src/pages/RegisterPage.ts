@@ -42,7 +42,8 @@ export class RegisterPage {
     this.phone = new FormField(form, 'Phone', 'phone-error');
     this.email = new FormField(form, 'Email address', 'email-error');
     this.password = new FormField(form, 'Password', 'password-error');
-    this.showPasswordButton = form.getByRole('button', { name: '', exact: true });
+    // No accessible name (A11Y-02): found as the form's button that is not the submit one.
+    this.showPasswordButton = form.getByRole('button').filter({ hasNotText: 'Register' });
     this.passwordRules = form.getByRole('listitem');
     this.registerButton = form.getByRole('button', { name: 'Register' });
     this.error = page.getByTestId('register-error');

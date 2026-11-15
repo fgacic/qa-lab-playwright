@@ -37,13 +37,19 @@ export class CheckoutPage {
     return this.wizard.payment;
   }
 
-  /** From the cart to the confirmation as a guest paying cash on delivery. */
-  @step('Check out as guest {0.email}')
-  async checkOutAsGuest(guest: Person, address: Address): Promise<void> {
+  /** From the cart to the payment step as a guest. Nothing is ordered yet. */
+  @step('Go to the payment step as guest {0.email}')
+  async proceedToPayment(guest: Person, address: Address): Promise<void> {
     await this.cart.proceed();
     await this.signIn.continueAsGuest(guest);
     await this.billing.enterAddress(address);
     await this.billing.proceed();
+  }
+
+  /** From the cart to the confirmation as a guest paying cash on delivery. */
+  @step('Check out as guest {0.email}')
+  async checkOutAsGuest(guest: Person, address: Address): Promise<void> {
+    await this.proceedToPayment(guest, address);
     await this.payment.payWith('cash-on-delivery');
   }
 

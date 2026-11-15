@@ -25,8 +25,8 @@ export class PaymentStep {
   constructor(private readonly root: Locator) {
     this.heading = root.getByRole('heading', { name: 'Payment', exact: true });
     this.method = root.getByRole('combobox', { name: 'Payment Method' });
-    this.checkPaymentButton = root.getByRole('button', { name: 'Check payment' });
-    this.confirmButton = root.getByRole('button', { name: 'Confirm' });
+    this.checkPaymentButton = root.getByRole('button', { name: 'Check payment', exact: true });
+    this.confirmButton = root.getByRole('button', { name: 'Confirm', exact: true });
     this.successMessage = root.getByTestId('payment-success-message');
     this.errorMessage = root.getByTestId('payment-error-message');
   }
@@ -61,7 +61,6 @@ export class PaymentStep {
   async payWith(method: Extract<PaymentMethod, 'cash-on-delivery'>): Promise<void> {
     await this.choose(method);
     await this.checkPayment();
-    await this.confirmButton.waitFor();
     await this.confirm();
   }
 }

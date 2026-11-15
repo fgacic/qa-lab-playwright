@@ -11,6 +11,7 @@ import { RegisterPage } from '@pages/RegisterPage';
 import { RentalsPage } from '@pages/RentalsPage';
 import type { CartItem, Product } from '@support/toolshop-api';
 import { test as apiTest } from './api';
+import { test as authTest } from './auth';
 import { test as mocksTest } from './mocks';
 
 export type ProductKind = 'in-stock' | 'another-in-stock' | 'out-of-stock' | 'eco' | 'rental';
@@ -33,6 +34,8 @@ export interface PageFixtures {
   product: Product;
   homePage: HomePage;
   productPage: ProductPage;
+  /** `productPage` for a signed-in customer: the session is in place before the page opens. */
+  signedInProductPage: ProductPage;
   categoryPage: CategoryPage;
   rentalsPage: RentalsPage;
   comparisonPage: ComparisonPage;
@@ -48,7 +51,7 @@ export interface PageFixtures {
   shop: { home: HomePage };
 }
 
-export const test = mergeTests(apiTest, mocksTest).extend<PageOptions & PageFixtures>({
+export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions & PageFixtures>({
   productKind: ['in-stock', { option: true }],
   cartItems: [async ({ catalog }, use) => use([{ product: await catalog.inStock(), quantity: 1 }]), { option: true }],
   comparedProducts: [[], { option: true }],
@@ -69,6 +72,12 @@ export const test = mergeTests(apiTest, mocksTest).extend<PageOptions & PageFixt
     await use(homePage);
   },
   productPage: async ({ page, product }, use) => {
+    const productPage = new ProductPage(page);
+    await productPage.open(product.id);
+    await use(productPage);
+  },
+  // Depends on `signedIn` so the session exists before the page opens, whatever order a spec lists its fixtures in.
+  signedInProductPage: async ({ page, product, signedIn: _ }, use) => {
     const productPage = new ProductPage(page);
     await productPage.open(product.id);
     await use(productPage);
