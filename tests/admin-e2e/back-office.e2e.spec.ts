@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@fixtures';
+import { API_URL } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { fakeGuest, uniqueEmail } from '@support/test-data';
 
@@ -7,9 +8,13 @@ import { fakeGuest, uniqueEmail } from '@support/test-data';
  * Real back-office journeys against the real admin API, signed in from the `admin` project's
  * storageState (the seeded admin on the self-hosted Toolshop). They create, change and delete
  * data, so on the live site they only run with RUN_ADMIN_TESTS=1 and ADMIN_EMAIL / ADMIN_PASSWORD.
- * Every product a test creates carries a unique "QaLab" name. `createdProducts` takes its id from
- * the create response as it arrives and deletes it by id in teardown, pass or fail, so even a
- * test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
+ * Every product a test creates carries a unique "QaLab" name and is a rental ("Item for rent"): the
+ * shop's default list, categories, filters, sorting and pagination leave rentals out, so no catalogue spec
+ * running at the same time (the `mobile` smoke set shares this project's pass) can see it or have its
+ * totals shift. The shop's search still finds a rental, which is all these journeys need. (The rentals
+ * page is the one list that shows it; no spec of the `admin` pass reads that page.) `createdProducts`
+ * is automatic here: it takes the id from the create response as it arrives and deletes it in
+ * teardown, pass or fail, so even a test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
  * message (DELETE /invoices/{id} and /messages/{id} answer 405), so those two tests leave one
  * uniquely named record each behind: they are tagged @self-hosted, never run on the live site,
  * and are harmless on the throwaway database of the self-hosted target, which is rebuilt for
@@ -23,50 +28,61 @@ const unique = () => randomUUID().slice(0, 8);
 test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   // No word under three letters in this name: search requires every word, and MariaDB's full-text
   // index ignores short ones (BUG-28, pinned below).
-  test('a product created in the back office is sold in the shop, repriced, then deleted', { tag: ['@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
+  test('a product created in the back office is listed in the shop, repriced, then deleted', { tag: ['@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
     const name = `QaLab Product ${unique()}`;
-    const form = await adminProducts.add();
-    await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '3', price: '12.34' });
-    await form.chrome.save();
-    await expect(form.chrome.alert('Product saved!')).toBeVisible();
-    await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
+    await test.step('Create the product in the back office', async () => {
+      const form = await adminProducts.add();
+      await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '3', price: '12.34', rental: true });
+      await form.chrome.save();
+      await expect(form.chrome.alert('Product saved!')).toBeVisible();
+      await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
+    });
 
-    await shop.home.open();
-    await shop.home.search.searchFor(name);
-    await expect(shop.home.grid.card(name).price).toHaveText('$12.34');
+    await test.step('The shop lists it at the entered price', async () => {
+      await shop.home.open();
+      await shop.home.search.searchFor(name);
+      await expect(shop.home.grid.card(name).price).toHaveText('$12.34');
+    });
 
-    await adminProducts.open();
-    await adminProducts.search.searchFor(name);
-    const edit = await adminProducts.edit(name);
-    // Wait for the form to load the product, or the load overwrites what is typed.
-    await expect(edit.name).toHaveValue(name);
-    // The edit form loads neither the stock (ADM-05) nor brand, category and image (ADM-09);
-    // choosing waits for their options to arrive.
-    await edit.stock.fill('3');
-    await edit.chooseRelations();
-    await edit.price.fill('23.45');
-    await edit.chrome.save();
-    await expect(edit.chrome.alert('Product saved!')).toBeVisible();
+    await test.step('Reprice it in the back office', async () => {
+      await adminProducts.open();
+      await adminProducts.search.searchFor(name);
+      const edit = await adminProducts.edit(name);
+      // Wait for the form to load the product, or the load overwrites what is typed.
+      await expect(edit.name).toHaveValue(name);
+      // The edit form loads neither the stock (ADM-05) nor brand, category and image (ADM-09);
+      // choosing waits for their options to arrive. It does load the rental flag, which keeps the product out of the catalogue.
+      await expect(edit.rental).toBeChecked();
+      await edit.stock.fill('3');
+      await edit.chooseRelations();
+      await edit.price.fill('23.45');
+      await edit.chrome.save();
+      await expect(edit.chrome.alert('Product saved!')).toBeVisible();
+    });
 
-    await shop.home.open();
-    await shop.home.search.searchFor(name);
-    await expect(shop.home.grid.card(name).price).toHaveText('$23.45');
+    await test.step('The shop shows the new price', async () => {
+      await shop.home.open();
+      await shop.home.search.searchFor(name);
+      await expect(shop.home.grid.card(name).price).toHaveText('$23.45');
+    });
 
-    await adminProducts.open();
-    await adminProducts.search.searchFor(name);
-    await adminProducts.table.delete(name);
-    await expect(adminProducts.feedback.filter({ hasText: 'Product deleted.' })).toBeVisible();
-    await expect.poll(() => createdProducts.pending(), 'the UI delete really removed the product').toHaveLength(0);
-    await shop.home.open();
-    await shop.home.search.searchFor(name);
-    await expect(shop.home.grid.emptyState).toBeVisible();
+    await test.step('Delete it in the back office; the shop no longer finds it', async () => {
+      await adminProducts.open();
+      await adminProducts.search.searchFor(name);
+      await adminProducts.table.delete(name);
+      await expect(adminProducts.feedback.filter({ hasText: 'Product deleted.' })).toBeVisible();
+      await expect.poll(() => createdProducts.pending(), 'the UI delete really removed the product').toHaveLength(0);
+      await shop.home.open();
+      await shop.home.search.searchFor(name);
+      await expect(shop.home.grid.emptyState).toBeVisible();
+    });
   });
 
   test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, createdProducts }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
     const name = `Set of QaLab Pliers ${unique()}`;
     const form = await adminProducts.add();
-    await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '1', price: '5.00' });
+    await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '1', price: '5.00', rental: true });
     await form.chrome.save();
     await expect(form.chrome.alert('Product saved!')).toBeVisible();
     await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
@@ -89,11 +105,15 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(order.status).toHaveValue('SHIPPED');
   });
 
-  test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock }) => {
+  test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, request, adminToken }) => {
     const sender = `Qa Lab Sender ${unique()}`;
     const text = `Sent by the qa-lab suite at ${new Date().toISOString()}, long enough to be a real message.`;
     await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: 'webmaster', message: text });
 
+    // The inbox lists newest first, 15 to a page, and has no search: the row is on page 1 unless 15 newer messages
+    // arrive first. Reading page 1 from the API first makes that precondition explicit instead of a timeout on a row.
+    const inbox = await request.get(`${API_URL}/messages`, { headers: { authorization: `Bearer ${await adminToken()}` } });
+    expect((await inbox.json()).data.map((m: { name: string }) => m.name), 'the new message is on the first page of the inbox').toContain(sender);
     await adminMessages.open();
     const message = await adminMessages.details(sender);
     await expect(message.text(text)).toBeVisible();

@@ -1,5 +1,9 @@
 // Waits until the self-hosted Toolshop answers like a seeded shop: the API lists products and
 // lets the seeded admin sign in, and the UI serves its index. Exits non-zero after the deadline.
+import { readFileSync } from 'node:fs';
+
+// The seeded accounts live in one place, shared with src/support/env.ts.
+const { admin } = JSON.parse(readFileSync(new URL('../src/support/seeded-accounts.json', import.meta.url), 'utf8'));
 const API = process.env.API_URL ?? 'http://localhost:4200/api';
 const UI = process.env.BASE_URL ?? 'http://localhost:4200';
 const deadline = Date.now() + Number(process.env.WAIT_TIMEOUT_MS ?? 180_000);
@@ -10,7 +14,7 @@ async function healthy() {
   const login = await fetch(`${API}/users/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@practicesoftwaretesting.com', password: 'welcome01' }),
+    body: JSON.stringify(admin),
   });
   if (!login.ok) return `seeded admin cannot sign in (${login.status})`;
   const ui = await fetch(UI);

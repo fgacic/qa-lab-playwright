@@ -1,10 +1,10 @@
-import { expect, test } from '@fixtures';
+import { expect, test } from '@playwright/test';
 import { untranslatedKeys } from '@support/i18n';
 
 /**
  * The leaked-key detector, on text the shop really renders: a key is flagged wherever it is
  * shown, and an email, a URL, a price, a version or an abbreviation is not mistaken for one.
- * No page is opened: this guards the guard.
+ * No page is opened (so `test` comes from Playwright itself, not the suite's page fixtures): this guards the guard.
  * @i18n: Chromium only, with the rest of the translation checks.
  */
 test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () => {
@@ -25,6 +25,25 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
       'errors.404.title',
       'cart.items.2',
     ]);
+  });
+
+  // The edges of the pattern, each of which a narrower detector missed: a camelCase or upper-case first
+  // segment, a key glued to punctuation, a key that starts with a digit, and a key that is all there is.
+  test('keys at the limits of the pattern are flagged', () => {
+    expect(untranslatedKeys(['navBar.home', 'NAV.HOME', 'Error:nav.home', '(nav.home)', '"nav.home"', 'nav.home,', '2fa.title'])).toEqual([
+      'navBar.home',
+      'NAV.HOME',
+      'nav.home',
+      'nav.home',
+      'nav.home',
+      'nav.home',
+      '2fa.title',
+    ]);
+    expect(untranslatedKeys(['nav.home'])).toEqual(['nav.home']);
+  });
+
+  test('a key and a real address in one text are told apart', () => {
+    expect(untranslatedKeys(['Write to info@testsmith.io or see nav.home', 'Visit www.practicesoftwaretesting.com, then login.title'])).toEqual(['nav.home', 'login.title']);
   });
 
   test('real page text holds no key', () => {

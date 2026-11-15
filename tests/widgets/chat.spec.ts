@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { contactSubjectSlug, emptyProductPage } from '@support/payloads';
+import { contactSubjectSlug, emptyProductPage, page as paged } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 test.describe('Chat assistant', () => {
@@ -89,6 +89,65 @@ test.describe('Chat assistant', () => {
         subject: contactSubjectSlug('Webmaster'),
         message: CONTACT_MESSAGE,
       });
+    });
+  });
+
+  test.describe('when the search finds a product', { tag: ['@mocked'] }, () => {
+    test.use({
+      apiMocks: async ({ catalog }, use) => {
+        const product = await catalog.inStock();
+        await use({ routes: [mock.respond('QUERY', '/products/search', { ...paged([product]), per_page: 9 })] });
+      },
+    });
+
+    test('its card shows the name and the price', async ({ homePage, catalog }) => {
+      const { chat } = homePage.shell;
+      const product = await catalog.inStock();
+      await chat.open();
+
+      await chat.findProduct(product.name);
+
+      await expect(chat.reply('Here are some products I found:')).toBeVisible();
+      await expect(chat.productResults).toHaveCount(1);
+      await expect(chat.productResult(product.name)).toContainText(`$${product.price.toFixed(2)}`);
+    });
+  });
+
+  test.describe('the ticket form validates what the visitor types', { tag: ['@negative'] }, () => {
+    // Nothing answers POST /messages here: the guard refuses a ticket that should never be sent.
+    test.beforeEach(async ({ homePage, apiMock }) => {
+      await apiMock.blockUnmockedWrites();
+      await homePage.shell.chat.open();
+      await homePage.shell.chat.choose('Create support ticket');
+    });
+
+    test('a malformed email is asked for again', async ({ homePage, apiMock }) => {
+      const { chat } = homePage.shell;
+      await chat.send('Testy');
+      await chat.send('McTestface');
+      await expect(chat.reply('What is your email address?')).toBeVisible();
+
+      await chat.send('not-an-email');
+
+      await expect(chat.reply('Please enter a valid email address.')).toBeVisible();
+      await expect(chat.reply('Please select a subject for your ticket:')).toBeHidden();
+      await apiMock.expectNoRequest('POST', '/messages');
+    });
+
+    test('a description under 50 characters is asked for again', async ({ homePage, apiMock }) => {
+      const { chat } = homePage.shell;
+      const guest = fakeGuest();
+      await chat.send(guest.firstName);
+      await chat.send(guest.lastName);
+      await chat.send(guest.email);
+      await chat.pick('Webmaster');
+      await expect(chat.reply('Please describe your issue (minimum 50 characters):')).toBeVisible();
+
+      await chat.send('too short');
+
+      await expect(chat.reply('Your message must be at least 50 characters long.')).toBeVisible();
+      await expect(chat.reply('Would you like to add an attachment?')).toBeHidden();
+      await apiMock.expectNoRequest('POST', '/messages');
     });
   });
 

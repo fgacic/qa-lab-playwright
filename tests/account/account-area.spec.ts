@@ -67,10 +67,14 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       const product = await catalog.inStock();
       await expect(favoritesPage.favorite(product.name)).toBeVisible();
 
+      // The page lists once on opening and again after a removal: the sequence's second answer (empty) belongs
+      // to that second list, so wait for it to be served before asserting what the page shows.
       const removal = apiMock.waitForRequest('DELETE', /^\/favorites\/.+$/);
+      const relisted = apiMock.waitForResponse('GET', '/favorites');
       await favoritesPage.remove(product.name);
 
       expect(apiPath((await removal).url())).toBe(`/favorites/${FAVORITE_ID}`);
+      await relisted;
       await expect(favoritesPage.favorites).toHaveCount(0);
       await expect(favoritesPage.emptyState).toBeVisible();
     });
@@ -141,10 +145,13 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect(details.text(fakeMessage.message)).toBeVisible();
       await expect(details.repliesHeading).toBeVisible();
 
+      // The message is read once on opening and again after the reply: wait for that second read, which lists the reply.
       const reply = apiMock.waitForRequest('POST', `/messages/${fakeMessage.id}/reply`);
+      const reread = apiMock.waitForResponse('GET', `/messages/${fakeMessage.id}`);
       await details.sendReply(REPLY);
 
       expect((await reply).postDataJSON()).toEqual({ message: REPLY });
+      await reread;
       await expect(details.text(REPLY)).toBeVisible();
       await expect(details.reply).toHaveValue('');
     });
@@ -159,6 +166,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   });
 
   test.describe('profile', () => {
+    // Replaces the set above (a nested `test.use` does not merge), so the profile page's own POST /totp/setup needs its mock here too.
     test.use(withMocks(
       mock.respond('POST', '/totp/setup', {}),
       mock.respond('PUT', /^\/users\/[^/]+$/, { success: true }),
@@ -202,26 +210,26 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await profilePage.changePasswordButton.click();
 
       await expect(profilePage.alerts.filter({ hasText: /required/i }).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: 2_000 });
-      await expect.poll(() => apiMock.requestsTo('POST', '/users/change-password'), { message: 'BUG-26: no request is sent' }).toBe(0);
+      await expect(apiMock.expectNoRequest('POST', '/users/change-password'), 'BUG-26: no request is sent').resolves.toBeUndefined();
     });
 
-    // The email field is read-only on this page, so the profile's format check is exercised through the phone number.
     test('an empty first name is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
       await profilePage.firstName.input.fill('');
 
       await profilePage.update();
 
       await expect(profilePage.alerts.filter({ hasText: 'Please correct the highlighted fields before saving.' })).toBeVisible();
-      await expect.poll(() => apiMock.requestsTo('PUT', /^\/users\/[^/]+$/), { message: 'invalid input is not sent' }).toBe(0);
+      await apiMock.expectNoRequest('PUT', /^\/users\/[^/]+$/);
     });
 
+    // The email field is read-only on this page, so the profile's format check is exercised through the phone number.
     test('a malformed phone number is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
       await profilePage.phone.input.fill('abc');
 
       await profilePage.update();
 
       await expect(profilePage.alerts.filter({ hasText: 'Please enter a valid phone number (digits, spaces and ( ) + - only).' })).toBeVisible();
-      await expect.poll(() => apiMock.requestsTo('PUT', /^\/users\/[^/]+$/), { message: 'invalid input is not sent' }).toBe(0);
+      await apiMock.expectNoRequest('PUT', /^\/users\/[^/]+$/);
     });
 
     test('a profile the API rejects shows its reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {

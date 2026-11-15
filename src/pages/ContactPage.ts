@@ -14,6 +14,7 @@ export interface ContactMessage {
 
 export class ContactPage {
   readonly shell: AppShell;
+  readonly form: Locator;
   readonly heading: Locator;
   readonly firstName: FormField;
   readonly lastName: FormField;
@@ -26,21 +27,23 @@ export class ContactPage {
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
-    const body = page.locator('body');
+    // The form has no accessible name and no test id, so its element is the only handle that keeps a status line inside it.
+    const form = page.locator('form');
+    this.form = form;
     this.heading = page.getByRole('heading', { name: 'Contact', exact: true });
-    this.firstName = new FormField(body, 'First name', 'first-name-error');
-    this.lastName = new FormField(body, 'Last name', 'last-name-error');
-    this.email = new FormField(body, 'Email address', 'email-error');
-    this.subject = new FormField(body, 'Subject', 'subject-error');
-    this.message = new FormField(body, 'Message *', 'message-error');
-    this.attachment = new FormField(body, 'Attachment', 'attachment-error');
+    this.firstName = new FormField(form, 'First name', 'first-name-error');
+    this.lastName = new FormField(form, 'Last name', 'last-name-error');
+    this.email = new FormField(form, 'Email address', 'email-error');
+    this.subject = new FormField(form, 'Subject', 'subject-error');
+    this.message = new FormField(form, 'Message *', 'message-error');
+    this.attachment = new FormField(form, 'Attachment', 'attachment-error');
     this.sendButton = page.getByRole('button', { name: 'Send' });
     this.successMessage = page.getByRole('alert').filter({ hasText: 'Thanks for your message! We will contact you shortly.' });
   }
 
-  /** A status line by its text: server errors render in an untagged box above the button. */
+  /** A status line of the form by its text: server errors render in an untagged box below the button. */
   statusMessage(text: string | RegExp): Locator {
-    return this.page.getByText(text);
+    return this.form.getByText(text);
   }
 
   @step('Open the contact page')

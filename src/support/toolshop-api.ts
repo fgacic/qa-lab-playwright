@@ -30,6 +30,15 @@ export interface CartItem {
   quantity: number;
 }
 
+/** A node of `GET /categories/tree`: a category with its subcategories. */
+export interface CategoryNode {
+  id: string;
+  name: string;
+  slug: string;
+  parent_id: string | null;
+  sub_categories: CategoryNode[];
+}
+
 /** The product list and search use the HTTP method QUERY with a JSON body. */
 export type ProductQuery = Partial<Record<'page' | 'sort' | 'between' | 'by_category' | 'by_brand' | 'eco_friendly' | 'is_rental' | 'by_category_slug', string>>;
 
@@ -129,7 +138,24 @@ export class ToolshopApi {
   @step('API: sign in')
   async login(email: string, password: string): Promise<string> {
     const response = await this.send(() => this.request.post(`${API_URL}/users/login`, { data: { email, password } }));
-    return (await response.json()).access_token;
+    const { access_token: token } = await response.json();
+    if (typeof token !== 'string' || !token) throw new Error(`${API_URL}/users/login answered ${response.status()} without an access_token`);
+    return token;
+  }
+
+  @step('API: get the signed-in user')
+  async me(token: string): Promise<{ first_name: string; last_name: string; email: string }> {
+    return (await this.read(() => this.request.get(`${API_URL}/users/me`, { headers: { authorization: `Bearer ${token}` } }))).json();
+  }
+
+  @step('API: category tree')
+  async categoryTree(): Promise<CategoryNode[]> {
+    return (await this.read(() => this.request.get(`${API_URL}/categories/tree`))).json();
+  }
+
+  @step('API: related products of {0}')
+  async related(productId: string): Promise<Product[]> {
+    return (await this.read(() => this.request.get(`${API_URL}/products/${productId}/related`))).json();
   }
 
   @step('API: add product {1} to favourites')
@@ -187,7 +213,7 @@ export class ToolshopApi {
 
   /**
    * The shared backend fails now and then (POST /carts returned 500 once in three tries while this
-   * suite was written), so reads (and the anonymous cart creation) retry a 5xx up to three times,
+   * suite was written), so reads (and the anonymous cart creation) are attempted up to three times (two retries) on a 5xx,
    * and a 429 once the server's Retry-After has passed. Other writes are never retried: a repeated
    * order or registration could duplicate, so they fail at once, with the response body in the message.
    */

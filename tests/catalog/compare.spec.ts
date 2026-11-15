@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { COMPARE_STORAGE_KEY } from '@pages/ComparisonPage';
 import { knownBug } from '@support/known-bug';
 
 test.describe('Product comparison', () => {
@@ -19,7 +20,7 @@ test.describe('Product comparison', () => {
     // The link only carries the selection the app has stored: check that before leaving the page.
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
     await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('compare_ids') ?? '[]').length), 'compare_ids in the session').toBe(2);
+    await expect.poll(() => page.evaluate((key) => JSON.parse(sessionStorage.getItem(key) ?? '[]').length, COMPARE_STORAGE_KEY), `${COMPARE_STORAGE_KEY} in the session`).toBe(2);
 
     const comparison = await homePage.openComparison();
 
@@ -28,7 +29,7 @@ test.describe('Product comparison', () => {
   });
 
   test('pressing Compare again takes a product back out', async ({ homePage }) => {
-    await homePage.grid.productNames();
+    await homePage.grid.waitForLoaded();
     const first = homePage.grid.first();
     await first.compareButton.click();
     await expect(homePage.compareBar.selection).toHaveText('1 product(s) selected');
@@ -40,15 +41,29 @@ test.describe('Product comparison', () => {
   });
 
   test('at most four products can be compared', { tag: ['@negative'] }, async ({ homePage }) => {
-    await homePage.grid.productNames();
+    await homePage.grid.waitForLoaded();
     for (let i = 0; i < 5; i++) await homePage.grid.nth(i).compareButton.click();
 
     await expect(homePage.compareBar.selection).toHaveText('4 product(s) selected');
     await expect(homePage.grid.nth(4).compareButton).toHaveAttribute('aria-pressed', 'false');
   });
 
+  test('the selection survives opening a product and coming back', async ({ homePage }) => {
+    const [first, second] = await homePage.grid.productNames();
+    await homePage.grid.compare(first);
+    await homePage.grid.compare(second);
+    await expect(homePage.compareBar.selection).toHaveText('2 product(s) selected');
+
+    const productPage = await homePage.openProduct(first);
+    await productPage.backToShop();
+
+    await expect(homePage.compareBar.selection).toHaveText('2 product(s) selected');
+    await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('Clear All in the bar empties the selection', async ({ homePage }) => {
-    await homePage.grid.productNames();
+    await homePage.grid.waitForLoaded();
     await homePage.grid.first().compareButton.click();
 
     await homePage.compareBar.clearAll();
@@ -101,7 +116,8 @@ test.describe('Product comparison', () => {
     test.use({
       comparedProducts: async ({ api, catalog }, use) => {
         const first = await catalog.inStock();
-        const sameBrand = await api.findProduct('same-brand', (p) => p.brand.id === first.brand.id && p.id !== first.id && !p.is_rental);
+        // Same brand, different price: the Brand row agrees and the Price row differs.
+        const sameBrand = await api.findProduct('same-brand, different-price', (p) => p.brand.id === first.brand.id && p.id !== first.id && !p.is_rental && p.price !== first.price);
         await use([first, sameBrand]);
       },
     });
@@ -110,10 +126,13 @@ test.describe('Product comparison', () => {
       knownBug('BUG-12', '"Show differences only" hides nothing; rows where both products agree stay visible.');
       await expect(comparisonPage.cells('Brand')).toHaveText(comparedProducts.map((p) => p.brand.name));
       await expect(comparisonPage.row('Brand')).toBeVisible();
+      await expect(comparisonPage.cells('Price')).toHaveText(comparedProducts.map((p) => `$${p.price.toFixed(2)}`));
 
       await comparisonPage.showDifferencesOnly.check();
 
       await expect(comparisonPage.row('Brand'), 'BUG-12: "Show differences only" hides the rows where both products agree').toBeHidden({ timeout: 5_000 });
+      // And the filter must not overreach: a row where they differ stays.
+      await expect(comparisonPage.row('Price'), 'BUG-12: "Show differences only" keeps the rows where the products differ').toBeVisible();
     });
   });
 

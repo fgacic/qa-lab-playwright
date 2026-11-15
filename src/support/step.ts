@@ -17,12 +17,13 @@ export function step(title?: string) {
             return format(key ? arg?.[key] : arg);
           })
         : `${(this as object).constructor.name}.${String(context.name)}`;
-      return test.step(name, () => target.apply(this, args), { box: true });
+      return test.step(name.trim(), () => target.apply(this, args), { box: true });
     };
   };
 }
 
 function format(value: unknown): string {
+  if (value === undefined) return '';
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   if (Array.isArray(value)) return value.map(format).join(', ');
   return JSON.stringify(value);

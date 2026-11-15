@@ -1,9 +1,5 @@
-import type { Page } from '@playwright/test';
 import { CATEGORY_MENU, type CategoryMenuItem } from '@components/Header';
 import { expect, test } from '@fixtures';
-import { ContactPage } from '@pages/ContactPage';
-import { HomePage } from '@pages/HomePage';
-import { LoginPage } from '@pages/LoginPage';
 
 test.describe('Header navigation', () => {
   test('the logo takes the shopper back to the home page', { tag: ['@smoke'] }, async ({ contactPage, shop, page }) => {
@@ -14,21 +10,21 @@ test.describe('Header navigation', () => {
   });
 
   // Each link starts from a product page, which none of them points to, so the click must navigate.
-  // The destination's page object is built here, not taken from its fixture, because the fixture would open it.
+  // The destinations come from `shop`, whose page objects are not opened yet: a page fixture would open its own page.
   const links = [
-    { label: 'Home', link: 'homeLink', path: '/', heading: (page: Page) => new HomePage(page).heading },
-    { label: 'Contact', link: 'contactLink', path: '/contact', heading: (page: Page) => new ContactPage(page).heading },
-    { label: 'Sign in', link: 'signInLink', path: '/auth/login', heading: (page: Page) => new LoginPage(page).heading },
+    { label: 'Home', link: 'homeLink', path: '/', destination: 'home' },
+    { label: 'Contact', link: 'contactLink', path: '/contact', destination: 'contact' },
+    { label: 'Sign in', link: 'signInLink', path: '/auth/login', destination: 'login' },
   ] as const;
 
-  for (const { label, link, path, heading } of links) {
-    test(`"${label}" goes to ${path}`, { tag: ['@smoke'] }, async ({ productPage, page }) => {
+  for (const { label, link, path, destination } of links) {
+    test(`"${label}" goes to ${path}`, { tag: ['@smoke'] }, async ({ productPage, shop, page }) => {
       const header = productPage.header;
       await header.expand();
       await header[link].click();
 
       await expect(page).toHaveURL(path);
-      await expect(heading(page)).toBeVisible();
+      await expect(shop[destination].heading).toBeVisible();
     });
   }
 

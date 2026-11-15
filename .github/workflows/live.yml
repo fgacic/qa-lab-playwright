@@ -35,6 +35,8 @@ jobs:
         project: [chromium, mobile]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: ${{ matrix.project == 'mobile' && 'chromium' || matrix.project }}
@@ -53,8 +55,11 @@ jobs:
     needs: live
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: none
@@ -63,8 +68,14 @@ jobs:
           pattern: live-blob-*
           path: all-blob-reports
           merge-multiple: true
-      - run: npx playwright merge-reports --reporter html ./all-blob-reports
-      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+      # Both live jobs can end before they upload (a cancelled run, a runner that never started): then there is nothing to merge.
+      - id: blobs
+        run: |
+          if compgen -G 'all-blob-reports/*.zip' > /dev/null; then echo "found=true" >> "$GITHUB_OUTPUT"; else echo "::warning::no blob report was uploaded, so there is no report to merge"; fi
+      - if: steps.blobs.outputs.found == 'true'
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+      - if: steps.blobs.outputs.found == 'true'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: live-playwright-report
           path: playwright-report/

@@ -14,11 +14,42 @@ import { API_URL, BASE_URL } from '@support/env';
  * can never stand in for "the header is missing". The bug assertion states the value a fixed
  * site would send, not just that the header exists.
  */
-const expected = [
-  { id: 'SEC-01', header: 'content-security-policy', value: /\S/, why: 'no Content-Security-Policy: nothing limits where scripts may load from' },
-  { id: 'SEC-03', header: 'x-content-type-options', value: /^nosniff$/i, why: 'no X-Content-Type-Options: nosniff' },
-  { id: 'SEC-04', header: 'referrer-policy', value: /\S/, why: 'no Referrer-Policy' },
-  { id: 'SEC-05', header: 'strict-transport-security', value: /max-age=\d{7,}/, why: 'no Strict-Transport-Security (HSTS) with a long max-age' },
+
+/** The directives of a Content-Security-Policy, by name (lower-cased), each with its source list. */
+function directivesOf(policy: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
+  for (const part of policy.split(';')) {
+    const [name, ...sources] = part.trim().split(/\s+/);
+    if (name && !directives.has(name.toLowerCase())) directives.set(name.toLowerCase(), sources);
+  }
+  return directives;
+}
+
+/** Referrer policies that never send the full URL to another origin. A comma list is a fallback chain: the last one the browser knows wins. */
+const SAFE_REFERRER_POLICIES = ['no-referrer', 'same-origin', 'strict-origin', 'strict-origin-when-cross-origin'];
+
+const expected: { id: string; header: string; ok: (value: string) => boolean; accepts: string; why: string }[] = [
+  {
+    id: 'SEC-01',
+    header: 'content-security-policy',
+    // A policy that names no script source limits nothing, and one that allows inline script does not stop injected script.
+    ok: (value) => {
+      const directives = directivesOf(value);
+      const scripts = directives.get('script-src') ?? directives.get('default-src');
+      return !!scripts && !scripts.some((source) => source.toLowerCase() === "'unsafe-inline'");
+    },
+    accepts: "a default-src or script-src, and no 'unsafe-inline' in the one that governs scripts",
+    why: 'no Content-Security-Policy that limits where scripts may load from',
+  },
+  { id: 'SEC-03', header: 'x-content-type-options', ok: (value) => /^nosniff$/i.test(value.trim()), accepts: 'nosniff', why: 'no X-Content-Type-Options: nosniff' },
+  {
+    id: 'SEC-04',
+    header: 'referrer-policy',
+    ok: (value) => SAFE_REFERRER_POLICIES.includes(value.split(',').pop()!.trim().toLowerCase()),
+    accepts: `one of ${SAFE_REFERRER_POLICIES.join(', ')}`,
+    why: 'no Referrer-Policy that keeps the full URL from other origins',
+  },
+  { id: 'SEC-05', header: 'strict-transport-security', ok: (value) => /max-age=\d{7,}/i.test(value), accepts: 'max-age of at least a year-ish (7+ digits of seconds)', why: 'no Strict-Transport-Security (HSTS) with a long max-age' },
 ];
 
 /** The shop's response headers, once it has answered: a Cloudflare challenge skips, any other error fails. */
@@ -34,12 +65,13 @@ async function shopHeaders({ request, page }: { request: APIRequestContext; page
 }
 
 test.describe('Security headers of the live shop', { tag: ['@security', '@live-only', '@bug'] }, () => {
-  for (const { id, header, value, why } of expected) {
+  for (const { id, header, ok, accepts, why } of expected) {
     test(`the shop sends ${header}`, async ({ request, page }, testInfo) => {
       knownBug(id, why);
       const headers = await shopHeaders({ request, page }, testInfo);
 
-      expect(headers[header] ?? '', `${id}: ${why}`).toMatch(value);
+      const sent = headers[header] ?? '';
+      expect(ok(sent), `${id}: ${why} (sent "${sent}", wanted ${accepts})`).toBe(true);
     });
   }
 
@@ -62,5 +94,46 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
     expect(response.status(), 'the API answered before its headers are judged').toBeLessThan(400);
 
     expect(response.headers()['server'] ?? '', 'SEC-06: the Server header names a product version').not.toMatch(/\d+\.\d+/);
+  });
+});
+
+// Not pins, so a describe of their own without @bug (verify-bugs.mjs treats every @bug test as a pin that must fail).
+test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['@security', '@live-only'] }, () => {
+  // The checks below are not pins: nothing is known about the live site's answer yet, so each states the behaviour a
+  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-10) then.
+  // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
+
+  test('every cookie the shop and its API set is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
+    const answers = [await request.get(BASE_URL), await request.get(`${API_URL}/status`)];
+    const cookies = answers.flatMap((answer) => answer.headersArray().filter(({ name }) => name.toLowerCase() === 'set-cookie').map(({ value }) => value));
+    // A shop that sets no cookie has nothing to misconfigure, but the count is recorded so "none" is a stated fact and not an unread loop.
+    testInfo.annotations.push({ type: 'cookies inspected', description: String(cookies.length) });
+
+    for (const cookie of cookies) {
+      const name = cookie.split('=')[0];
+      expect.soft(cookie, `${name} is Secure`).toMatch(/;\s*secure(;|$)/i);
+      expect.soft(cookie, `${name} is HttpOnly`).toMatch(/;\s*httponly(;|$)/i);
+      expect.soft(cookie, `${name} has a SameSite`).toMatch(/;\s*samesite=(strict|lax|none)(;|$)/i);
+    }
+  });
+
+  test('the API does not let another origin read it with credentials', async ({ request }) => {
+    const origin = 'https://attacker.example';
+    const response = await request.get(`${API_URL}/status`, { headers: { origin } });
+    expect(response.status(), 'the API answered before its headers are judged').toBeLessThan(400);
+
+    const allowedOrigin = response.headers()['access-control-allow-origin'] ?? '';
+    const withCredentials = (response.headers()['access-control-allow-credentials'] ?? '').toLowerCase() === 'true';
+    // Public data may be read cross-origin ("*" or a reflected origin), but never together with credentials.
+    expect(withCredentials && (allowedOrigin === origin || allowedOrigin === '*'), `an unknown origin may read the API with credentials (allow-origin "${allowedOrigin}", allow-credentials true)`).toBe(false);
+  });
+
+  test('the shop sends a Permissions-Policy that switches off the camera, microphone and geolocation', async ({ request, page }, testInfo) => {
+    const headers = await shopHeaders({ request, page }, testInfo);
+
+    const policy = headers['permissions-policy'] ?? '';
+    for (const feature of ['camera', 'microphone', 'geolocation']) {
+      expect.soft(policy, `Permissions-Policy turns ${feature} off (sent "${policy}")`).toMatch(new RegExp(`(^|,)\\s*${feature}=\\(\\)`));
+    }
   });
 });

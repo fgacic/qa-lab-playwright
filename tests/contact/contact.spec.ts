@@ -19,8 +19,7 @@ test.describe('Contact form', () => {
   });
 
   // The form's own validation must stop these. If it regresses, the guard refuses the write (so the real
-  // inbox stays clean) and the last assertion names it. A request would leave in the same click that renders
-  // the labels, ahead of them, so the guard has seen it by the time the labels are asserted.
+  // inbox stays clean) and `expectNoRequest`, which watches a short window after the labels appear, names it.
   test.describe('validation', () => {
     test.beforeEach(async ({ apiMock }) => {
       await apiMock.blockUnmockedWrites();
@@ -34,35 +33,35 @@ test.describe('Contact form', () => {
       await expect(contactPage.email.error).toHaveText('Email is required');
       await expect(contactPage.subject.error).toHaveText('Subject is required');
       await expect(contactPage.message.error).toHaveText('Message is required');
-      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+      await apiMock.expectNoRequest('POST', '/messages');
     });
 
     test('a malformed email is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ from: { ...fakeGuest(), email: 'not-an-email' } }));
 
       await expect(contactPage.email.error).toHaveText('Email format is invalid');
-      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+      await apiMock.expectNoRequest('POST', '/messages');
     });
 
     test('a message under 50 characters is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ message: 'Too short to be a useful message.' }));
 
       await expect(contactPage.message.error).toHaveText('Message must be minimal 50 characters');
-      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+      await apiMock.expectNoRequest('POST', '/messages');
     });
 
     test('an attachment with content is rejected: files must be empty', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ attachment: textFile('notes.txt', 'not empty') }));
 
       await expect(contactPage.attachment.error).toHaveText('File should be empty.');
-      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+      await apiMock.expectNoRequest('POST', '/messages');
     });
 
     test('an attachment that is not .txt is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ attachment: { name: 'image.png', mimeType: 'image/png', buffer: Buffer.alloc(0) } }));
 
       await expect(contactPage.attachment.error).toHaveText('File should have a txt extension.');
-      expect(apiMock.blockedWrites, 'invalid input is not sent').toEqual([]);
+      await apiMock.expectNoRequest('POST', '/messages');
     });
   });
 
@@ -74,7 +73,7 @@ test.describe('Contact form', () => {
   });
 
   // The real submission lands in the shop's inbox, so it runs on our own Toolshop only.
-  test('a complete message is sent and acknowledged', { tag: ['@smoke', '@flow', '@self-hosted'] }, async ({ contactPage, apiMock }) => {
+  test('a complete message is sent and acknowledged (real)', { tag: ['@smoke', '@flow', '@self-hosted'] }, async ({ contactPage, apiMock }) => {
     const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
     const sent = apiMock.waitForRequest('POST', '/messages');
 
@@ -89,7 +88,7 @@ test.describe('Contact form', () => {
     test.use(withMocks(mock.respond('POST', '/messages', { id: '01QALABFAKEMESSAGE0000000', status: 'NEW' }, 201)));
 
     // The same journey with the write answered by a mock, so it also runs on the public site.
-    test('a complete message is sent and acknowledged', { tag: ['@smoke', '@flow'] }, async ({ contactPage, apiMock }) => {
+    test('a complete message is sent and acknowledged (mocked)', { tag: ['@smoke', '@flow'] }, async ({ contactPage, apiMock }) => {
       const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
       const sent = apiMock.waitForRequest('POST', '/messages');
 
@@ -135,8 +134,8 @@ test.describe('Contact form', () => {
       await contactPage.send(message());
       await attempted;
 
-      // Any wording that says it failed will do.
-      await expect(contactPage.statusMessage(/not sent|could not|couldn.t|failed|unable|went wrong|error|try again/i), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
+      // Any wording that says the message was not sent will do; a bare "error" or "failed" would also match unrelated text.
+      await expect(contactPage.statusMessage(/(?:not|could ?n.?t|could not|unable to|failed to) (?:be )?sen[dt]|went wrong|try again/i), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
     });
   });
 });

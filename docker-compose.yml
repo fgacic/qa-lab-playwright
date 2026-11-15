@@ -3,6 +3,7 @@
 # ("v2.5 | Built 2026-10-11", main @ ae7caec), so both targets run the same code.
 #   npm run toolshop:up     build, start, seed and wait until healthy (uses .env.toolshop)
 #   npm run toolshop:down   stop and remove everything, data included
+# Ports are bound to 127.0.0.1: the shop (seeded admin password included) is never exposed to the network.
 # UI http://localhost:4200, API http://localhost:4200/api (also direct on http://localhost:8091)
 name: toolshop
 
@@ -42,7 +43,7 @@ services:
       context: .
       dockerfile: docker/toolshop-web.Dockerfile
     ports:
-      - '8091:80'
+      - '127.0.0.1:8091:80'
     depends_on:
       - laravel-api
     healthcheck:
@@ -60,7 +61,7 @@ services:
         TOOLSHOP_REF: ${TOOLSHOP_REF:?set in .env}
         API_URL: /api
     ports:
-      - '4200:4200'
+      - '127.0.0.1:4200:4200'
     depends_on:
       - web
     healthcheck:

@@ -1,13 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { API_URL } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
-
-interface CategoryNode {
-  slug: string;
-  sub_categories: { slug: string }[];
-}
 
 test.describe('Category pages', () => {
   const categories = [
@@ -17,7 +11,7 @@ test.describe('Category pages', () => {
   ];
 
   for (const { slug, title } of categories) {
-    test(`/category/${slug} lists that category's products`, async ({ categoryPage, apiMock, request }) => {
+    test(`/category/${slug} lists that category's products`, async ({ categoryPage, apiMock, api }) => {
       const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
 
       await categoryPage.open(slug);
@@ -25,15 +19,28 @@ test.describe('Category pages', () => {
       await expect(categoryPage.title).toHaveText(title);
       const { json: found } = await results;
       expect(found.total).toBeGreaterThan(0);
-      const tree = (await (await request.get(`${API_URL}/categories/tree`)).json()) as CategoryNode[];
       // A parent category lists the products of its subcategories too: all of them, and nothing from elsewhere.
-      const parent = tree.find((node) => node.slug === slug);
+      const parent = (await api.categoryTree()).find((node) => node.slug === slug);
       expect(parent, `the category tree should contain "${slug}"`).toBeDefined();
       const belonging = new Set(parent!.sub_categories.map((sub) => sub.slug));
       expect(found.data.filter((p) => !belonging.has(p.category.slug)).map((p) => p.name), 'products outside the category').toEqual([]);
+      // "All of them": the parent's total is the sum of its subcategories' totals, each asked of the API on its own.
+      const subtotals = await Promise.all(parent!.sub_categories.map(async (sub) => (await api.listProducts({ by_category_slug: sub.slug })).total));
+      expect(found.total, `"${slug}" should list every product of ${[...belonging].join(', ')}`).toBe(subtotals.reduce((sum, total) => sum + total, 0));
       await expect(categoryPage.grid.names).toHaveText(found.data.map((p) => p.name));
     });
   }
+
+  test('every card shows a picture with the product name as alt text', async ({ categoryPage, apiMock }) => {
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === 'hand-tools');
+    await categoryPage.open('hand-tools');
+    const { json: found } = await results;
+    await expect(categoryPage.grid.cards).toHaveCount(found.data.length);
+
+    for (const [index, product] of found.data.entries()) {
+      await expect(categoryPage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
+    }
+  });
 
   test.describe('when a category has no products', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));

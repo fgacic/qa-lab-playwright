@@ -1,32 +1,98 @@
 {
-  "local": {
+  "local (Apple M3 Pro, 12 cores)": {
     "home": {
-      "lcp": 1228,
-      "tbt": 0,
-      "inp": 16
+      "lcp": {
+        "median": 1224,
+        "spread": 8
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 0
+      },
+      "inp": {
+        "median": 16,
+        "spread": 24
+      }
     },
     "search": {
-      "lcp": 1224,
-      "tbt": 0,
-      "inp": 24
+      "lcp": {
+        "median": 1224,
+        "spread": 12
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 0
+      },
+      "inp": {
+        "median": 32,
+        "spread": 40
+      }
     },
     "product": {
-      "lcp": 1264,
-      "tbt": 0,
-      "inp": 16
+      "lcp": {
+        "median": 1260,
+        "spread": 24
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 0
+      },
+      "inp": {
+        "median": 32,
+        "spread": 24
+      }
     },
     "cart": {
-      "lcp": 1052,
-      "tbt": 0,
-      "inp": 16
+      "lcp": {
+        "median": 1044,
+        "spread": 16
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 15
+      },
+      "inp": {
+        "median": 16,
+        "spread": 48
+      }
     },
     "contact": {
-      "lcp": 1044,
-      "tbt": 0,
-      "inp": 16
+      "lcp": {
+        "median": 1044,
+        "spread": 12
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 0
+      },
+      "inp": {
+        "median": 16,
+        "spread": 32
+      }
+    },
+    "home-slow-api": {
+      "cls": {
+        "median": 0.258,
+        "spread": 0
+      }
+    },
+    "product-slow-api": {
+      "cls": {
+        "median": 0.316,
+        "spread": 0.065
+      }
+    },
+    "contact-slow-api": {
+      "cls": {
+        "median": 0.17,
+        "spread": 0
+      }
     },
     "cart-slow-api": {
-      "cls": 0.107
+      "cls": {
+        "median": 0.107,
+        "spread": 0
+      }
     }
   }
 }

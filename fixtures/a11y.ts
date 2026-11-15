@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test as base } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
+import type { Locator } from '@playwright/test';
 import type { AxeResults, Result } from 'axe-core';
+import type { ScanName } from '@support/a11y-baseline';
 
 /** WCAG 2.0, 2.1 and 2.2, levels A and AA. */
 export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
@@ -50,15 +52,18 @@ export interface A11yScan {
 export interface A11yFixtures {
   /**
    * Scans the page as it is now and attaches the full axe result to the report.
-   * `only` limits the scan to some rules, `within` to part of the page.
+   * `ready` is the scan-ready step every scan shares: the content the state draws last, each of
+   * which must be visible before axe reads the page (a scan that ran before it rendered would
+   * pass for the wrong reason). `only` limits the scan to some rules, `within` to part of the page.
    */
-  a11y: { scan: (name: string, options?: { only?: string[]; within?: string }) => Promise<A11yScan> };
+  a11y: { scan: (name: ScanName, options?: { ready?: Locator[]; only?: string[]; within?: string }) => Promise<A11yScan> };
 }
 
 export const test = base.extend<A11yFixtures>({
   a11y: async ({ page }, use, testInfo) => {
     await use({
-      scan: async (name, { only, within } = {}) => {
+      scan: async (name, { ready = [], only, within } = {}) => {
+        for (const content of ready) await expect(content.first(), `${name}: the state to be rendered before it is scanned`).toBeVisible();
         // Transitions and fades caught half way read as low contrast; the page is scanned at rest.
         await page.emulateMedia({ reducedMotion: 'reduce' });
         // Either the named rules or the whole WCAG set, never one narrowing the other.
@@ -66,16 +71,19 @@ export const test = base.extend<A11yFixtures>({
         for (const { selector } of EXCLUDED) builder = builder.exclude(selector);
         if (within) builder = builder.include(within);
         const results = await builder.analyze();
-        await testInfo.attach(`axe-${name}.json`, { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
+        const file = name.replaceAll(' ', '-') + (only ? `-${only.join('+')}` : '');
+        await testInfo.attach(`axe-${file}.json`, { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
         // "Needs review" results are not violations and do not fail a scan, but a growing count is worth seeing in the report.
-        await testInfo.attach(`axe-${name}-incomplete.txt`, { body: `${results.incomplete.length} incomplete: ${results.incomplete.map((r) => r.id).join(', ') || 'none'}`, contentType: 'text/plain' });
+        await testInfo.attach(`axe-${file}-incomplete.txt`, { body: `${results.incomplete.length} incomplete: ${results.incomplete.map((r) => r.id).join(', ') || 'none'}`, contentType: 'text/plain' });
         const byTarget = new Map<string, Finding>();
         for (const v of results.violations) {
           for (const n of v.nodes) {
             const target = n.target.join(' ').replace(/:nth-child\(\d+\)/g, '');
-            const found = byTarget.get(v.id + target);
+            // Keyed by rule AND target with a separator neither can contain, so no rule/target pair can collide with another.
+            const key = `${v.id}\u0000${target}`;
+            const found = byTarget.get(key);
             if (found) found.nodes++;
-            else byTarget.set(v.id + target, { rule: v.id, impact: v.impact ?? 'unknown', target, wcag: wcagCriteria(v.tags), help: v.help, nodes: 1 });
+            else byTarget.set(key, { rule: v.id, impact: v.impact ?? 'unknown', target, wcag: wcagCriteria(v.tags), help: v.help, nodes: 1 });
           }
         }
         const findings = [...byTarget.values()];

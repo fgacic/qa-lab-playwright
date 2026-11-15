@@ -21,11 +21,17 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// eslint-disable-next-line no-control-regex -- the escape character is what an ANSI colour sequence starts with
 const ANSI = /\u001b\[[0-9;]*m/g;
 const strip = (text) => (text ?? '').replace(ANSI, '');
 // When a pin is scheduled in several projects, it is verified in the first of these that has it.
+// A pin scheduled only in firefox or webkit is verified there, after installing that browser (see below).
 const PREFERRED = ['chromium', 'admin', 'account', 'firefox', 'webkit', 'mobile', 'perf'];
 const rank = (project) => (PREFERRED.includes(project) ? PREFERRED.indexOf(project) : PREFERRED.length);
+
+/** The id as a whole word: "BUG-1" must not be found in "BUG-12: ...". */
+const mentions = (message, id) => new RegExp(`(?<![A-Za-z0-9_-])${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_-])`).test(message);
+const BROWSER_OF = { firefox: 'firefox', webkit: 'webkit' };
 
 // Playwright empties test-results/ at the start of every run, so each pass writes its report here instead.
 const work = mkdtempSync(join(tmpdir(), 'verify-bugs-'));
@@ -86,6 +92,14 @@ for (const [, { spec, projects }] of scheduled) {
 }
 const projectsToRun = [...new Set(verifyIn.values())];
 
+// A pin that only firefox or webkit schedules needs that browser: install it now (a no-op when present),
+// instead of letting the run fail with "Executable doesn't exist" and a misleading verdict.
+for (const browser of new Set(projectsToRun.map((p) => BROWSER_OF[p]).filter(Boolean))) {
+  console.log(`installing ${browser}: a known-bug spec is scheduled only there`);
+  const install = spawnSync('npx', ['playwright', 'install', browser], { stdio: 'inherit' });
+  if (install.status !== 0) fail(`could not install ${browser}, which a known-bug spec needs (try: npx playwright install --with-deps ${browser})`);
+}
+
 // 2. The pins the live target would add (@live-only), which no local run can verify.
 const liveOnly = new Set();
 {
@@ -141,7 +155,7 @@ function whyNotThePin({ id, errors, specFile, last }) {
   if (!errors.length) return `failed with no error message`;
   for (const [i, { message, file }] of errors.entries()) {
     const where = i === 0 ? 'the test body' : `error ${i + 1}`;
-    if (!message.includes(id)) return `${where} does not name "${id}": ${firstLine(message)}`;
+    if (!mentions(message, id)) return `${where} does not name "${id}": ${firstLine(message)}`;
     if (!/expect\(/.test(message) || /Test timeout of|Target (page, context or browser|closed)|has been closed/.test(message)) {
       return `${where} names "${id}" but is not an assertion failure: ${firstLine(message)}`;
     }

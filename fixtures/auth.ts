@@ -5,9 +5,9 @@ import { InvoicesPage } from '@pages/account/InvoicesPage';
 import { MessagesPage } from '@pages/account/MessagesPage';
 import { ProfilePage } from '@pages/account/ProfilePage';
 import { mock } from '@support/api-mock';
-import { CUSTOMER_CREDENTIALS } from '@support/env';
-import { fakeJwt, fakeUser } from '@support/payloads';
-import { installToken } from '@support/session';
+import { CUSTOMER_STORAGE_STATE } from '@support/env';
+import { fakeJwt, fakeUser, jwtExpiry } from '@support/payloads';
+import { installToken, readSavedToken } from '@support/session';
 import { fakeCustomer, type Customer } from '@support/test-data';
 import { test as apiTest } from './api';
 import { test as mocksTest } from './mocks';
@@ -30,7 +30,10 @@ export interface AuthFixtures {
    * The customer the browser is signed in as. Account page fixtures depend on it.
    * In `storage-state` the session is whatever tests/setup/account.setup.ts saved and is never
    * refreshed (the JWT lives 300 s and cannot be renewed), so the `account` project has to run in
-   * a pass of its own, right after its setup. `worker-account` issues a fresh token per test.
+   * a pass of its own, right after its setup; the names are read from `GET /users/me` with that token.
+   * `worker-account` issues a fresh token per test.
+   * Only the test that proves a saved session opens the account area uses `storage-state`: every
+   * other real session uses `worker-account`, so no spec depends on how long ago the setup ran.
    */
   signedIn: { firstName: string; lastName: string; email: string };
   accountPage: AccountPage;
@@ -73,7 +76,7 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
     { scope: 'worker' },
   ],
 
-  signedIn: async ({ page, session, apiMock, workerAccount }, use) => {
+  signedIn: async ({ page, session, apiMock, workerAccount, api }, use) => {
     if (session === 'mocked') {
       await installToken(page, fakeJwt());
       await apiMock.use(mock.respond('GET', '/users/me', fakeUser));
@@ -88,8 +91,12 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
       await use(customer);
       return;
     }
-    // storage-state: the account project's storageState already holds the token.
-    await use({ firstName: '', lastName: '', email: CUSTOMER_CREDENTIALS.email ?? '' });
+    // storage-state: the account project's storageState already holds the token, which is deliberately
+    // not replaced: the point of this session is that a SAVED sign-in opens the account area.
+    const token = readSavedToken(CUSTOMER_STORAGE_STATE);
+    if (jwtExpiry(token) <= Date.now() / 1000) throw new Error('The saved session has expired (it lives 300 s): run the session projects in their own pass, right after their setup (npm test does).');
+    const me = await api.me(token);
+    await use({ firstName: me.first_name, lastName: me.last_name, email: me.email });
   },
 
   // Depends on `signedIn` so the session exists before the page opens.

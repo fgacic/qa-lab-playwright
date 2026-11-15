@@ -15,6 +15,8 @@ import { test } from '@playwright/test';
  * reported as "fails for another reason", and a pass as fixed.
  */
 export function knownBug(id: string, summary: string): void {
+  // scripts/verify-bugs.mjs finds the pins by the @bug tag: a pin without it would never be verified.
+  if (!test.info().tags.includes('@bug')) throw new Error(`knownBug(${id}) needs the @bug tag: add { tag: ['@bug'] } to the test, or verify-bugs.mjs never checks this pin.`);
   test.info().annotations.push({ type: 'known bug', description: `${id}: ${summary} (docs/COVERAGE.md)` });
   test.fail(process.env.VERIFY_BUGS !== '1', `${id}: ${summary}`);
 }

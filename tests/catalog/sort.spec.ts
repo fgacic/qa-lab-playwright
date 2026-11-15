@@ -3,7 +3,11 @@ import { expect, test } from '@fixtures';
 import type { Product, ProductPage } from '@support/toolshop-api';
 
 const CO2_ORDER = ['A', 'B', 'C', 'D', 'E'];
-const sortKey: Record<string, (p: Product) => string | number> = {
+/** The fields the sort menu offers, i.e. the part of each SORT_OPTIONS value before the comma. */
+type SortField = 'name' | 'price' | 'co2_rating';
+type SortDirection = 'asc' | 'desc';
+/** One key per field: an option for a new field fails to compile until it has a key here. */
+const sortKey: Record<SortField, (p: Product) => string | number> = {
   name: (p) => p.name,
   price: (p) => p.price,
   co2_rating: (p) => CO2_ORDER.indexOf(p.co2_rating),
@@ -11,7 +15,7 @@ const sortKey: Record<string, (p: Product) => string | number> = {
 
 test.describe('Sorting', () => {
   for (const [label, value] of Object.entries(SORT_OPTIONS) as [SortOption, string][]) {
-    const [field, direction] = value.split(',');
+    const [field, direction] = value.split(',') as [SortField, SortDirection];
 
     test(`"${label}" orders the grid by ${field.replace('_', ' ')}, ${direction}ending`, async ({ homePage, apiMock }) => {
       const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === value);
@@ -22,7 +26,8 @@ test.describe('Sorting', () => {
       expect(sorted.data).not.toHaveLength(0);
       expect(sorted.data.map(sortKey[field])).toBeSorted({ descending: direction === 'desc' });
       await expect(homePage.grid.names).toHaveText(sorted.data.map((p) => p.name));
-      if (field === 'price') await expect.poll(() => homePage.grid.priceValues()).toBeSorted({ descending: direction === 'desc' });
+      // The prices on the cards are the ones the API sent, in the same order.
+      await expect.poll(() => homePage.grid.priceValues()).toEqual(sorted.data.map((p) => p.price));
     });
   }
 

@@ -11,7 +11,7 @@ export class AdminFormChrome {
   readonly id: Locator;
   readonly saveButton: Locator;
   readonly backLink: Locator;
-  /** Validation labels and the "… saved!" / error messages are all ARIA alerts. */
+  /** Validation labels and the "… saved!" / error messages are all ARIA alerts (the brand form's per-field errors also have test ids). */
   readonly alerts: Locator;
 
   constructor(readonly page: Page) {
@@ -24,6 +24,15 @@ export class AdminFormChrome {
 
   alert(text: string | RegExp): Locator {
     return this.alerts.filter({ hasText: text });
+  }
+
+  /**
+   * The "<label> is required" validation message. Only the brand form's fields carry an error test id
+   * (`FormField.error`); the category, product and user forms render the same alerts with no id, so
+   * theirs are reached by the message, through this one helper.
+   */
+  required(label: string): Locator {
+    return this.alert(`${label} is required`);
   }
 
   @step('Save the form')
@@ -92,6 +101,8 @@ export interface ProductInput {
   brand?: string;
   category?: string;
   image?: string;
+  /** Tick "Item for rent": the shop's default list, categories and filters leave rentals out. */
+  rental?: boolean;
 }
 
 export class AdminProductForm {
@@ -138,6 +149,7 @@ export class AdminProductForm {
     await this.description.fill(product.description);
     await this.stock.fill(product.stock);
     await this.price.fill(product.price);
+    if (product.rental) await this.rental.check();
     if (product.co2Rating) await this.co2Rating.selectOption({ label: product.co2Rating });
     // Brand, category and image default to the first real option unless named.
     await this.brand.selectOption(product.brand ? { label: product.brand } : { index: 1 });
@@ -212,7 +224,8 @@ export class AdminUserForm {
     this.email = page.getByRole('textbox', { name: 'Email' });
     this.enabled = page.getByRole('checkbox', { name: 'Enabled' });
     this.failedLoginAttempts = page.getByRole('textbox', { name: 'Failed login attempts' });
-    this.password = page.getByRole('textbox', { name: 'Password' });
+    // By label, not role: a password field is not a textbox, and the form's is (ADM-17), so a role locator would stop finding it the day that is fixed.
+    this.password = page.getByLabel('Password', { exact: true });
   }
 
   @step('Fill in user {0.email}')

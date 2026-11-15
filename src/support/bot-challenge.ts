@@ -25,5 +25,7 @@ export function isBotChallenge(url: string): boolean {
 export async function skipIfBotChallenge(page: Page): Promise<void> {
   if (TARGET !== 'live') return;
   const challenged = isBotChallenge(page.url()) || (await page.title().catch(() => '')) === 'Just a moment...';
+  // The one runtime skip the suite allows: an environmental block, counted and bounded by the run-guard reporter.
+  // eslint-disable-next-line playwright/no-skipped-test
   test.skip(challenged, BOT_CHALLENGE_REASON);
 }

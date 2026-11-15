@@ -4,38 +4,40 @@ End-to-end UI tests for the Toolshop demo shop (practicesoftwaretesting.com), ru
 
 **Live report: [fgacic.github.io/qa-lab-playwright](https://fgacic.github.io/qa-lab-playwright/)**, with Allure trends across runs. The Playwright HTML report is under [/playwright](https://fgacic.github.io/qa-lab-playwright/playwright/).
 
-The suite runs **665 tests in Chromium and 363 each in Firefox and WebKit** (the axe and translation suites are Chromium-only), in 42 spec files. On top of that come:
+The suite runs **976 tests in Chromium and 426 each in Firefox and WebKit** (the axe and translation suites are Chromium-only), in 44 spec files. On top of that come:
 
-- 9 performance budgets, measured alone in a project of their own;
-- a 16-test smoke set on a Pixel 7;
+- 10 performance tests, measured alone in a project of their own: 9 measurements and the control that proves the collector sees a long task;
+- an 18-test smoke set on a Pixel 7;
 - 17 visual baselines (18 tests: one more checks that no baseline on disk is orphaned);
 - 17 tests in the real-account and real-admin projects: 15 journeys and the 2 sign-ins they start from.
 
 Every control the site exposes, the back office included, is listed in [docs/COVERAGE.md](docs/COVERAGE.md) with the test that covers it.
 
-The suite found **91 defects**, each pinned as a test:
+The suite found **106 defects**, each pinned as a test. (107 ids are in use: I18N-23, the forgot-password confirmation that shows its raw key, is BUG-20 seen from the translation suite. Both stay as pins, because they test different surfaces, but the defect is counted once, under Functional.)
 
 | Kind | Count |
 |---|---|
-| Functional | 47 (12 of them in the back office) |
-| Accessibility | 17 |
-| Translation | 20 |
-| Security headers | 6 |
+| Functional | 56 (BUG-01..35 and BUG-40..43, ADM-01..17: 17 of them in the back office) |
+| Accessibility | 17 (A11Y-01..04, AX-01..13) |
+| Translation | 23 (I18N-01..24 without I18N-23) |
+| Security | 9 (SEC-01..06 headers on the live site; SEC-07..09 unauthenticated writes to the catalogue API) |
 | Performance | 1 |
+
+BUG-36..39 were never assigned.
 
 ## What it tests
 
 | Area | Specs | Highlights |
 |---|---|---|
-| Shop | `tests/navigation`, `catalog`, `product`, `cart`, `checkout`, `contact`, `widgets` | Every header link lands where it says; search, sort, filters, pagination, compare; cart maths and discounts; **full guest purchases** with Cash on Delivery; chat and the live sales feed |
-| Accounts | `tests/auth`, `tests/account` | Login (incl. TOTP), registration, password reset; **register → log in → account** for real on the self-hosted shop, mocked everywhere else |
+| Shop | `tests/navigation`, `catalog`, `product`, `cart`, `checkout`, `contact`, `widgets` | Every header link lands where it says; search, sort, filters (and their combinations with search and sort), pagination, compare; cart maths and discounts, re-checked after a reload; **full guest purchases** with Cash on Delivery; chat and the live sales feed |
+| Accounts | `tests/auth`, `tests/account` | Login (incl. TOTP and a wrong code), registration, password reset (the refused-login and unknown-email answers are real on the self-hosted shop, with mocked twins elsewhere); **register → log in → account** for real on the self-hosted shop, mocked everywhere else |
 | Back office | `tests/admin`, `tests/admin-e2e` | Every admin list, form, status change, report and setting against a mocked admin API; **real journeys** as the seeded admin: create → sell → reprice → delete a product, ship an order, answer a message |
-| Failure paths | every area | Each request the UI sends also answers 500, 4xx, a network abort, and an empty 200; the back office reports a failed reply, status save or refused save, or the test pins that it does not |
-| Accessibility | `tests/a11y` | axe-core WCAG 2.2 A/AA on 40 pages and states; 13 known violations pinned one by one, and the baseline is a ratchet: a fix or a spread both fail until it is updated |
+| Failure paths | every area | Each request the UI sends also answers 500, 4xx, a network abort, and an empty 200; the back office reports a failed reply, status save or refused save, or the test pins that it does not; a healthy page is shown to raise no alert, proven over a time window |
+| Accessibility | `tests/a11y` | axe-core WCAG 2.2 A/AA on 40 pages and states; 13 known violations pinned one by one (every baseline id has a pin), and the baseline is a ratchet: a fix or a spread both fail until it is updated; every scan waits for its page to be ready first |
 | Visual | `tests/visual` | 17 screenshots of key pages and states (out-of-stock product, checkout payment, admin orders and an order among them), compared in the official Playwright image |
-| Translations | `tests/i18n` | 18 pages and states in all 7 languages (the cart with lines, checkout billing and payment, a toast, the chat, the language menu, an unknown product): visible text, `<title>`, labels, placeholders, alt text and options. No leaked keys, no stray English |
-| Security | `tests/security` | Script and HTML payloads through search, chat, contact, registration, admin forms and route segments (`/category/<payload>`, `/product/<payload>`) are shown as text, never run, watched by a sentinel that is itself tested (popups and other tabs included, with a control for every payload); live response headers by value |
-| Performance | `tests/performance` | LCP, TBT (long tasks before the first input) and an INP proxy per key page against Core Web Vitals limits and against a baseline recorded per environment (`ci` or `local`), the median of 3 throttled cold loads; CLS on a slow API |
+| Translations | `tests/i18n` | 28 pages and states in all 7 languages (search without results, comparison with products, the order confirmation, a refused login, the forgot-password confirmation and 5 signed-in account pages among them): visible text, `<title>`, labels, placeholders, alt text and options, the product card included except its name, price and image. No leaked keys, no stray English; each known untranslated item is pinned once per language it affects (135 tests across 24 ids) |
+| Security | `tests/security` | Script and HTML payloads through search, chat, contact, registration, admin forms and route segments (`/category/<payload>`, `/product/<payload>`) are shown as text, never run, watched by a sentinel that is itself tested (popups and other tabs included, with a control for every payload); live response headers by value, cookie flags, CORS with credentials and Permissions-Policy; **API authorisation** on the self-hosted shop (401 without a token, 403 for a customer on admin endpoints, another customer's invoice and account refused, writes and deletes refused) |
+| Performance | `tests/performance` | LCP, TBT (long tasks before the first input) and an INP proxy per key page against Core Web Vitals limits and against a baseline recorded per environment (`ci`, or `local` keyed by CPU model and cores), the median of 5 throttled cold loads; a control proves the long-task observer counts a known 150 ms task; CLS on a slow API (the cart held to a fixed 0.13 ceiling as well as its baseline) |
 
 Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@axe`, `@visual`, `@i18n`, `@security`, `@perf`, `@mobile`, `@account`, `@admin`.
 
@@ -46,12 +48,17 @@ Tags also decide where a spec is scheduled, in `playwright.config.ts`, so nothin
 
 Guards in the framework, so a run cannot quietly prove nothing:
 - An unknown `TARGET` throws, and `TARGET=local` with a non-local `BASE_URL` / `API_URL` throws.
+- `knownBug` requires the `@bug` tag, and verify-bugs matches pin ids as whole words (`BUG-1` is not found in `BUG-12`).
+- A negative is proven one way: `ApiMock.expectNoRequest(method, path, { within })` watches a window for a request that must not happen. Routes are installed on the browser context, so popups and other tabs are covered.
+- The run guard counts final outcomes only, so a retried pass is not counted twice.
 - A run that schedules `perf` next to another project is refused (`src/support/run-guard-reporter.ts`).
 - On live, a run fails if more than 20% of its tests were skipped for the bot challenge.
 - Every page test asserts at teardown that `apiMock.blockedWrites` is empty: a write no mock answers is refused, and fails the test. The write guard is on by default for the live target; anonymous cart writes (add to cart, cart edits) are allowed there as arrange steps.
 - `apiMock` is not an auto fixture: a test that mocks says so.
 - The self-hosted test timeout is 45 s, so a hung test fails early; live gets 90 s.
 
+
+Static checks: `npm run lint` (ESLint with `eslint-plugin-playwright`, zero warnings allowed) runs next to `tsc --noEmit`, locally and in CI.
 
 Allure labels are derived in one fixture (`fixtures/allure-labels.ts`):
 - epic from the spec folder, feature from the file, story from the innermost describe;
@@ -70,14 +77,15 @@ Allure labels are derived in one fixture (`fixtures/allure-labels.ts`):
 
 ## How to run
 
-Requires Node 22 and Docker.
+Requires Node 22 (`.nvmrc`, `engines.node >= 22`) and Docker. The Toolshop container binds to 127.0.0.1 only.
 
 ```bash
 npm ci
 npx playwright install --with-deps chromium firefox webkit
 npm run toolshop:up                  # build, start, seed and health-check the shop
 
-npm test                             # everything against the self-hosted shop, in three passes as in CI:
+npm run lint                         # ESLint, 0 warnings
+npm test                             # everything against the self-hosted shop, in three passes (scripts/test-all.mjs, a separate report for each), as in CI:
                                      # the browsers; perf alone, so nothing competes for the CPU it measures;
                                      # then the real sessions, because a Toolshop token lives 300 s and cannot be renewed
 npm run test:parallel                # the browsers pass only, with more workers; self-hosted shop only (TARGET=local)
@@ -94,7 +102,7 @@ npm run toolshop:down
 npm run report                       # Allure 3 report from allure-results/
 ```
 
-**Performance baselines.** `tests/performance/baseline.json` holds one set of medians per environment: `ci` when `CI` is set, otherwise `local`. A run enforces the baseline limit (median plus 30%, with a noise floor per metric) only when an entry for its environment exists. Without one it attaches the measured medians with the note "no baseline for <env>: record with UPDATE_PERF_BASELINE=1", and the absolute Core Web Vitals budgets still apply. To record the `ci` set, run the CI workflow by hand (Actions, "Run workflow") with **record_perf_baseline** ticked. The `record-perf-baseline` job measures on a runner and uploads `baseline.json` as the `perf-baseline-ci` artifact. Merging it is a human step: download the artifact, review the diff, and commit the file.
+**Performance baselines.** `tests/performance/baseline.json` holds one set of medians per environment: `ci` when `CI` is set, otherwise `local`. `local` is keyed by CPU model and core count, so another machine has no baseline until it records its own. Each metric is the median of 5 loads and is recorded with its spread; a run enforces the median plus a margin of the largest of 3 times that spread, 5% and a per-metric noise floor, but only when an entry for its environment exists. Without one it attaches the measured medians and says so (on CI also as a workflow warning), and the absolute Core Web Vitals budgets still apply. Recording is refused above a one-minute load average of 4, and from a run that failed. To record the `ci` set, run the CI workflow by hand (Actions, "Run workflow") with **record_perf_baseline** ticked. The `record-perf-baseline` job measures on a runner and uploads `baseline.json` as the `perf-baseline-ci` artifact. Merging it is a human step: download the artifact, review the diff, and commit the file.
 
 **The public site:** `npm run test:live` (`TARGET=live`). There, real-account and admin journeys stay off unless `RUN_ACCOUNT_TESTS=1` / `RUN_ADMIN_TESTS=1` (with `ADMIN_EMAIL`, `ADMIN_PASSWORD`), and payload, visual and performance specs never run. `BASE_URL` / `API_URL` point either target elsewhere.
 
@@ -108,7 +116,7 @@ npm run report                       # Allure 3 report from allure-results/
 
 `.github/workflows/ci.yml` runs on every push to `main`, every pull request, nightly at 03:17 UTC, and on demand. It is the gate, against the self-hosted shop.
 
-1. **typecheck.** `tsc --noEmit`.
+1. **typecheck and lint.** `tsc --noEmit` and `npm run lint`.
 2. **e2e.** A 9-job matrix:
    - Chromium in 3 shards, Firefox in 2, WebKit in 2, and the `perf` project alone;
    - one job for the real account and admin projects plus the mobile smoke set.
@@ -128,7 +136,7 @@ On the self-hosted gate a test that only passed on its retry fails the run (`fai
 The rest of the setup:
 
 - **Actions** are pinned to commit SHAs.
-- **Concurrency** cancels superseded pull-request runs, and Pages deploys are serialised.
+- **Concurrency** cancels superseded pull-request runs, Pages deploys are serialised, and the nightly run has a concurrency group of its own. Checkouts do not persist credentials, the Pages deploy has a timeout, and the fetched Allure history is validated before it is used.
 - **No secrets.** None is needed: the only accounts used are the self-hosted shop's seeded test accounts.
 
 ## Structure
@@ -137,7 +145,7 @@ The rest of the setup:
 docker/, docker-compose.yml, .env.toolshop   the self-hosted Toolshop, pinned
 src/components/   Header, FilterPanel, ProductGrid, CartTable, checkout steps, admin table and search, FormField…
 src/pages/        thin pages composing components; actions return the next page
-src/support/      env (targets), @step, ApiMock, ToolshopApi, payloads, test data, knownBug, i18n, a11y baseline
+src/support/      env (targets), @step, ApiMock, ToolshopApi, payloads, test data, seeded accounts (JSON), knownBug, i18n and its baseline, a11y baseline
 fixtures/         api · mocks · pages · auth · admin · a11y · security · performance · matchers → index.ts (mergeTests, mergeExpects)
 tests/            specs by area; tests/setup/* sign in and write storageState
 docs/COVERAGE.md  every control, its test, the bug list, and run results
@@ -146,14 +154,14 @@ docs/COVERAGE.md  every control, its test, the bug list, and run results
 - **Fixtures inject page objects.** Tests destructure `{ homePage, productPage, checkout }`. The fixture does the setup (a seeded cart, a comparison, a session, mocks) and opens the page; no test calls `new`. Options change the setup per describe block, for example `test.use({ productKind: 'out-of-stock' })`, `test.use(withMocks(mock.fail('QUERY', '/products')))` or `test.use({ apiLatencyMs: 500 })`.
 - **Composition, not inheritance.** No BasePage. Components take a root `Locator`. Pages hold an `AppShell`, and admin forms an `AdminFormChrome`.
 - **User-facing locators.** `getByRole` and `getByLabel` first. `getByTestId` (`data-test`) only where no role or label is unique: error labels, the cart badge, and buttons whose names change with the language. CSS only where the markup leaves no other handle, each case commented.
-- **Methods say what the user does.** Examples are `filters.filterByCategory('Pliers')` and `checkout.payment.payWith('cash-on-delivery')`. Each is wrapped in `test.step` by a `@step` decorator.
+- **Methods say what the user does.** Examples are `filters.filterByCategory('Pliers')` and `checkout.payment.payOnDelivery()`. Each is wrapped in `test.step` by a `@step` decorator.
 - **Sessions.** `mocked` (fake JWT) runs everywhere. `storage-state` comes from a setup project. `worker-account` gives each worker its own customer. Toolshop's JWT lives 300 s and cannot be refreshed, so real sessions get a fresh token per test.
 
 ## What broke
 
 Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The headlines:
 
-- **Silent failures everywhere.** A failed product list, cart (BUG-13, BUG-32), product, rentals, favourites, search or admin list leaves a blank area or a misleading empty state. A rejected order still says "Payment was successful" (BUG-17).
+- **Silent failures everywhere.** A failed product list, cart (BUG-13, BUG-32), product, related products (BUG-43), rentals, favourites, search or admin list leaves a blank area or a misleading empty state. A rejected order still says "Payment was successful" (BUG-17).
 - **Data and validation.**
   - A failed quantity update leaves line and cart totals disagreeing (BUG-14).
   - A future birth date is accepted (BUG-18).
@@ -163,15 +171,19 @@ Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The hea
   - A search under 3 characters is silently ignored (BUG-35), and a spaces-only one is sent and reported as "0 products found" (BUG-34).
   - After a sort or filter change from a later page the list restarts at page 1, but the pager still marks the old page (BUG-33).
   - The registration page promises passwords of at least 8 characters; the validation message says 6 (BUG-31).
-  - The price slider shows whichever answer arrives last, so a slow one for an earlier step replaces the final filter (BUG-30). It surfaced as a flaky test under load; holding one answer back reproduces it every time.
-- **Back office** (ADM-01..12):
+  - The price slider shows whichever answer arrives last, so a slow one for an earlier step replaces the final filter (BUG-30). It surfaced as a flaky test under load; holding one answer back reproduces it every time. The billing address has the same race: an older lookup answer overwrites the address of the last house number (BUG-41).
+  - A malformed postcode is explained, yet Proceed stays enabled (BUG-40).
+  - The API refuses a cart quantity of 2.5 (422), but the line keeps 2.5 and its total (BUG-42).
+- **Back office** (ADM-01..17):
   - Delete never asks for confirmation.
   - A failed reply, a failed message status save and a refused brand or category save (409) are not reported (ADM-10..12).
   - Prices are not validated.
   - The edit form drops stock, brand, category and image, so an existing product cannot be saved as loaded.
+  - A failed order load says "This invoice doesn't exist." (ADM-13); an edit form whose record fails to load (product, brand, user) opens empty (ADM-14); failed statistics show empty tables (ADM-15).
+  - Settings accept a non-URL payment endpoint and report "Settings saved!" (ADM-16), and the user form's password field is plain text (ADM-17).
 - **Sessions.** `/users/refresh` throws an unhandled exception (500), so every session ends after 5 minutes.
-- **Raw text leaks:** "[object Object]", "true", `page.forgot-password.confirm` (BUG-20, 21, 22).
-- **Untranslated text.** Twenty areas stay English in the other languages (I18N-01..20): the notification bar, the screen-reader heading, the footer, "Sign in with Google", the registration help, the privacy page, the hard-coded "Quantity", the page titles of eight pages, the credit-card form in German, and the labels a screen reader reads out (menus, chat and its close button, cart link and line quantities, sort, slider, pagination, login links, the logo tooltip and the banner's alt text). Some of those labels are internal ids, like "nav-categories", "cart" and "ngx-slider".
+- **Raw text leaks:** "[object Object]", "true", `page.forgot-password.confirm` (BUG-20, 21, 22; the last is also I18N-23, counted once).
+- **Untranslated text.** Twenty-three areas stay English in the other languages (I18N-01..24, with I18N-23 counted under BUG-20): the notification bar, the screen-reader heading, the footer, "Sign in with Google", the registration help, the privacy page, the hard-coded "Quantity", the page titles of eight pages and of the account pages, the search caption, the refused login's error, the credit-card form in German, and the labels a screen reader reads out (menus, chat and its close button, cart link and line quantities, sort, slider, pagination, login links, the logo tooltip and the banner's alt text). Some of those labels are internal ids, like "nav-categories", "cart" and "ngx-slider".
 - **Accessibility.** 13 axe violations, 6 of them critical:
   - the checkout tabs break the ARIA tab pattern;
   - three password buttons have no name;
@@ -179,8 +191,8 @@ Everything is listed in [docs/COVERAGE.md](docs/COVERAGE.md#bugs-found). The hea
   - the related-products links are too small to tap.
 
   Four more defects were found by locator friction: the cart remove control, Sign out, and pagination that is disabled by CSS only.
-- **Security headers.** The live site sends no CSP, X-Frame-Options, nosniff, Referrer-Policy or HSTS, and the API names its server and OS versions (SEC-01..06).
-- **Performance.** The footer renders before the page content and jumps (CLS 0.17 to 0.38 on home, product and contact, PERF-01). The cart shifts by 0.107, a hair over the 0.1 budget: that is an observation held to its baseline, not a pin, because a pin that noise can flip cannot tell a fix from luck. LCP, TBT and INP are well inside budget, even at 4× CPU throttling.
+- **Security.** The live site sends no CSP, X-Frame-Options, nosniff, Referrer-Policy or HSTS, and the API names its server and OS versions (SEC-01..06). On the self-hosted shop, the brand, category and product write APIs accept anonymous callers and customer tokens, for both create and update (SEC-07..09); reads and deletes are refused.
+- **Performance.** The footer renders before the page content and jumps (CLS 0.17 to 0.38 on home, product and contact, PERF-01). The cart shifts by 0.107, a hair over the 0.1 budget: that is an observation held to a fixed 0.13 ceiling and to its baseline, not a pin, because a pin that noise can flip cannot tell a fix from luck. LCP, TBT and INP are well inside budget, even at 4× CPU throttling.
 - **Test-design lessons.**
   - `test.use()` reads a two-element array as `[value, options]`, so mocks are an object.
   - Fixture-driven navigation needs settle waits, or a late initial response overwrites the test's first search.

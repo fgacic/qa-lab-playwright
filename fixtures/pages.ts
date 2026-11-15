@@ -1,7 +1,8 @@
 import { mergeTests } from '@playwright/test';
+import { AppShell } from '@pages/AppShell';
 import { CategoryPage } from '@pages/CategoryPage';
 import { CheckoutPage } from '@pages/CheckoutPage';
-import { ComparisonPage } from '@pages/ComparisonPage';
+import { COMPARE_STORAGE_KEY, ComparisonPage } from '@pages/ComparisonPage';
 import { ContactPage } from '@pages/ContactPage';
 import { ForgotPasswordPage } from '@pages/ForgotPasswordPage';
 import { HomePage } from '@pages/HomePage';
@@ -9,9 +10,10 @@ import { LoginPage } from '@pages/LoginPage';
 import { ProductPage } from '@pages/ProductPage';
 import { RegisterPage } from '@pages/RegisterPage';
 import { RentalsPage } from '@pages/RentalsPage';
+import { mock } from '@support/api-mock';
 import { installToken } from '@support/session';
-import type { CartItem, Product } from '@support/toolshop-api';
-import { test as apiTest } from './api';
+import type { CartItem, Product, ToolshopApi } from '@support/toolshop-api';
+import { test as apiTest, type Catalog } from './api';
 import { test as authTest } from './auth';
 import { test as mocksTest } from './mocks';
 
@@ -24,7 +26,43 @@ export interface PageOptions {
   cartItems: CartItem[];
   /** Products `comparisonPage` has selected for comparison. */
   comparedProducts: Product[];
+  /**
+   * Refuse (418, and fail the test) every write to the API that no mock answers, from the first
+   * request on. For specs that mock the write they are about: a gap in the mocks then cannot write
+   * to a real shop. Always on for live, where the page fixture already guards writes.
+   */
+  refuseUnmockedWrites: boolean;
 }
+
+/**
+ * Two different in-stock products with no eco discount, 2 of the first and 1 of the second: the
+ * cart the cart and purchase specs share. With neither product eco-friendly (and neither a rental),
+ * the cart total is the plain sum of its lines, so a spec can state the figure instead of reading it.
+ * `test.use({ cartItems: twoProductCart })`
+ */
+export const twoProductCart = async ({ catalog, api }: { catalog: Catalog; api: ToolshopApi }, use: (items: CartItem[]) => Promise<void>): Promise<void> => {
+  const first = await catalog.nonEco();
+  const second = await api.findProduct('second non-eco', (p) => p.in_stock && !p.is_rental && !p.is_eco_friendly && p.id !== first.id);
+  await use([
+    { product: first, quantity: 2 },
+    { product: second, quantity: 1 },
+  ]);
+};
+
+/**
+ * An answer for GET /postcode-lookup, for specs that are not about the lookup: the address is then
+ * filled from this and a lookup outage cannot fail them. Specs that mock other routes list it too,
+ * since a describe's `withMocks` replaces the file's.
+ */
+export const POSTCODE_LOOKUP_RESULT = {
+  street: 'Mockstraat',
+  house_number: '1',
+  city: 'Mockstad',
+  state: 'Mockland',
+  country: 'NL',
+  postcode: '1234 AB',
+};
+export const postcodeLookupMock = mock.respond('GET', '/postcode-lookup', POSTCODE_LOOKUP_RESULT);
 
 /**
  * Page fixtures. Each one builds its page object, does the setup the page needs (a cart, a
@@ -49,13 +87,14 @@ export interface PageFixtures {
    * Page objects that are not opened yet, for journeys that move between areas (back office,
    * then shop): the test opens them when the story gets there.
    */
-  shop: { home: HomePage };
+  shop: { home: HomePage; contact: ContactPage; login: LoginPage; appShell: AppShell };
 }
 
 export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions & PageFixtures>({
   productKind: ['in-stock', { option: true }],
   cartItems: [async ({ catalog }, use) => use([{ product: await catalog.inStock(), quantity: 1 }]), { option: true }],
   comparedProducts: [[], { option: true }],
+  refuseUnmockedWrites: [false, { option: true }],
 
   product: async ({ catalog, productKind }, use) => {
     const lookup = {
@@ -93,14 +132,19 @@ export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions 
   },
   comparisonPage: async ({ page, comparedProducts }, use) => {
     const ids = comparedProducts.map((p) => p.id);
-    await page.addInitScript((ids) => {
-      if (ids.length && !sessionStorage.getItem('compare_ids')) sessionStorage.setItem('compare_ids', JSON.stringify(ids));
-    }, ids);
+    await page.addInitScript(
+      ({ ids, key }) => {
+        if (ids.length && !sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(ids));
+      },
+      { ids, key: COMPARE_STORAGE_KEY },
+    );
     const comparisonPage = new ComparisonPage(page);
     await comparisonPage.open();
     await use(comparisonPage);
   },
-  checkout: async ({ page, cartItems, seedCart, session, workerAccount }, use) => {
+  checkout: async ({ page, cartItems, seedCart, session, workerAccount, apiMock, refuseUnmockedWrites }, use) => {
+    // Before the first request, so a write no mock answers is refused wherever it would come from.
+    if (refuseUnmockedWrites) await apiMock.blockUnmockedWrites();
     // A real customer's session must be in place before /checkout loads (the step after the cart
     // differs for a signed-in customer), whatever order a spec lists its fixtures in. The mocked
     // session is not installed here: checkout specs are guests unless they ask for `signedIn`.
@@ -125,7 +169,13 @@ export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions 
     await forgotPasswordPage.open();
     await use(forgotPasswordPage);
   },
-  shop: async ({ page }, use) => use({ home: new HomePage(page) }),
+  shop: async ({ page }, use) =>
+    use({
+      home: new HomePage(page),
+      contact: new ContactPage(page),
+      login: new LoginPage(page),
+      appShell: new AppShell(page),
+    }),
   contactPage: async ({ page }, use) => {
     const contactPage = new ContactPage(page);
     await contactPage.open();

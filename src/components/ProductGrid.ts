@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { step } from '@support/step';
 
 export class ProductCard {
@@ -6,9 +6,11 @@ export class ProductCard {
   readonly price: Locator;
   readonly compareButton: Locator;
   readonly outOfStock: Locator;
+  readonly image: Locator;
 
   constructor(readonly root: Locator) {
     this.name = root.getByRole('heading', { level: 5 });
+    this.image = root.getByRole('img');
     this.price = root.getByTestId('product-price');
     this.compareButton = root.getByRole('button', { name: 'Compare' });
     this.outOfStock = root.getByText('Out of stock', { exact: true });
@@ -47,9 +49,14 @@ export class ProductGrid {
     return new ProductCard(this.cards.nth(index));
   }
 
+  /** Resolves once the grid shows at least one card: the list the page asked for has arrived and rendered. */
+  async waitForLoaded(): Promise<void> {
+    await expect(this.cards.first(), 'the product grid should show cards').toBeVisible();
+  }
+
   /** Card names in display order, once the grid has rendered. */
   async productNames(): Promise<string[]> {
-    await this.names.first().waitFor();
+    await this.waitForLoaded();
     return this.names.allInnerTexts();
   }
 

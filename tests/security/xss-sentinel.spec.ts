@@ -39,6 +39,18 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
     });
   }
 
+  // The sentinel's wrappers and hook are installed on the context before the first navigation. A payload that runs while
+  // the page is still loading, from an inline script, is the case that proves it: a late install would miss it.
+  test('detects an alert called by an inline script while the page loads', async ({ page, xss }) => {
+    await page.route('**/xss-install-order-control', (route) =>
+      route.fulfill({ contentType: 'text/html', body: `<!doctype html><title>control</title><script>alert('during load'); __qaLabXssHit('hook during load');</script>` }),
+    );
+
+    await page.goto('/xss-install-order-control');
+
+    await expect.poll(() => xss.executions(), 'both calls made during load were recorded').toEqual(['alert: during load', 'hook during load']);
+  });
+
   test('detects a dialog opened by page script', async ({ homePage, xss }) => {
     await homePage.page.evaluate(() => window.alert('anything'));
 

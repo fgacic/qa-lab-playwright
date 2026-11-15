@@ -10,7 +10,8 @@ export class Pagination {
     this.next = root.getByRole('button', { name: 'Next' });
   }
 
-  page(n: number): Locator {
+  /** The button of page n. Not named `page...`: eslint-plugin-playwright reads any `page*` receiver as a Page. */
+  numbered(n: number): Locator {
     return this.root.getByRole('button', { name: `Page-${n}`, exact: true });
   }
 
@@ -21,13 +22,13 @@ export class Pagination {
 
   /** How many numbered page buttons there are, i.e. the number of pages. */
   async pageCount(): Promise<number> {
-    await this.page(1).waitFor();
+    await this.numbered(1).waitFor();
     return this.root.getByRole('button', { name: /^Page-\d+$/ }).count();
   }
 
   @step('Go to page {0}')
   async goTo(n: number): Promise<void> {
-    await this.page(n).click();
+    await this.numbered(n).click();
   }
 
   @step('Go to the next page')

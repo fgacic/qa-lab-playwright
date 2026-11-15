@@ -48,6 +48,9 @@ export const orderPayment = { method: 'cash-on-delivery', label: 'Cash on Delive
 /** The one line of the mocked order: fixed numbers, so no spec computes its expectation with the arithmetic it checks. */
 export const orderLine = { unitPrice: 9.99, quantity: 2, total: 19.98 };
 
+/** The status the mocked order has, and the one a status picker does not offer again. */
+export const ORDER_STATUS = 'AWAITING_FULFILLMENT';
+
 export const order = (product: Product) => ({
   id: '01QALABORDER0000000000000',
   user_id: customer.id,
@@ -62,7 +65,7 @@ export const order = (product: Product) => ({
   additional_discount_amount: null,
   subtotal: orderLine.total,
   total: orderLine.total,
-  status: 'AWAITING_FULFILLMENT',
+  status: ORDER_STATUS,
   status_message: null,
   created_at: '2026-11-01 10:00:00',
   payment: { id: '01QALABPAYMENT', payment_method: orderPayment.method, payment_details: {} },

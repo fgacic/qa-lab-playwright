@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 
 /** The localStorage key the SPA keeps its JWT under. */
@@ -16,4 +17,12 @@ export async function installToken(page: Page, token: string): Promise<void> {
     },
     { key: TOKEN_KEY, token },
   );
+}
+
+/** The token a saved storageState file holds. Read from the file: the SPA drops an expired one as soon as a page opens. */
+export function readSavedToken(storageStatePath: string): string {
+  const state = JSON.parse(readFileSync(storageStatePath, 'utf8')) as { origins: { localStorage: { name: string; value: string }[] }[] };
+  const token = state.origins.flatMap((origin) => origin.localStorage).find((item) => item.name === TOKEN_KEY)?.value;
+  if (!token) throw new Error(`${storageStatePath} holds no "${TOKEN_KEY}": the setup did not save a session.`);
+  return token;
 }

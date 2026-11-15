@@ -25,8 +25,10 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await expect(page).toHaveScreenshot('product.png', { fullPage: true, mask: [productPage.relatedProducts] });
   });
 
-  test('category page', async ({ categoryPage, page }) => {
-    await categoryPage.open('hand-tools');
+  test('category page', async ({ categoryPage, api, page }) => {
+    // The shop's first top-level category, from its own tree: the same one on every freshly seeded shop.
+    const [first] = await api.categoryTree();
+    await categoryPage.open(first.slug);
     await expect(categoryPage.grid.cards.first()).toBeVisible();
     await expect(page).toHaveScreenshot('category.png', { fullPage: true });
   });
@@ -128,7 +130,11 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
   // Last in the file, but order does not matter: it reads the baselines on disk, not the run.
   test('every baseline on disk belongs to a screenshot in this file', async ({}, testInfo) => {
-    const named = [...fs.readFileSync(testInfo.file, 'utf8').matchAll(/toHaveScreenshot\('([^']+)'/g)].map((m) => m[1]);
+    // A name may be single- or double-quoted or a template literal; one built from an expression cannot be matched, so it is refused outright.
+    const source = fs.readFileSync(testInfo.file, 'utf8');
+    const named = [...source.matchAll(/toHaveScreenshot\(\s*(['"`])([^'"`]*)\1/g)].map((m) => m[2]);
+    expect(named.filter((name) => name.includes('${')), 'screenshot names must be literal so the orphan check can read them').toEqual([]);
+    expect(named, 'every toHaveScreenshot call names its file with a literal first argument').toHaveLength(source.match(/toHaveScreenshot\(/g)?.length ?? 0);
     const onDisk = fs.readdirSync(path.dirname(testInfo.snapshotPath('x.png'))).filter((f) => f.endsWith('.png'));
 
     expect(onDisk.filter((f) => !named.includes(f)), 'baselines no test compares against (delete them)').toEqual([]);

@@ -1,8 +1,24 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { salesStream } from '@support/payloads';
 
+/**
+ * The panel is "Live" only while its EventSource is open. A mocked stream is a finite body: the browser
+ * sees it end and drops back to "Reconnecting" with the connecting text, whatever it carried. So the mocked
+ * tests assert what the stream delivered, and the one real feed (below) proves the "Live" state.
+ */
+const CONNECTING = 'Connecting to the live feed…';
+
 /** The feed is Server-Sent Events. Mocking it with a fixed stream makes the panel deterministic. */
 test.describe('Live shop activity', () => {
+  // The real feed (a read-only GET) stays open, which no mocked body can: this is where the dot says "Live".
+  test('connects to the shop\'s own feed and says it is live', async ({ homePage }) => {
+    const { liveActivity } = homePage.shell;
+
+    await liveActivity.open();
+
+    await expect(liveActivity.connection).toHaveAttribute('title', 'Live');
+  });
+
   test.describe('with no sales yet', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.eventStream('/sales-stream', salesStream([]))));
 
@@ -11,7 +27,7 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
       await expect(liveActivity.window).toBeVisible();
-      await expect(liveActivity.emptyState).toBeVisible();
+      await expect(liveActivity.emptyState).toHaveText(CONNECTING);
       await expect(liveActivity.items).toHaveCount(0);
       await expect(liveActivity.salesCount).toHaveText('0');
       await expect(liveActivity.revenue).toHaveText('$0.00');
@@ -48,7 +64,7 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
 
-      await expect(liveActivity.emptyState).toHaveText('Connecting to the live feed…');
+      await expect(liveActivity.emptyState).toHaveText(CONNECTING);
       await expect(liveActivity.connection).toHaveAttribute('title', 'Reconnecting');
       await expect(liveActivity.items).toHaveCount(0);
       await expect(liveActivity.salesCount).toHaveText('0');

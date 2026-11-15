@@ -27,18 +27,20 @@ test.describe('Checkout: sign-in step', () => {
     await expect(checkout.signIn.loginButton).toBeHidden();
   });
 
-  test('an empty login shows both required labels', { tag: ['@negative'] }, async ({ checkout }) => {
+  test('an empty login shows both required labels and sends no sign-in', { tag: ['@negative'] }, async ({ checkout, apiMock }) => {
     await checkout.signIn.loginButton.click();
 
     await expect(checkout.signIn.email.error).toHaveText(TEXT.emailRequired);
     await expect(checkout.signIn.password.error).toHaveText(TEXT.passwordRequired);
+    await apiMock.expectNoRequest('POST', '/users/login');
   });
 
-  test('a malformed email and a too-short password are rejected before sending', { tag: ['@negative'] }, async ({ checkout }) => {
+  test('a malformed email and a too-short password show errors and send no sign-in', { tag: ['@negative'] }, async ({ checkout, apiMock }) => {
     await checkout.signIn.signIn('not-an-email', 'x');
 
     await expect(checkout.signIn.email.error).toHaveText(TEXT.emailInvalid);
     await expect(checkout.signIn.password.error).toHaveText(TEXT.passwordInvalid);
+    await apiMock.expectNoRequest('POST', '/users/login');
   });
 
   // The real refusal is a failed sign-in on the shop's own log, so it runs on the self-hosted shop only;

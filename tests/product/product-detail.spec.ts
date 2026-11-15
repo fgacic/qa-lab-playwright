@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { API_URL } from '@support/env';
 import { knownBug } from '@support/known-bug';
+import { escapeRegExp } from '@support/regexp';
 
 /** What the shop tells the shopper, word for word. */
 const MESSAGES = {
@@ -10,6 +10,19 @@ const MESSAGES = {
   favouriteDuplicate: 'Product already in your favorites list.',
   favouriteSignedOut: 'Unauthorized, can not add product to your favorite list.',
 } as const;
+/** What the page does with quantities that are not a number from 1 to 99. */
+const QUANTITY_CASES = [
+  { typed: '0', clampedTo: '1' },
+  { typed: '', clampedTo: '1' },
+  { typed: '2.5', clampedTo: '2' },
+  { typed: '-1', clampedTo: '1' },
+] as const;
+const MAX_QUANTITY = 99;
+const OVER_MAX_QUANTITY = 150;
+/** The quantity the add-to-cart test sends. */
+const ADDED_QUANTITY = 3;
+/** The related-products endpoint of any product. */
+const RELATED = /^\/products\/[^/]+\/related$/;
 /** A server message nobody would write by accident: seeing it in the toast proves the app shows what the server said. */
 const SERVER_MESSAGE = 'qa-lab: the cart service is down for maintenance';
 
@@ -19,6 +32,13 @@ test.describe('Product detail', () => {
     await expect(productPage.price).toHaveText(product.price.toFixed(2));
     await expect(productPage.description).toHaveText(product.description);
     await expect(productPage.addToCartButton).toBeEnabled();
+  });
+
+  test('the picture is the one of the catalogue and has the product name as alt text', async ({ productPage, product }) => {
+    const image = productPage.image(product.name);
+
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAttribute('src', new RegExp(`/${escapeRegExp(product.product_image.file_name)}$`));
   });
 
   test('lists the product specifications', async ({ productPage }) => {
@@ -40,12 +60,7 @@ test.describe('Product detail', () => {
     await expect(productPage.quantity).toHaveValue('1');
   });
 
-  for (const { typed, clampedTo } of [
-    { typed: '0', clampedTo: '1' },
-    { typed: '', clampedTo: '1' },
-    { typed: '2.5', clampedTo: '2' },
-    { typed: '-1', clampedTo: '1' },
-  ]) {
+  for (const { typed, clampedTo } of QUANTITY_CASES) {
     test(`a typed quantity of "${typed}" is corrected to ${clampedTo}`, { tag: ['@negative'] }, async ({ productPage }) => {
       await productPage.typeQuantity(typed);
 
@@ -54,18 +69,18 @@ test.describe('Product detail', () => {
   }
 
   test('a quantity above 99 is capped at 99 with a warning', { tag: ['@negative'] }, async ({ productPage }) => {
-    await productPage.typeQuantity(150);
+    await productPage.typeQuantity(OVER_MAX_QUANTITY);
 
-    await expect(productPage.quantity).toHaveValue('99');
+    await expect(productPage.quantity).toHaveValue(String(MAX_QUANTITY));
     await expect(productPage.toast.message(MESSAGES.atMost99).first()).toBeVisible();
   });
 
   test('the + button stops at 99 with the same warning', { tag: ['@negative'] }, async ({ productPage }) => {
-    await productPage.typeQuantity(99);
+    await productPage.typeQuantity(MAX_QUANTITY);
 
     await productPage.increaseQuantityButton.click();
 
-    await expect(productPage.quantity).toHaveValue('99');
+    await expect(productPage.quantity).toHaveValue(String(MAX_QUANTITY));
     await expect(productPage.toast.message(MESSAGES.atMost99).first()).toBeVisible();
   });
 
@@ -75,11 +90,11 @@ test.describe('Product detail', () => {
   test('Add to cart puts the chosen quantity in the cart', { tag: ['@smoke'] }, async ({ productPage, product, apiMock }) => {
     const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
 
-    await productPage.addToCart(3);
+    await productPage.addToCart(ADDED_QUANTITY);
 
-    expect((await added).postDataJSON()).toEqual({ product_id: product.id, quantity: 3 });
+    expect((await added).postDataJSON()).toEqual({ product_id: product.id, quantity: ADDED_QUANTITY });
     await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
-    await expect(productPage.header.cartLink).toHaveText('3');
+    await expect(productPage.header.cartLink).toHaveText(String(ADDED_QUANTITY));
   });
 
   test('adding to favourites while signed out is refused', { tag: ['@negative'] }, async ({ productPage, product, page }) => {
@@ -90,10 +105,10 @@ test.describe('Product detail', () => {
     await expect(page).toHaveURL(`/product/${product.id}`);
   });
 
-  test('a related product opens its own page', async ({ productPage, product, page, request }) => {
+  test('a related product opens its own page', async ({ productPage, product, page, api }) => {
     await expect(productPage.relatedHeading).toBeVisible();
     const [relatedName] = await productPage.relatedNames();
-    const related = ((await (await request.get(`${API_URL}/products/${product.id}/related`)).json()) as { id: string; name: string }[]).find((p) => p.name === relatedName);
+    const related = (await api.related(product.id)).find((p) => p.name === relatedName);
     expect(related, `"${relatedName}" should be one of the product's related products`).toBeDefined();
 
     await productPage.openRelated(relatedName);
@@ -165,16 +180,29 @@ test.describe('Product detail', () => {
   });
 
   test.describe('when there are no related products', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.respond('GET', /^\/products\/[^/]+\/related$/, [])));
+    test.use(withMocks(mock.respond('GET', RELATED, [])));
 
     test('the related section is empty', async ({ productPage, apiMock }) => {
       // Reload with the answer awaited: an empty section only means something once the data has arrived.
       await Promise.all([
-        apiMock.waitForResponse('GET', /^\/products\/[^/]+\/related$/),
+        apiMock.waitForResponse('GET', RELATED),
         productPage.page.reload({ waitUntil: 'domcontentloaded' }),
       ]);
       await expect(productPage.name).toBeVisible();
       await expect(productPage.relatedProducts).toHaveCount(0);
+    });
+  });
+
+  test.describe('when the related products fail to load', { tag: ['@mocked', '@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', RELATED, 500)));
+
+    test('the shopper is told, and the product itself is unaffected', async ({ productPage, product, apiMock }) => {
+      knownBug('BUG-43', 'a failed related-products request leaves the "Related products" heading over nothing, with no message.');
+      await expect(productPage.name).toHaveText(product.name);
+      await expect(productPage.addToCartButton).toBeEnabled();
+      await expect.poll(() => apiMock.requestsTo('GET', RELATED), 'the related products were asked for').toBeGreaterThan(0);
+
+      await expect(productPage.shell.errorAlert, 'BUG-43: a failed related-products request is reported').toBeVisible({ timeout: 5_000 });
     });
   });
 

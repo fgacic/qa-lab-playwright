@@ -50,7 +50,7 @@ export class CheckoutPage {
   @step('Check out as guest {0.email}')
   async checkOutAsGuest(guest: Person, address: Address): Promise<void> {
     await this.proceedToPayment(guest, address);
-    await this.payment.payWith('cash-on-delivery');
+    await this.payment.payOnDelivery();
   }
 
   @step('Open the cart')

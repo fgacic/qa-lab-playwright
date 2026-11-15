@@ -1,5 +1,6 @@
 import { expect, test as base, type Page } from '@playwright/test';
 import { ContactPage } from '@pages/ContactPage';
+import { IS_SELF_HOSTED } from '@support/env';
 
 /**
  * Injection payloads, typed into forms as plain text; the specs then check the text comes back as
@@ -7,6 +8,10 @@ import { ContactPage } from '@pages/ContactPage';
  * it is recorded whether or not it opens a dialog (a payload that fetches, writes to the DOM or
  * redirects is caught the same way). All are under 40 characters, the longest search the shop
  * accepts (BUG-27). The number it passes says which one ran.
+ *
+ * Caveat shared by every payload that uses `<img src=x>`: the DOM check (`injectedCount`) recognises a parsed payload by the
+ * attribute `src="x"`, so a payload that used another source would go uncounted, and a genuine image whose source is
+ * exactly "x" would be counted wrongly. The sentinel's own hit record does not depend on it, which is why both checks are made.
  */
 export const XSS_PAYLOADS = {
   'img onerror': `<img src=x onerror=__qaLabXssHit(1)>`,
@@ -31,8 +36,9 @@ export const ROUTE_XSS_PAYLOADS = {
  * How long a negative result is observed before it is believed. "Nothing ran" cannot be polled
  * for like a visible element: it is true the instant the page is quiet, and also true a moment
  * before a handler fires. So `expectNotExecuted` first waits for what a payload hangs on to
- * settle (every image has loaded or failed, two timer turns have passed) and then keeps sampling
- * for this long. It is only ever paid on a passing test; a hit fails it at once.
+ * settle (every image has loaded or failed, two timer turns have passed) and then watches
+ * for this long, racing the window against the sentinel's hit signal. It is only ever paid on a
+ * passing test; a hit ends the wait at once and fails it.
  */
 const OBSERVATION_WINDOW_MS = 1_000;
 
@@ -52,12 +58,15 @@ declare global {
  */
 export class XssSentinel {
   private readonly hits: string[] = [];
+  /** Resolves on the first recorded sign that script ran, so a negative check can stop watching the moment one arrives. */
+  private signalHit!: () => void;
+  private readonly firstHit = new Promise<'hit'>((resolve) => (this.signalHit = () => resolve('hit')));
 
   constructor(private readonly page: Page, private readonly watching: boolean) {}
 
   async install(): Promise<void> {
     const context = this.page.context();
-    await context.exposeFunction('__qaLabXssHit', (kind: string) => void this.hits.push(String(kind)));
+    await context.exposeFunction('__qaLabXssHit', (kind: string) => this.record(String(kind)));
     await context.addInitScript(() => {
       for (const name of ['alert', 'confirm', 'prompt'] as const) {
         window[name] = ((message?: unknown) => {
@@ -68,9 +77,14 @@ export class XssSentinel {
     });
     // A dialog the wrapper missed (opened by a frame created before it, say) must not hang the page.
     context.on('dialog', async (dialog) => {
-      this.hits.push(`${dialog.type()}: ${dialog.message()}`);
+      this.record(`${dialog.type()}: ${dialog.message()}`);
       await dialog.dismiss();
     });
+  }
+
+  private record(kind: string): void {
+    this.hits.push(kind);
+    this.signalHit();
   }
 
   /** What ran so far, in order. */
@@ -92,25 +106,29 @@ export class XssSentinel {
 
   /**
    * The negative check: nothing a payload could do has been seen, after the observation window.
-   * This is the one that waits; `expectNoInjectedElements` is a snapshot, so call it first and
-   * this last.
+   * A negative cannot be proven by looking once, so the window is watched for real: it is raced
+   * against the first hit, and a hit fails the check at once, naming what ran. This is the one that
+   * waits; `expectNoInjectedElements` is a snapshot, so call it first and this last.
    */
   async expectNotExecuted(): Promise<void> {
     expect(this.watching, 'the sentinel is not installed: add test.use({ xssWatch: true }) to the spec').toBe(true);
     await this.settle();
-    const started = Date.now();
-    await expect
-      .poll(() => (this.hits.length ? [...this.hits] : Date.now() - started >= OBSERVATION_WINDOW_MS ? [] : ['still observing']), {
-        message: 'script ran on the page (the sentinel recorded these calls)',
-        intervals: [100],
-        timeout: OBSERVATION_WINDOW_MS + 3_000,
-      })
-      .toEqual([]);
+    let timer: NodeJS.Timeout | undefined;
+    // The window is a plain timer on purpose: this is the one place where the point is to let time pass, and the hit
+    // signal ends it early. It never waits for a state to appear.
+    const elapsed = new Promise<'quiet'>((resolve) => (timer = setTimeout(() => resolve('quiet'), OBSERVATION_WINDOW_MS)));
+    try {
+      await Promise.race([elapsed, this.firstHit]);
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(this.hits, 'script ran on the page (the sentinel recorded these calls)').toEqual([]);
   }
 
   /**
    * How many elements a payload would have created had it been parsed as HTML. Read from the DOM
-   * rather than by locator: Playwright's text matching ignores the body of a <script>.
+   * rather than by locator: Playwright's text matching ignores the body of a <script>. It recognises an
+   * `<img>` payload by `src="x"`: see the caveat on XSS_PAYLOADS.
    */
   async injectedCount(): Promise<number> {
     return this.page.evaluate(
@@ -138,6 +156,10 @@ export interface SecurityFixtures {
 
 export const test = base.extend<SecurityFixtures>({
   xssWatch: [false, { option: true }],
+  // Auto, though only the specs that opt in with `xssWatch` need it: the sentinel must be installed on the context
+  // before any page fixture navigates, and Playwright orders only auto fixtures ahead of the ones a test names.
+  // Left to be requested by name, a spec listing `homePage` before `xss` would open the page unwatched. With
+  // `xssWatch` off it installs nothing, and `expectNotExecuted` refuses to pass.
   xss: [
     async ({ page, xssWatch }, use) => {
       const sentinel = new XssSentinel(page, xssWatch);
@@ -147,10 +169,15 @@ export const test = base.extend<SecurityFixtures>({
     { auto: true },
   ],
   visitorContactPage: async ({ browser, baseURL }, use) => {
+    // Its users submit attack strings through a real form: our own shop only.
+    if (!IS_SELF_HOSTED) throw new Error('visitorContactPage submits real contact messages: it only runs against the self-hosted Toolshop.');
     const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
-    const contactPage = new ContactPage(await visitor.newPage());
-    await contactPage.open();
-    await use(contactPage);
-    await visitor.close();
+    try {
+      const contactPage = new ContactPage(await visitor.newPage());
+      await contactPage.open();
+      await use(contactPage);
+    } finally {
+      await visitor.close();
+    }
   },
 });

@@ -56,10 +56,10 @@ export class PaymentStep {
     await this.confirmButton.click();
   }
 
-  /** For methods that need no financial details: choose, check, confirm. */
-  @step('Pay with {0}')
-  async payWith(method: Extract<PaymentMethod, 'cash-on-delivery'>): Promise<void> {
-    await this.choose(method);
+  /** The one method that needs no financial details: choose it, check, confirm. */
+  @step('Pay cash on delivery')
+  async payOnDelivery(): Promise<void> {
+    await this.choose('cash-on-delivery');
     await this.checkPayment();
     await this.confirm();
   }

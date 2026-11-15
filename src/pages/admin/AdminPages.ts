@@ -62,7 +62,10 @@ export class AdminOrderPage {
   readonly paymentMethod: Locator;
   readonly billingCity: Locator;
   readonly lines: Locator;
+  /** What the page says after a status change: the "Status updated!" confirmation (plain text, no role) or an error alert. */
   readonly feedback: Locator;
+  /** The page's answer to an invoice that could not be loaded. */
+  readonly notFoundNotice: Locator;
 
   constructor(readonly page: Page) {
     // exact: the date field's accessible name is "Invoice Number Invoice Date" (two labels).
@@ -76,6 +79,7 @@ export class AdminOrderPage {
     this.billingCity = page.getByRole('textbox', { name: 'City' });
     this.lines = page.getByRole('table').getByRole('row').filter({ has: page.getByRole('cell') });
     this.feedback = page.getByRole('alert').or(page.getByText('Status updated!'));
+    this.notFoundNotice = page.getByText("This invoice doesn't exist.");
   }
 
   @step('Set the order status to {0}')
@@ -93,6 +97,7 @@ export class AdminMessagePage {
   readonly replyBox: Locator;
   readonly replyButton: Locator;
   readonly backLink: Locator;
+  /** Any alert of the message page (a failed reply or status change would show here). */
   readonly feedback: Locator;
 
   constructor(readonly page: Page) {
@@ -121,32 +126,45 @@ export class AdminMessagePage {
 
 /** The four tables of the statistics page, in page order, with the request that fills each. */
 const REPORTS = [
-  { title: 'Top 10 Best Selling Categories', feed: '/reports/top10-best-selling-categories' },
-  { title: 'Top 10 Most Purchased Products', feed: '/reports/top10-purchased-products' },
-  { title: 'Customers By Country', feed: '/reports/customers-by-country' },
-  { title: 'Total Sales Per Country', feed: '/reports/total-sales-per-country' },
+  { title: 'Top 10 Best Selling Categories', feed: '/reports/top10-best-selling-categories', columns: ['Category Name', 'Total Earned'] },
+  { title: 'Top 10 Most Purchased Products', feed: '/reports/top10-purchased-products', columns: ['Product Name', 'Amount'] },
+  { title: 'Customers By Country', feed: '/reports/customers-by-country', columns: ['Country', 'Amount'] },
+  { title: 'Total Sales Per Country', feed: '/reports/total-sales-per-country', columns: ['Country', 'Total Earned'] },
 ] as const;
 export type ReportTitle = (typeof REPORTS)[number]['title'];
 const REPORT_TITLES = REPORTS.map((r) => r.title);
+/** The column titles each report's table has, whatever it is answered with. */
+export const reportColumns = (title: ReportTitle): readonly string[] => REPORTS[REPORT_TITLES.indexOf(title)].columns;
 
 export class AdminStatisticsPage {
   readonly shell: AppShell;
   readonly heading: Locator;
+  /** Any alert: a healthy statistics page shows none. */
+  readonly alerts: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
     this.heading = page.getByRole('heading', { name: 'Statistics', level: 1 });
+    this.alerts = page.getByRole('alert');
+  }
+
+  private table(title: ReportTitle): Locator {
+    return this.page
+      .getByRole('table')
+      .filter({ has: this.page.getByRole('columnheader') })
+      .nth(REPORT_TITLES.indexOf(title));
   }
 
   /** The data rows of the table under a report heading. */
   report(title: ReportTitle): Locator {
-    return this.page
-      .getByRole('table')
-      .filter({ has: this.page.getByRole('columnheader') })
-      .nth(REPORT_TITLES.indexOf(title))
-      .getByRole('row')
-      .filter({ has: this.page.getByRole('cell') });
+    return this.table(title).getByRole('row').filter({ has: this.page.getByRole('cell') });
   }
+
+  /** The column titles of a report (`reportColumns`): all that is left on screen when its answer is empty. */
+  columns(title: ReportTitle): Locator {
+    return this.table(title).getByRole('columnheader');
+  }
+
 
   /** Returns once all four reports have been answered, so an empty table means an empty answer. */
   @step('Open the statistics')
@@ -200,6 +218,7 @@ export class AdminSettingsPage {
   readonly ecoBadge: Locator;
   readonly saveButton: Locator;
   readonly clearStorageButton: Locator;
+  /** What the page says after Save: the "Settings saved!" confirmation (plain text, no role) or an error alert. */
   readonly feedback: Locator;
 
   constructor(readonly page: Page) {

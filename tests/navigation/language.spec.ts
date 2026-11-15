@@ -26,14 +26,13 @@ test.describe('Language switcher', () => {
     await expect(language.menu.getByRole('menuitem')).toHaveText(LANGUAGES.map((l) => l.toUpperCase()));
   });
 
+  // Every case starts from a language other than the target, so each switch is a real change.
   for (const lang of LANGUAGES) {
-    test(`switching to ${lang.toUpperCase()} translates the header`, async ({ homePage, page }) => {
+    const from: Language = lang === 'en' ? 'de' : 'en';
+    test(`switching from ${from.toUpperCase()} to ${lang.toUpperCase()} translates the header`, async ({ homePage, page }) => {
       const { header } = homePage;
-      // Start from a non-English language so switching to EN is a real change too.
-      if (lang === 'en') {
-        await header.language.switchTo('de');
-        await expect(header.navItem('home')).toHaveText(NAV_LABELS.de.home!);
-      }
+      await header.language.switchTo(from);
+      await expect(header.navItem('home')).toHaveText(NAV_LABELS[from].home!);
 
       await header.language.switchTo(lang);
 

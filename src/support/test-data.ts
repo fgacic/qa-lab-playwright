@@ -2,7 +2,8 @@
  * Unique, obviously fake data per run. Nothing here is a real person, address or card.
  * Emails use example.com (RFC 2606), so nothing is ever delivered anywhere.
  */
-const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+// The worker's parallel index makes two workers that start in the same millisecond with the same random digits still differ.
+const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}w${process.env.TEST_PARALLEL_INDEX ?? '0'}`;
 let counter = 0;
 
 export function uniqueEmail(prefix = 'qa-lab'): string {
@@ -33,8 +34,10 @@ export interface Customer extends Person {
   address: Address;
 }
 
+const fakePerson = (emailPrefix: string): Person => ({ firstName: 'Testy', lastName: 'McTestface', email: uniqueEmail(emailPrefix) });
+
 export function fakeGuest(): Person {
-  return { firstName: 'Testy', lastName: 'McTestface', email: uniqueEmail('guest') };
+  return fakePerson('guest');
 }
 
 /**
@@ -54,8 +57,7 @@ export function fakeAddress(): Address {
 
 export function fakeCustomer(): Customer {
   return {
-    ...fakeGuest(),
-    email: uniqueEmail('customer'),
+    ...fakePerson('customer'),
     dateOfBirth: '1990-01-01',
     phone: '0123456789',
     password: `Qa-lab-${runId}!9`,

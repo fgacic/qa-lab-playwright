@@ -18,8 +18,10 @@ on:
 permissions:
   contents: read
 
+# The nightly run has a group of its own: sharing one with pushes, a queued schedule would replace the
+# pending push run of main (GitHub keeps one pending run per group), and a push would be dropped.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}${{ github.event_name == 'schedule' && '-nightly' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -32,10 +34,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: none
       - run: npm run typecheck
+      - run: npm run lint
       # The visual baselines are only valid in the image of the installed Playwright version, and the
       # tag in scripts/visual.sh is typed by hand: a bump of @playwright/test must not leave it behind.
       - name: The visual image matches @playwright/test
@@ -66,6 +71,8 @@ jobs:
           - { id: sessions-mobile, browsers: chromium, projects: --project=account --project=admin --project=mobile, shard: 1/1 }
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: ${{ matrix.browsers }}
@@ -99,6 +106,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: none
@@ -131,6 +140,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: chromium
@@ -157,6 +168,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: chromium
@@ -185,6 +198,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false # nothing in this workflow pushes
       - uses: ./.github/actions/setup-suite
         with:
           browsers: none
@@ -213,6 +228,16 @@ jobs:
           curl -fsSL "https://fgacic.github.io/qa-lab-playwright/history/history.jsonl" -o allure-history/history.jsonl \
             && echo "history: $(wc -l < allure-history/history.jsonl) earlier runs" \
             || { echo "no published history yet, starting one"; rm -f allure-history/history.jsonl; }
+          # A truncated download or an error page served with 200 would poison every later report:
+          # reuse the file only when every line parses as JSON.
+          if [ -f allure-history/history.jsonl ] && ! node -e '
+            const lines = require("fs").readFileSync("allure-history/history.jsonl", "utf8").split("\n").filter(Boolean);
+            if (!lines.length) process.exit(1);
+            lines.forEach((line) => JSON.parse(line));
+          '; then
+            echo "::warning::the published history is not valid JSON Lines; starting a new one"
+            rm -f allure-history/history.jsonl
+          fi
       - name: Generate the Allure report
         run: npx allure generate allure-results
       - name: Assemble the site
@@ -258,6 +283,7 @@ jobs:
     needs: report
     if: ${{ !cancelled() && needs.report.result == 'success' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write

@@ -23,10 +23,8 @@ test.describe('Registration form', () => {
   } as const;
 
   // The form's own validation must stop the negative tests below. Nothing answers POST /users/register in
-  // them, so the guard refuses (and records) a submission that should never leave, and the real shop gets
-  // no account. A request would leave in the same click that renders the labels, ahead of them, so the
-  // guard has seen it by the time the labels are asserted.
-  const expectNothingSent = (blockedWrites: string[]) => expect(blockedWrites, 'invalid input is not sent').toEqual([]);
+  // them, so the guard refuses a submission that should never leave (the real shop gets no account), and
+  // `expectNoRequest` watches a short window after the labels appear to prove none was sent.
 
   test('an empty form flags every required field', { tag: ['@negative'] }, async ({ registerPage, apiMock }) => {
     await apiMock.blockUnmockedWrites();
@@ -36,7 +34,7 @@ test.describe('Registration form', () => {
     for (const [field, message] of Object.entries(required)) {
       await expect(registerPage.fields[field as keyof typeof required].error, field).toHaveText(message);
     }
-    expectNothingSent(apiMock.blockedWrites);
+    await apiMock.expectNoRequest('POST', '/users/register');
   });
 
   const invalid = [
@@ -55,7 +53,7 @@ test.describe('Registration form', () => {
       await registerPage.submit();
 
       await expect(registerPage[field].error).toHaveText(message);
-      expectNothingSent(apiMock.blockedWrites);
+      await apiMock.expectNoRequest('POST', '/users/register');
     });
   }
 
@@ -64,6 +62,7 @@ test.describe('Registration form', () => {
     await apiMock.blockUnmockedWrites();
     await registerPage.dateOfBirth.input.fill('2099-01-01');
     await registerPage.submit();
+    // The other required fields are empty, so the form stops here whether or not the date is flagged.
     await expect(registerPage.firstName.error).toBeVisible();
 
     await expect(registerPage.dateOfBirth.error, 'BUG-18: a future birth date is flagged').toBeVisible({ timeout: 5_000 });

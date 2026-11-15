@@ -15,22 +15,35 @@ test.describe('Login', () => {
   });
 
   test('a malformed email and a too-short password are rejected before sending', { tag: ['@negative'] }, async ({ loginPage, apiMock }) => {
-    // Nothing answers POST /users/login here, so the guard refuses (and records) a request that should never leave.
+    // Nothing answers POST /users/login here, so the guard refuses a request that should never leave.
     await apiMock.blockUnmockedWrites();
 
     await loginPage.login('not-an-email', 'x');
 
     await expect(loginPage.email.error).toHaveText('Email format is invalid');
     await expect(loginPage.password.error).toHaveText('Password length is invalid');
-    // A request would leave in the same click that renders the labels, ahead of them, so the guard has seen it by now.
-    expect(apiMock.blockedWrites, 'invalid input must not reach the API').toEqual([]);
+    await apiMock.expectNoRequest('POST', '/users/login');
   });
 
-  test('unknown credentials are refused', { tag: ['@negative', '@smoke'] }, async ({ loginPage, page }) => {
+  // The real refusal is a failed sign-in on the shop's own log, so it runs on the self-hosted shop only;
+  // the mocked twin below proves the same page behaviour everywhere, the live site included.
+  test('unknown credentials are refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ loginPage, page }) => {
     await loginPage.login('nobody@example.invalid', 'not-a-real-password');
 
     await expect(loginPage.error).toHaveText('Invalid email or password');
     await expect(page).toHaveURL('/auth/login');
+  });
+
+  test.describe('when the shop refuses the credentials', { tag: ['@mocked', '@negative'] }, () => {
+    // The body the real API answers with (401).
+    test.use(withMocks(mock.fail('POST', '/users/login', 401, { error: 'Unauthorized' })));
+
+    test('the shopper is told so and stays on the login page', { tag: ['@smoke'] }, async ({ loginPage, page }) => {
+      await loginPage.login('nobody@example.invalid', 'not-a-real-password');
+
+      await expect(loginPage.error).toHaveText('Invalid email or password');
+      await expect(page).toHaveURL('/auth/login');
+    });
   });
 
   test('the eye button shows and hides the password', async ({ loginPage }) => {
@@ -64,9 +77,11 @@ test.describe('Login', () => {
       mock.respond('GET', '/users/me', fakeUser),
     ));
 
-    test('the customer lands in the account area, signed in', async ({ loginPage, page }) => {
+    test('the customer lands in the account area, signed in', async ({ loginPage, apiMock, page }) => {
+      const login = apiMock.waitForRequest('POST', '/users/login');
       await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
 
+      expect((await login).postDataJSON()).toEqual({ email: fakeUser.email, password: 'Qa-lab-mocked-1!' });
       await expect(page).toHaveURL('/account');
       await expect(loginPage.shell.header.userMenu).toHaveText(`${fakeUser.first_name} ${fakeUser.last_name}`);
       await expect(loginPage.shell.header.signInLink).toHaveCount(0);
@@ -91,6 +106,23 @@ test.describe('Login', () => {
 
       expect((await verification).postDataJSON()).toEqual({ totp: '123456', access_token: 'qa-lab-pending-totp' });
       await expect(page).toHaveURL('/account');
+    });
+
+    test('a wrong TOTP code is refused and the customer stays on login', { tag: ['@negative'] }, async ({ loginPage, apiMock, page }) => {
+      // The first answer asks for a code; the second refuses it, the way the real API refuses a bad credential.
+      await apiMock.use(mock.sequence('POST', '/users/login',
+        { status: 200, json: { requires_totp: true, access_token: 'qa-lab-pending-totp' } },
+        { status: 401, json: { error: 'Unauthorized' } }));
+      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+      await expect(loginPage.totpCode).toBeVisible();
+
+      const verification = apiMock.waitForResponse('POST', '/users/login');
+      await loginPage.verifyTotp('000000');
+
+      expect((await verification).response.status()).toBe(401);
+      await expect(loginPage.error).toHaveText('Unauthorized');
+      await expect(page).toHaveURL('/auth/login');
+      await expect(loginPage.shell.header.userMenu).toHaveCount(0);
     });
 
     test('an empty TOTP code is refused', { tag: ['@negative'] }, async ({ loginPage }) => {

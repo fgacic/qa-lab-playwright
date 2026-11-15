@@ -3,6 +3,9 @@ import { expect as base, type Locator } from '@playwright/test';
 /** Collection matchers: `expect(prices).toBeSorted({ descending: true })`. */
 export const collectionExpect = base.extend({
   toBeSorted(received: Array<string | number>, { descending = false }: { descending?: boolean } = {}) {
+    // One value (or none) is trivially "sorted": a grid that has not rendered yet would pass for the wrong reason.
+    // Failing makes expect.poll wait for the content, and a test that really has one item must not claim an order.
+    if (received.length < 2) throw new Error(`toBeSorted needs at least 2 values to prove an order, got ${received.length}: ${JSON.stringify(received)}`);
     const compare = (a: string | number, b: string | number) =>
       typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), 'en', { sensitivity: 'base' });
     const firstUnsorted = received.findIndex((value, i) => i > 0 && (descending ? compare(received[i - 1], value) < 0 : compare(received[i - 1], value) > 0));

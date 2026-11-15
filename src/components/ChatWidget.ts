@@ -22,6 +22,11 @@ export class ChatWidget {
     this.productResults = this.window.getByTestId('chat-product');
   }
 
+  /** A product card the assistant listed, by the product's name. Each card shows the name and the price. */
+  productResult(name: string): Locator {
+    return this.productResults.filter({ hasText: name });
+  }
+
   /** The newest bot reply. Earlier replies stay in the transcript. */
   reply(text: string | RegExp): Locator {
     return this.window.getByText(text).last();

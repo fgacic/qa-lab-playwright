@@ -38,7 +38,9 @@ export default defineConfig({
   timeout: IS_SELF_HOSTED ? 45_000 : 90_000,
   expect: {
     timeout: 15_000,
-    toHaveScreenshot: { animations: 'disabled', caret: 'hide', scale: 'css', maxDiffPixels: 150 },
+    // threshold is the per-pixel colour tolerance (Playwright's default is 0.2); 0.1 flags a real colour change
+    // while ignoring anti-aliasing noise, and maxDiffPixels bounds how many pixels may differ at all.
+    toHaveScreenshot: { animations: 'disabled', caret: 'hide', scale: 'css', threshold: 0.1, maxDiffPixels: 150 },
   },
   // Baselines are Linux renderings from the official image only, so the path has no platform.
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
@@ -74,7 +76,7 @@ export default defineConfig({
           {
             name: 'account',
             use: { ...devices['Desktop Chrome'], storageState: CUSTOMER_STORAGE_STATE },
-            grep: /@account/,
+            grep: tagged('account'),
             grepInvert: notOnThisTarget,
             dependencies: ['account-setup'],
           },
@@ -86,7 +88,7 @@ export default defineConfig({
           {
             name: 'admin',
             use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
-            grep: /@admin/,
+            grep: tagged('admin'),
             grepInvert: notOnThisTarget,
             dependencies: ['admin-setup'],
           },
@@ -100,13 +102,19 @@ export default defineConfig({
       // The header collapses behind a toggler below 992 px; the smoke set proves the shop still works there.
       name: 'mobile',
       use: { ...devices['Pixel 7'] },
-      grep: /@smoke|@mobile/,
+      grep: tagged('smoke', 'mobile'),
       grepInvert: [ownProject, chromiumOnly, notOnThisTarget],
     },
     // Budgets are measured alone: a project of its own with a single worker. `workers: 1` limits this
     // project only, so it must also run in a pass of its own (`npm run test:perf`, its own CI job);
     // the run-guard reporter refuses a run that schedules it next to another project.
-    { name: 'perf', use: { ...devices['Desktop Chrome'] }, grep: perfOnly, grepInvert: notOnThisTarget, fullyParallel: false, workers: 1 },
+    {
+      name: 'perf',
+      // No trace and no video: recording perturbs TBT and INP, which are measured under 4x CPU throttling.
+      use: { ...devices['Desktop Chrome'], trace: 'off', video: 'off' },
+      grep: perfOnly, grepInvert: notOnThisTarget, fullyParallel: false,
+      workers: 1,
+    },
     // Screenshots: only inside the Playwright image (scripts/visual.sh), against our own Toolshop.
     ...(IN_PLAYWRIGHT_IMAGE && IS_SELF_HOSTED
       ? [{ name: 'visual', use: {
@@ -118,7 +126,7 @@ export default defineConfig({
           timezoneId: 'UTC',
           colorScheme: 'light' as const,
           reducedMotion: 'reduce' as const,
-        }, grep: /@visual/ }]
+        }, grep: tagged('visual') }]
       : []),
   ],
 });

@@ -8,9 +8,9 @@ import { ADMIN_CREDENTIALS, ADMIN_STORAGE_STATE } from '@support/env';
  */
 setup('sign in the admin and save the session', async ({ loginPage, page }) => {
   const { email, password } = ADMIN_CREDENTIALS;
-  expect(email && password, 'ADMIN_EMAIL and ADMIN_PASSWORD must be set').toBeTruthy();
+  if (!email || !password) throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be set.');
 
-  await loginPage.login(email!, password!);
+  await loginPage.login(email, password);
 
   await expect(page).toHaveURL('/admin/dashboard');
   await page.context().storageState({ path: ADMIN_STORAGE_STATE });

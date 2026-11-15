@@ -1,9 +1,8 @@
+import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
 import { PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, test } from '@fixtures';
+import { twoProductCart } from '@fixtures/pages';
 import { fakeAddress, fakeGuest } from '@support/test-data';
-
-/** What the shop tells the shopper, word for word. */
-const MESSAGES = { added: 'Product added to shopping cart.', quantityUpdated: 'Product quantity updated.' } as const;
 
 interface GuestInvoice {
   invoice_number: string;
@@ -50,18 +49,20 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     await expect(checkout.header.cartLink).toHaveCount(0);
   });
 
-  test('search, fill a cart with three products, then change a quantity and remove a line', async ({ homePage, api }) => {
-    const added: { id: string; name: string }[] = [];
-    for (const term of ['pliers', 'hammer', 'saw']) {
-      await homePage.search.searchFor(term);
-      await expect(homePage.search.caption).toHaveText(`Searched for: ${term}`);
-      const { id, name, productPage } = await homePage.openFirstInStockProduct();
+  test('search, fill a cart with three products, then change a quantity and remove a line', async ({ homePage, catalog, api }) => {
+    // Three distinct products, chosen by the catalogue and not by what a search happens to list first.
+    const first = await catalog.inStock();
+    const second = await catalog.anotherInStock();
+    const third = await api.inStockProduct([first.id, second.id]);
+    const [kept, removed, alsoKept] = [first, second, third];
+    for (const product of [kept, removed, alsoKept]) {
+      await homePage.search.searchFor(product.name);
+      await expect(homePage.search.caption).toHaveText(`Searched for: ${product.name}`);
+      const productPage = await homePage.openProduct(product.name);
       await productPage.addToCart();
       await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
-      added.push({ id, name });
       await productPage.backToShop();
     }
-    const [kept, removed, alsoKept] = added;
 
     const checkout = await homePage.openCart();
     const { table } = checkout.cart;
@@ -73,37 +74,28 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     await expect(checkout.header.cartLink).toHaveText('4');
 
     // The lines come from the catalogue's prices.
-    const [keptProduct, alsoKeptProduct] = await Promise.all([api.product(kept.id), api.product(alsoKept.id)]);
-    await expect(table.row(kept.name).linePrice).toShowAmount(keptProduct.price * 3);
-    await expect(table.row(alsoKept.name).linePrice).toShowAmount(alsoKeptProduct.price);
+    await expect(table.row(kept.name).linePrice).toShowAmount(kept.price * 3);
+    await expect(table.row(alsoKept.name).linePrice).toShowAmount(alsoKept.price);
   });
 
   test.describe('ordering what the cart shows', { tag: ['@self-hosted'] }, () => {
-    test.use({
-      cartItems: async ({ catalog }, use) =>
-        use([
-          { product: await catalog.inStock(), quantity: 3 },
-          { product: await catalog.anotherInStock(), quantity: 1 },
-        ]),
-    });
+    test.use({ cartItems: twoProductCart });
 
     test('the invoice charges the cart total and bills the address entered', async ({ checkout, cartItems, apiMock }) => {
       const { table } = checkout.cart;
-      // The total also depends on discounts (eco products), so the order must charge the cart's own
-      // figure. It is read once every line shows its catalogue price, i.e. once the cart has rendered.
-      for (const { product, quantity } of cartItems) await expect(table.row(product.name).linePrice).toShowAmount(product.price * quantity);
-      const cartTotal = Number((await table.total.innerText()).replace(/[^0-9.]/g, ''));
+      // Neither product is eco-friendly, so no discount applies and the cart total is the sum of its lines.
+      const cartTotal = cartItems.reduce((sum, { product, quantity }) => sum + product.price * quantity, 0);
+      await expect(table.total).toShowAmount(cartTotal);
 
       await checkout.cart.proceed();
       await checkout.signIn.continueAsGuest(fakeGuest());
       await checkout.billing.enterAddress(fakeAddress());
       // enterAddress returns once the lookup's answer is in the fields, so the city read is the settled one.
-      await expect(checkout.billing.city.input).not.toHaveValue('');
       const billedCity = await checkout.billing.city.input.inputValue();
       await checkout.billing.proceed();
       const [{ response, json: invoice }] = await Promise.all([
         apiMock.waitForResponse<GuestInvoice>('POST', '/invoices/guest'),
-        checkout.payment.payWith('cash-on-delivery'),
+        checkout.payment.payOnDelivery(),
       ]);
 
       expect(response.status(), JSON.stringify(invoice)).toBe(201);

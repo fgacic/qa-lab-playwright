@@ -1,6 +1,7 @@
 import { ADMIN_SECTIONS } from '@components/Header';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { paginated } from '@support/admin-payloads';
+import { alertAppears } from '@pages/admin/alerts';
+import { ORDER_STATUS, paginated } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 
 /**
@@ -12,7 +13,16 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
   test('the dashboard shows the sales chart and the orders awaiting fulfilment', async ({ adminDashboard, backOffice }) => {
     await expect(adminDashboard.salesHeading).toBeVisible();
     await expect(adminDashboard.salesChart).toBeVisible();
-    await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toContainText('AWAITING_FULFILLMENT');
+    await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toContainText(ORDER_STATUS);
+  });
+
+  // The baseline of ADM-01: a dashboard whose requests succeed announces nothing, so an alert on a failing one is news.
+  test('a healthy dashboard shows no alert', async ({ adminDashboard, backOffice }) => {
+    // Anchor on what the last answer draws (the orders table), then watch for an alert for a short window.
+    await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toBeVisible();
+    await expect(adminDashboard.salesChart).toBeVisible();
+
+    expect(await alertAppears(adminDashboard.alerts), 'no alert appears on a healthy dashboard').toBe(false);
   });
 
   test('an order on the dashboard opens for editing', async ({ adminDashboard, backOffice, page }) => {
@@ -45,13 +55,13 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
       knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.');
       await expect(adminDashboard.salesHeading).toBeVisible();
 
-      // Any alert will do: the pin does not prescribe the wording. A healthy dashboard shows none.
+      // Any alert will do: the pin does not prescribe the wording (a healthy dashboard shows none, see above).
       await expect(adminDashboard.alerts.first(), 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: 5_000 });
     });
   });
 });
 
-test.describe('Admin access control (mocked back office)', { tag: ['@mocked'] }, () => {
+test.describe('Admin access control (mocked customer session)', { tag: ['@mocked'] }, () => {
   test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, page }) => {
     await page.goto('/admin/dashboard', { waitUntil: 'domcontentloaded' });
 

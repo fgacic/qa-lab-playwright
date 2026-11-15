@@ -29,8 +29,9 @@ export class CheckoutWizard {
 
   /** The invoice number in the confirmation, once it is shown. */
   async invoiceNumber(): Promise<string> {
-    let found: string | undefined;
-    await expect.poll(async () => (found = /INV-\d+/.exec(await this.confirmation.innerText().catch(() => ''))?.[0]), { message: 'the confirmation should name an invoice number' }).toBeDefined();
-    return found!;
+    await expect(this.confirmation, 'the confirmation should name an invoice number').toBeVisible();
+    const invoice = /INV-\d+/.exec(await this.confirmation.innerText());
+    if (!invoice) throw new Error('The order confirmation does not name an invoice number');
+    return invoice[0];
   }
 }

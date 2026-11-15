@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ORDER_STATUSES } from '@pages/admin/AdminPages';
-import { contactMessage, customer, messageReply, orderPayment, paginated } from '@support/admin-payloads';
+import { ORDER_STATUS, contactMessage, customer, messageReply, orderPayment, paginated } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
@@ -36,7 +36,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   // The order's current status is not offered as an option, so every other status is set in turn.
-  for (const status of ORDER_STATUSES.filter((s) => s !== 'AWAITING_FULFILLMENT')) {
+  for (const status of ORDER_STATUSES.filter((s) => s !== ORDER_STATUS)) {
     test(`changing the status to ${status} saves it and confirms`, async ({ adminOrders, backOffice, apiMock }) => {
       const order = await adminOrders.edit(backOffice.order.invoice_number);
       await expect(order.status).toHaveValue(backOffice.order.status);
@@ -48,6 +48,21 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
       await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeVisible();
     });
   }
+
+  test.describe('when the order cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', /^\/invoices\/[^/]+$/, 500)));
+
+    test('the page does not claim the invoice is gone', async ({ adminOrders, backOffice, apiMock }) => {
+      knownBug('ADM-13', 'an order whose load fails (500) is reported as "This invoice doesn\'t exist.", the message for a missing one.');
+      const failed = apiMock.waitForResponse('GET', /^\/invoices\/[^/]+$/);
+
+      const order = await adminOrders.edit(backOffice.order.invoice_number);
+      await failed;
+
+      // A server error is not "not found": any other wording, or an alert, would do. The pin only refuses the wrong claim.
+      await expect(order.notFoundNotice, 'ADM-13: a failed order load does not say the invoice does not exist').toBeHidden({ timeout: 2_000 });
+    });
+  });
 
   test.describe('when the status update fails', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('PUT', /^\/invoices\/[^/]+\/status$/, 500)));
@@ -102,8 +117,8 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await form.chrome.save();
 
     // Postal code, State, Phone and Password are optional on this form, so they are not listed.
-    for (const message of ['First Name is required', 'Last Name is required', 'Date of birth is required', 'Street is required', 'City is required', 'Country is required', 'Email is required']) {
-      await expect(form.chrome.alert(message)).toBeVisible();
+    for (const field of ['First Name', 'Last Name', 'Date of birth', 'Street', 'City', 'Country', 'Email']) {
+      await expect(form.chrome.required(field), field).toBeVisible();
     }
   });
 
@@ -135,6 +150,43 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(adminUsers.table.row(customer.email)).toHaveCount(0);
   });
 
+  test('the password of a new user is typed into a masked field', { tag: ['@bug'] }, async ({ adminUsers }) => {
+    knownBug('ADM-17', 'the admin user form shows the password in clear text (an <input type="text">).');
+    const form = await adminUsers.add();
+    await expect(form.chrome.heading).toHaveText('Add User');
+
+    await expect(form.password, 'ADM-17: the password field is masked').toHaveAttribute('type', 'password', { timeout: 2_000 });
+  });
+
+  test.describe('when the new user is refused', { tag: ['@negative'] }, () => {
+    test.use(withMocks(mock.fail('POST', '/users/register', 422, { email: ['A customer with this email address already exists.'] })));
+
+    test('the API error is shown and nothing is reported as saved', async ({ adminUsers }) => {
+      const form = await adminUsers.add();
+
+      await form.fillIn({ firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: customer.email });
+      await form.chrome.save();
+
+      await expect(form.chrome.alert('A customer with this email address already exists.')).toBeVisible();
+      await expect(form.chrome.alert('User saved!')).toBeHidden();
+    });
+  });
+
+  test.describe('when the user cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', /^\/users\/[^/]+$/, 500)));
+
+    test('the admin is told the user could not be loaded', async ({ adminUsers, apiMock }) => {
+      knownBug('ADM-14', 'an edit form whose record fails to load (500) opens empty, with no message: saving it would write blanks.');
+      const failed = apiMock.waitForResponse('GET', /^\/users\/[^/]+$/);
+
+      const form = await adminUsers.edit(customer.email);
+      await failed;
+
+      // Any alert will do: the pin does not prescribe the wording.
+      await expect(form.chrome.alerts.first(), 'ADM-14: a failed user load tells the admin').toBeVisible({ timeout: 2_000 });
+    });
+  });
+
   test.describe('when the email is already taken', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, 422, { email: ['A customer with this email address already exists.'] })));
 
@@ -163,22 +215,26 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     await message.setStatus('IN_PROGRESS');
 
     expect((await sent).postDataJSON()).toEqual({ status: 'IN_PROGRESS' });
+    await expect(message.status).toHaveValue('IN_PROGRESS');
   });
 
   test.describe('after a reply', () => {
-    // The page asks for the message again once the reply is saved: the second answer carries it.
-    test.use(withMocks(mock.sequence('GET', /^\/messages\/[^/]+$/, { status: 200, json: contactMessage }, { status: 200, json: { ...contactMessage, replies: [messageReply('A mocked admin reply.')] } })));
+    // The page asks for the message again once the reply is saved. The second answer carries a reply
+    // worded differently from what is typed, so a reply that shows can only have come from that refetch.
+    const typed = 'A mocked admin reply.';
+    const stored = 'The reply as the API stored it.';
+    test.use(withMocks(mock.sequence('GET', /^\/messages\/[^/]+$/, { status: 200, json: contactMessage }, { status: 200, json: { ...contactMessage, replies: [messageReply(stored)] } })));
 
     test('a reply is sent, shown under the message and the box is emptied', async ({ adminMessages, apiMock }) => {
       const message = await adminMessages.details(contactMessage.name);
       await expect(message.text(contactMessage.message)).toBeVisible();
-      await expect(message.text('A mocked admin reply.')).toHaveCount(0);
+      await expect(message.text(stored)).toHaveCount(0);
       const sent = apiMock.waitForRequest('POST', `/messages/${contactMessage.id}/reply`);
 
-      await message.reply('A mocked admin reply.');
+      await message.reply(typed);
 
-      expect((await sent).postDataJSON()).toEqual({ message: 'A mocked admin reply.' });
-      await expect(message.text('A mocked admin reply.')).toBeVisible();
+      expect((await sent).postDataJSON()).toEqual({ message: typed });
+      await expect(message.text(stored)).toBeVisible();
       await expect(message.replyBox).toHaveValue('');
     });
   });
@@ -220,6 +276,6 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     await message.replyButton.click();
 
     await expect(message.feedback.filter({ hasText: /required/i }), 'ADM-06: the form says a reply is required').toBeVisible({ timeout: 2_000 });
-    expect(apiMock.requestsTo('POST', `/messages/${contactMessage.id}/reply`), 'ADM-06: no empty reply is sent').toBe(0);
+    await expect(apiMock.expectNoRequest('POST', `/messages/${contactMessage.id}/reply`), 'ADM-06: no empty reply is sent').resolves.toBeUndefined();
   });
 });

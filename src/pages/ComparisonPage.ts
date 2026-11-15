@@ -2,6 +2,9 @@ import type { Locator, Page } from '@playwright/test';
 import { step } from '@support/step';
 import { AppShell } from './AppShell';
 
+/** The sessionStorage key under which the app keeps the ids of the products picked for comparison. */
+export const COMPARE_STORAGE_KEY = 'compare_ids';
+
 export class ComparisonPage {
   readonly shell: AppShell;
   readonly title: Locator;

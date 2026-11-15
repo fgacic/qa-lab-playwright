@@ -10,7 +10,8 @@ cd "$(dirname "$0")/.."
 
 IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble"
 if [[ "$(uname -s)" == "Linux" ]]; then
-  NETWORK=(--network host); HOST="localhost"
+  # Run as the caller, so the report and any re-recorded baselines are not left owned by root.
+  NETWORK=(--network host --user "$(id -u):$(id -g)"); HOST="localhost"
 else
   # Docker Desktop: the host is reachable as host.docker.internal.
   NETWORK=(--add-host=host.docker.internal:host-gateway); HOST="host.docker.internal"
@@ -19,6 +20,6 @@ fi
 # Mounted at the same path as on the host, so its blob report merges with the other jobs'.
 docker run --rm --ipc=host "${NETWORK[@]}" \
   -v "$PWD":"$PWD" -w "$PWD" \
-  -e CI -e REPORT_ID -e PLAYWRIGHT_DOCKER=1 -e TARGET=local \
+  -e CI -e REPORT_ID -e PLAYWRIGHT_DOCKER=1 -e TARGET=local -e HOME=/tmp \
   -e BASE_URL="http://${HOST}:4200" -e API_URL="http://${HOST}:4200/api" \
   "$IMAGE" npx playwright test --project=visual --workers=2 "$@"

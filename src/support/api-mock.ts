@@ -73,7 +73,7 @@ export const mock = {
 
 /**
  * Routes requests to the Toolshop API through mocks. Unmatched requests go to the real API.
- * Mocking is per page, so it never leaks between tests.
+ * Mocking is per browser context (the test's own), so it covers every page the test opens and never leaks between tests.
  *
  * On a target that is not self-hosted the write guard is on from the start (`guardWrites`): a gap in
  * the mocks must never write to the public shop. Only the anonymous cart writes above pass.
@@ -96,7 +96,8 @@ export class ApiMock {
    */
   constructor(private readonly page: Page, private readonly latencyMs = 0, guardWrites = !IS_SELF_HOSTED) {
     this.guardWrites = guardWrites;
-    page.on('request', (request) => {
+    // On the context, like the route: a page opened with `context.newPage()` is observed and guarded too.
+    page.context().on('request', (request) => {
       if (isApiUrl(request.url())) this.sent.push({ method: request.method(), pathname: apiPath(request.url()) });
     });
   }
@@ -110,7 +111,7 @@ export class ApiMock {
   async install(): Promise<void> {
     if (this.installed) return;
     this.installed = true;
-    await this.page.route((url) => isApiUrl(url.href), (route) => this.handle(route));
+    await this.page.context().route((url) => isApiUrl(url.href), (route) => this.handle(route));
   }
 
   async use(...routes: MockRoute[]): Promise<void> {
@@ -138,11 +139,48 @@ export class ApiMock {
 
   /**
    * How many requests to an endpoint the page has sent since this mock was created, mocked or
-   * real. A snapshot: pair it with `expect.poll` to prove that something is (not) sent, e.g.
-   * `await expect.poll(() => apiMock.requestsTo('POST', '/users/register')).toBe(0)`.
+   * real. A snapshot, so it proves that something WAS sent (`expect.poll(...).toBeGreaterThan(0)`),
+   * never that something was not: use `expectNoRequest` for that.
    */
   requestsTo(method: HttpMethod, path: MockRoute['path']): number {
     return this.sent.filter((r) => r.method === method && matches(path, r.pathname)).length;
+  }
+
+  /**
+   * Proves that no request to an endpoint is sent: it fails on the first one, whether it was sent
+   * before the call or arrives within `within` ms. Call it AFTER the action that could send the request.
+   *
+   * A window is needed because an absence cannot be observed, only waited for: a one-shot count
+   * (`requestsTo(...) === 0`) passes the instant it is taken, before a handler that fires on a later
+   * tick, a debounce or a promise has sent anything. The default 750 ms covers the debounce and
+   * submit handlers in this app (the slowest is the 300 ms search debounce); pass a longer window for
+   * a slower trigger. The cost is exactly `within` on a passing test, which is why a spec should call
+   * this once, at the end of the scenario, not between steps.
+   */
+  async expectNoRequest(method: HttpMethod, path: MockRoute['path'], { within = 750 }: { within?: number } = {}): Promise<void> {
+    const label = (pathname: string) => `${method} ${pathname}`;
+    const early = this.sent.find((r) => r.method === method && matches(path, r.pathname));
+    if (early) throw new Error(`Expected no ${label(early.pathname)}, but one was already sent`);
+    const context = this.page.context();
+    let onRequest!: (request: Request) => void;
+    const arrived = new Promise<string>((resolve) => {
+      onRequest = (request) => {
+        if (request.method() === method && isApiUrl(request.url()) && matches(path, apiPath(request.url()))) resolve(apiPath(request.url()));
+      };
+      context.on('request', onRequest);
+    });
+    let stop!: () => void;
+    const quiet = new Promise<undefined>((resolve) => {
+      const timer = setTimeout(resolve, within);
+      stop = () => clearTimeout(timer);
+    });
+    try {
+      const pathname = await Promise.race([arrived, quiet]);
+      if (pathname !== undefined) throw new Error(`Expected no ${label(pathname)} within ${within} ms, but one was sent`);
+    } finally {
+      stop();
+      context.off('request', onRequest);
+    }
   }
 
   /** Waits for the next request to an endpoint, mocked or real, and returns it. */
@@ -217,5 +255,8 @@ function jsonBody(request: Request): Record<string, unknown> {
 }
 
 function matches(path: MockRoute['path'], pathname: string): boolean {
-  return typeof path === 'string' ? pathname === path : path.test(pathname);
+  if (typeof path === 'string') return pathname === path;
+  // A /g or /y regex keeps `lastIndex` between calls, so the same path would match every other time.
+  if (path.global || path.sticky) throw new Error(`Mock path ${path} must not use the /g or /y flag: it is stateful across test() calls`);
+  return path.test(pathname);
 }

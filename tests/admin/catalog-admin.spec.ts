@@ -3,19 +3,24 @@ import { brand, category, customer, paginated } from '@support/admin-payloads';
 import type { AdminListName } from '@pages/admin/admin-lists';
 import { knownBug } from '@support/known-bug';
 
+/** A record the mocked search answers with: not in the full list, so a table that shows it has really been replaced. */
+const SEARCH_HIT = 'Qa Lab Search Hit';
+const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
+
 const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
 
 test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () => {
-  test('the list shows the catalogue with stock and price', async ({ adminProducts, backOffice }) => {
+  test('the list shows each product with its stock status and price', async ({ adminProducts, backOffice }) => {
     const row = adminProducts.table.row(backOffice.product.id);
 
     await expect(row).toContainText(backOffice.product.name);
+    // The Stock column shows the product's in-stock flag ("true" / "false"), not a count.
+    await expect(row.getByRole('cell', { name: String(backOffice.product.in_stock), exact: true })).toBeVisible();
     await expect(row).toContainText(`$${backOffice.product.price.toFixed(2)}`);
   });
 
   test('searching sends the term and lists the matches', async ({ adminProducts, backOffice, apiMock }) => {
-    // The answer differs from the full list, so a table that shows it has really been replaced.
-    const match = { ...backOffice.product, id: '01QALABSEARCHHIT0000000000', name: 'Qa Lab Search Hit' };
+    const match = { ...backOffice.product, id: '01QALABSEARCHHIT0000000000', name: SEARCH_HIT };
     await apiMock.use(mock.respond('QUERY', '/products/search', paginated([match], 9)));
     const sent = apiMock.waitForRequest('QUERY', '/products/search');
 
@@ -83,8 +88,8 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
 
     await form.chrome.save();
 
-    for (const message of ['Name is required', 'Description is required', 'Price is required']) {
-      await expect(form.chrome.alert(message)).toBeVisible();
+    for (const field of ['Name', 'Description', 'Price']) {
+      await expect(form.chrome.required(field), field).toBeVisible();
     }
   });
 
@@ -97,7 +102,8 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
       await form.chrome.save();
 
       await expect(form.chrome.alert(/price/i), 'ADM-03: the form names the invalid price').toBeVisible({ timeout: 2_000 });
-      expect(apiMock.requestsTo('POST', '/products'), 'ADM-03: no request is sent with an invalid price').toBe(0);
+      // `expectNoRequest` watches a short window and rejects on the first POST; the message keeps the pin's id on that failure too.
+      await expect(apiMock.expectNoRequest('POST', '/products'), 'ADM-03: no request is sent with an invalid price').resolves.toBeUndefined();
     });
   }
 
@@ -161,6 +167,21 @@ test.describe('Admin products (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(form.specRows.filter({ hasText: 'Length' })).toHaveCount(1);
   });
 
+  test.describe('when the product cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', /^\/products\/[^/]+$/, 500)));
+
+    test('the admin is told the product could not be loaded', async ({ adminProducts, backOffice, apiMock }) => {
+      knownBug('ADM-14', 'an edit form whose record fails to load (500) opens empty, with no message: saving it would write blanks.');
+      const failed = apiMock.waitForResponse('GET', /^\/products\/[^/]+$/);
+
+      const form = await adminProducts.edit(backOffice.product.id);
+      await failed;
+
+      // Any alert will do: the pin does not prescribe the wording.
+      await expect(form.chrome.alerts.first(), 'ADM-14: a failed product load tells the admin').toBeVisible({ timeout: 2_000 });
+    });
+  });
+
   test.describe('when saving is rejected', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('POST', '/products', 422, { message: 'The given data was invalid.', errors: { name: ['The name has already been taken.'] } })));
 
@@ -182,8 +203,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   test('searching sends the term and lists the matches', async ({ adminBrands, apiMock }) => {
-    // The answer differs from the full list, so a table that shows it has really been replaced.
-    const match = { id: '01QALABBRANDHIT0000000000', name: 'Qa Lab Search Hit', slug: 'qa-lab-search-hit' };
+    const match = { id: '01QALABBRANDHIT0000000000', name: SEARCH_HIT, slug: 'qa-lab-search-hit' };
     await apiMock.use(mock.respond('QUERY', '/brands/search', [match]));
     const sent = apiMock.waitForRequest('QUERY', '/brands/search');
 
@@ -198,10 +218,10 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     const form = await adminBrands.add();
     const created = apiMock.waitForRequest('POST', '/brands');
 
-    await form.fillIn({ name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' });
+    await form.fillIn(NEW_BRAND);
     await form.chrome.save();
 
-    expect((await created).postDataJSON()).toMatchObject({ name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' });
+    expect((await created).postDataJSON()).toMatchObject(NEW_BRAND);
     await expect(form.chrome.alert('Brand saved!')).toBeVisible();
   });
 
@@ -239,6 +259,21 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(adminBrands.table.row(brand.name)).toHaveCount(0);
   });
 
+  test.describe('when the brand cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', /^\/brands\/[^/]+$/, 500)));
+
+    test('the admin is told the brand could not be loaded', async ({ adminBrands, apiMock }) => {
+      knownBug('ADM-14', 'an edit form whose record fails to load (500) opens empty, with no message: saving it would write blanks.');
+      const failed = apiMock.waitForResponse('GET', /^\/brands\/[^/]+$/);
+
+      const form = await adminBrands.edit(brand.name);
+      await failed;
+
+      // Any alert will do: the pin does not prescribe the wording.
+      await expect(form.chrome.alerts.first(), 'ADM-14: a failed brand load tells the admin').toBeVisible({ timeout: 2_000 });
+    });
+  });
+
   test.describe('when saving a brand is refused', { tag: ['@negative', '@bug'] }, () => {
     // The real API answers a taken slug with 409 and the reason keyed by field (POST /brands, probed on the self-hosted shop).
     test.use(withMocks(mock.fail('POST', '/brands', 409, { slug: ['A brand already exists with this slug.'] })));
@@ -248,7 +283,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
       const form = await adminBrands.add();
       const sent = apiMock.waitForRequest('POST', '/brands');
 
-      await form.fillIn({ name: 'Qa Lab New Brand', slug: brand.slug });
+      await form.fillIn({ name: NEW_BRAND.name, slug: brand.slug });
       await form.chrome.save();
       await sent;
 
@@ -278,8 +313,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
   });
 
   test('searching sends the term and lists the matches', async ({ adminCategories, apiMock }) => {
-    // The answer differs from the full list, so a table that shows it has really been replaced.
-    const match = { ...category, id: '01QALABCATEGORYHIT00000000', name: 'Qa Lab Search Hit', slug: 'qa-lab-search-hit' };
+    const match = { ...category, id: '01QALABCATEGORYHIT00000000', name: SEARCH_HIT, slug: 'qa-lab-search-hit' };
     await apiMock.use(mock.respond('QUERY', '/categories/search', [match]));
     const sent = apiMock.waitForRequest('QUERY', '/categories/search');
 
@@ -306,8 +340,8 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
 
     await form.chrome.save();
 
-    await expect(form.chrome.alert('Name is required')).toBeVisible();
-    await expect(form.chrome.alert('Slug is required')).toBeVisible();
+    await expect(form.chrome.required('Name')).toBeVisible();
+    await expect(form.chrome.required('Slug')).toBeVisible();
   });
 
   test('editing loads the category and saves the change', async ({ adminCategories, apiMock }) => {
@@ -319,6 +353,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
     await form.chrome.save();
 
     expect((await saved).postDataJSON()).toMatchObject({ name: category.name, slug: 'qa-lab-renamed' });
+    await expect(form.chrome.alert('Category saved!')).toBeVisible();
   });
 
   test('Delete removes the category', async ({ adminCategories, apiMock }) => {
@@ -351,7 +386,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
   });
 });
 
-/** The four lists whose Delete is one click. The row to delete is named by what the mocked list shows for it. */
+/** The four lists whose Delete is one click today (ADM-02). The row to delete is named by what the mocked list shows for it. */
 const deletable: { name: AdminListName; rowText: (product: { id: string }) => string }[] = [
   { name: 'products', rowText: (product) => product.id },
   { name: 'brands', rowText: () => brand.name },
@@ -364,16 +399,13 @@ test.describe('Admin delete (mocked back office)', { tag: ['@mocked'] }, () => {
     test.describe(name, { tag: ['@bug'] }, () => {
       test.use({ adminListName: name });
 
-      test(`Delete asks for confirmation first (${name})`, async ({ adminList, backOffice, page }) => {
+      test(`Delete asks for confirmation first (${name})`, async ({ adminList, backOffice }) => {
         knownBug('ADM-02', 'Delete (products, brands, categories, users) acts on the first click, with no confirmation.');
-        let asked = false;
-        page.on('dialog', async (dialog) => { asked = true; await dialog.dismiss(); });
 
-        // A confirm() opens during the click and the click returns once the dialog is dismissed,
-        // so `asked` is final here whether the site has the dialog or not.
-        await adminList.table.delete(rowText(backOffice.product));
+        // `delete` answers a confirm() if one opens (dismissing it here) and returns its text, or undefined when the site deleted unasked.
+        const question = await adminList.table.delete(rowText(backOffice.product), 'dismiss');
 
-        expect(asked, `ADM-02: Delete asks for confirmation before it deletes a ${name} record`).toBe(true);
+        expect(question, `ADM-02: Delete asks for confirmation before it deletes a ${name} record`).toBeDefined();
       });
     });
   }

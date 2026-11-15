@@ -1,4 +1,6 @@
 import { expect, test } from '@fixtures';
+import type { AdminBrandForm } from '@pages/admin/AdminForms';
+import type { AdminListPage } from '@pages/admin/AdminListPage';
 import { XSS_PAYLOADS } from '@fixtures/security';
 import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 
@@ -7,15 +9,36 @@ import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/
  * the user themselves. These submit attack strings, so they only ever run against the
  * self-hosted Toolshop, our own environment, never the public site (@self-hosted).
  *
- * Cleanup: the brand is deleted again, pass or fail. The API cannot delete a contact message
- * (DELETE /messages/{id} answers 405), so the two contact tests leave one uniquely named message
- * each behind: harmless on the throwaway database of the self-hosted target, which is rebuilt for
- * every CI run (the same trade-off as tests/admin-e2e).
+ * Cleanup: the brand is deleted again, pass or fail. Two kinds of record are deliberately left behind,
+ * all uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt for
+ * every CI run (the same trade-off as tests/admin-e2e):
+ * - one contact message per contact test: the API cannot delete a message (DELETE /messages/{id} answers 405);
+ * - the customer registered by the last test: it carries the payload in its name by design, and the suite has no
+ *   admin client call that deletes a user. It cannot collide with anything, its e-mail is unique per run.
  */
 const payload = XSS_PAYLOADS['img onerror'];
 const breakout = XSS_PAYLOADS['svg onload, breaking out of an attribute'];
 
 const scriptTag = XSS_PAYLOADS['script tag'];
+
+/**
+ * Removes the brand a test saved. The brand lives in the shared database, so it goes even when an assertion failed, and even when
+ * the save went out but its answer never arrived: it is looked up by name, not by a flag. A cleanup that fails after the test
+ * already failed is recorded as an annotation and never thrown, so it cannot replace the error that matters.
+ */
+async function removeBrand(adminBrands: AdminListPage<AdminBrandForm>, name: string, testPassed: boolean): Promise<void> {
+  try {
+    await adminBrands.open();
+    await expect(adminBrands.table.rows.first()).toBeVisible();
+    if ((await adminBrands.table.row(name).count()) > 0) {
+      await adminBrands.table.delete(name);
+      await expect(adminBrands.feedback.filter({ hasText: 'Brand deleted.' })).toBeVisible();
+    }
+  } catch (cleanupError) {
+    if (testPassed) throw cleanupError;
+    test.info().annotations.push({ type: 'cleanup failed', description: `brand "${name}" may be left behind: ${String(cleanupError).slice(0, 300)}` });
+  }
+}
 
 test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@admin', '@self-hosted'] }, () => {
   test.use({ adminSession: 'storage-state', xssWatch: true });
@@ -54,6 +77,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
 
   test('a brand name is listed as text', async ({ adminBrands, xss }) => {
     const name = `Qa Lab ${payload} ${Date.now().toString(36)}`;
+    let passed = false;
     try {
       const form = await adminBrands.add();
       await form.fillIn({ name, slug: `qa-lab-xss-${Date.now().toString(36)}` });
@@ -64,15 +88,9 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
       await expect(adminBrands.table.row(name)).toBeVisible();
       await xss.expectNoInjectedElements();
       await xss.expectNotExecuted();
+      passed = true;
     } finally {
-      // The brand lives in the shared database: remove it even when an assertion above failed, and
-      // even when the save went out but its answer never arrived. So look it up by name, not by a flag.
-      await adminBrands.open();
-      await expect(adminBrands.table.rows.first()).toBeVisible();
-      if ((await adminBrands.table.row(name).count()) > 0) {
-        await adminBrands.table.delete(name);
-        await expect(adminBrands.feedback.filter({ hasText: 'Brand deleted.' })).toBeVisible();
-      }
+      await removeBrand(adminBrands, name, passed);
     }
   });
 });

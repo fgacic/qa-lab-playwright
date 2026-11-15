@@ -1,6 +1,16 @@
 import type { Locator } from '@playwright/test';
 import { step } from '@support/step';
 
+/** What the shop tells the shopper about the cart, word for word. */
+export const CART_MESSAGES = {
+  added: 'Product added to shopping cart.',
+  quantityUpdated: 'Product quantity updated.',
+  lineDeleted: 'Product deleted.',
+  atMost99: 'You can order at most 99 of this product.',
+  notAnInteger: 'The quantity field must be an integer.',
+  serverError: 'Server Error',
+} as const;
+
 export class CartRow {
   readonly title: Locator;
   readonly quantity: Locator;
@@ -38,9 +48,12 @@ export class CartTable {
     return new CartRow(this.rows.filter({ has: this.root.page().getByTestId('product-title').getByText(productName, { exact: true }) }));
   }
 
-  /** Quantity is saved on Enter (or blur), which sends PUT /carts/{id}/product/quantity. */
+  /**
+   * Quantity is saved on Enter (or blur), which sends PUT /carts/{id}/product/quantity. A string
+   * is typed as it is, so a negative spec can type what a number cannot say (an empty field, "2.5").
+   */
   @step('Change the quantity of "{0}" to {1}')
-  async setQuantity(productName: string, quantity: number): Promise<void> {
+  async setQuantity(productName: string, quantity: number | string): Promise<void> {
     const input = this.row(productName).quantity;
     await input.fill(String(quantity));
     await input.press('Enter');

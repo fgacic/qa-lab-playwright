@@ -66,7 +66,10 @@ export class BillingStep {
    * Enter an address: look it up, keep what the lookup suggests, and type only what it left
    * empty. Keeping the suggestion matters: the API refuses an order whose city does not belong
    * to the country (422), so an invented city cannot be typed over a real one. A lookup that
-   * failed throws: typing the whole address by hand would hide a broken lookup. What the lookup
+   * failed throws: typing the whole address by hand would hide a broken lookup. That is a
+   * decision, not an oversight: a lookup outage is an environment failure, so it surfaces as an
+   * error naming the status (a test about a failing lookup calls `lookUp` and `completeAddress`
+   * itself), and specs that are not about the lookup mock it so an outage cannot fail them. What the lookup
    * suggested is awaited in the field (web-first) rather than read once, so the address is
    * complete, and the page done filling it, when this returns.
    */

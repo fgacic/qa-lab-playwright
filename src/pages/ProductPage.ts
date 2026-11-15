@@ -50,6 +50,11 @@ export class ProductPage {
     return this.shell.toast;
   }
 
+  /** The product's picture, found by the name the shop gives it as alt text (the related products have pictures of their own). */
+  image(productName: string): Locator {
+    return this.page.getByRole('img', { name: productName, exact: true });
+  }
+
   specification(name: string): Locator {
     return this.specifications.filter({ has: this.page.getByRole('cell', { name, exact: true }) });
   }

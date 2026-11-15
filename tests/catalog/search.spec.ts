@@ -1,18 +1,13 @@
-import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { apiPath } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
-/** The terms sent to the search API from now on, in order. */
-function recordSearchTerms(page: Page): string[] {
-  const terms: string[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'QUERY' && apiPath(request.url()) === '/products/search') terms.push(String(request.postDataJSON()?.q));
-  });
-  return terms;
-}
+/** A term no product matches. */
+const NO_MATCH = 'qa-lab-no-such-product';
+/** The search box ignores terms outside these lengths (BUG-27, BUG-35). */
+const MIN_TERM = 3;
+const MAX_TERM = 40;
 
 test.describe('Search', () => {
   test('lists exactly the products the search found', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
@@ -39,10 +34,10 @@ test.describe('Search', () => {
   });
 
   test('a term nothing matches shows the empty state', { tag: ['@negative'] }, async ({ homePage }) => {
-    await homePage.search.searchFor('qa-lab-no-such-product');
+    await homePage.search.searchFor(NO_MATCH);
 
     await expect(homePage.grid.emptyState).toBeVisible();
-    await expect(homePage.search.resultCount).toHaveText("0 products found for 'qa-lab-no-such-product'");
+    await expect(homePage.search.resultCount).toHaveText(`0 products found for '${NO_MATCH}'`);
     await expect(homePage.grid.cards).toHaveCount(0);
   });
 
@@ -76,30 +71,54 @@ test.describe('Search', () => {
     await expect(homePage.grid.names).toHaveText(exact.data.map((p) => p.name));
   });
 
-  test('submitting an empty search sends nothing', { tag: ['@negative'] }, async ({ homePage }) => {
-    const terms = recordSearchTerms(homePage.page);
-
+  test('submitting an empty search sends nothing', { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
     await homePage.search.submitButton.click();
-    // A later search that is answered proves the empty one, sent first, had its chance to go out.
-    await homePage.search.searchFor('pliers');
 
-    expect(terms).toEqual(['pliers']);
+    await apiMock.expectNoRequest('QUERY', '/products/search');
   });
 
-  test('submitting only spaces sends nothing either', { tag: ['@negative', '@bug'] }, async ({ homePage }) => {
+  test('submitting only spaces sends nothing either', { tag: ['@negative', '@bug'] }, async ({ homePage, apiMock }) => {
     knownBug('BUG-34', 'a search of only spaces is sent as it is and reported as "0 products found for \' \'", where an empty search sends nothing.');
-    const terms = recordSearchTerms(homePage.page);
-
     await homePage.search.query.fill('   ');
     await homePage.search.submitButton.click();
-    await homePage.search.searchFor('pliers');
 
-    expect(terms, 'BUG-34: a blank search is not sent, like an empty one').toEqual(['pliers']);
+    await expect(apiMock.expectNoRequest('QUERY', '/products/search'), 'BUG-34: a blank search is not sent, like an empty one').resolves.toBeUndefined();
+  });
+
+  // The search and the sort/filter menu share one grid. These two pin how they combine, as the shop
+  // does today: a sort applies to the searched list, and a new search starts over without the filters.
+  test('sorting after a search keeps the search and orders its results', async ({ homePage, apiMock }) => {
+    await homePage.search.searchFor('pliers');
+    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc');
+
+    await homePage.filters.sortBy('Price (Low - High)');
+
+    const { body, json: found } = await sorted;
+    expect(body.q, 'the sort request carries the search term').toBe('pliers');
+    expect(found.total, 'the catalogue should contain pliers').toBeGreaterThan(0);
+    expect(found.data.every((p) => /pliers/i.test(p.name))).toBe(true);
+    expect(found.data.map((p) => p.price)).toBeSorted();
+    await expect(homePage.search.caption).toHaveText('Searched for: pliers');
+    await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
+  });
+
+  test('searching after a filter shows the search results and unticks the filter', async ({ homePage, apiMock }) => {
+    await homePage.filters.filterByCategory('Hammer');
+    await expect(homePage.filters.category('Hammer')).toBeChecked();
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
+
+    await homePage.search.searchFor('saw');
+
+    const { json: found } = await results;
+    expect(found.total, 'the catalogue should contain saws').toBeGreaterThan(0);
+    await expect(homePage.search.caption).toHaveText('Searched for: saw');
+    await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
+    await expect(homePage.filters.category('Hammer'), 'a ticked filter that no longer applies is not left on screen').not.toBeChecked();
   });
 
   test('clearing the search restores the full catalogue', async ({ homePage, api }) => {
     const { per_page: pageSize } = await api.listProducts();
-    await homePage.search.searchFor('qa-lab-no-such-product');
+    await homePage.search.searchFor(NO_MATCH);
     await expect(homePage.grid.emptyState).toBeVisible();
 
     await homePage.search.reset();
@@ -110,8 +129,8 @@ test.describe('Search', () => {
   });
 
   for (const { title, term, bug } of [
-    { title: 'a long search term', term: 'qa lab search term longer than forty chars', bug: ['BUG-27', 'a search term over 40 characters is silently ignored: no request, no message.'] },
-    { title: 'a very short search term', term: 'ph', bug: ['BUG-35', 'a search term under 3 characters is silently ignored: no request, no message.'] },
+    { title: 'a long search term', term: 'x'.repeat(MAX_TERM + 1), bug: ['BUG-27', 'a search term over 40 characters is silently ignored: no request, no message.'] },
+    { title: 'a very short search term', term: 'x'.repeat(MIN_TERM - 1), bug: ['BUG-35', 'a search term under 3 characters is silently ignored: no request, no message.'] },
   ]) {
     test(`${title} is searched or explained`, { tag: ['@negative', '@bug'] }, async ({ homePage, apiMock }) => {
       const [id, summary] = bug;
@@ -122,6 +141,9 @@ test.describe('Search', () => {
       await homePage.search.submitButton.click();
 
       // Either answer is fine: the term goes to the API, or the page shows an alert saying why not.
+      // Promise.any settles on whichever happens first. The loser keeps running until its own 3 s
+      // timeout, but Promise.any has already attached to it, so its rejection is not left unhandled;
+      // only when both fail does the race reject, which `responded` reports as false.
       const responded = await Promise.any([searched, explained]).then(() => true, () => false);
       expect(responded, `${id}: the term is searched, or the shopper is told why not`).toBe(true);
     });

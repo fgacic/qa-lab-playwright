@@ -106,14 +106,23 @@ test.describe('Pagination', () => {
     await expect(homePage.pagination.item(1), 'BUG-33: the pager marks page 1 as current once the list restarts there').toHaveClass(CURRENT_PAGE, { timeout: 5_000 });
   });
 
-  test('Previous on page 1 and Next on the last page are disabled for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {
+  // Two pins, one per button, so each is verified (and will go green) on its own.
+  test('Previous is disabled on page 1 for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {
     knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
-    const { pagination } = homePage;
-    const lastPage = await pagination.pageCount();
+    await expect(homePage.pagination.item(1)).toHaveClass(CURRENT_PAGE);
 
-    await expect(pagination.previous, 'A11Y-03: Previous is disabled on page 1').toBeDisabled({ timeout: 5_000 });
-    await pagination.goTo(lastPage);
-    await expect(pagination.next, 'A11Y-03: Next is disabled on the last page').toBeDisabled({ timeout: 5_000 });
+    await expect(homePage.pagination.previous, 'A11Y-03: Previous is disabled on page 1').toBeDisabled({ timeout: 5_000 });
+  });
+
+  test('Next is disabled on the last page for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage, apiMock }) => {
+    knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
+    const lastPage = await homePage.pagination.pageCount();
+    const last = pageAnswer(apiMock, lastPage);
+    await homePage.pagination.goTo(lastPage);
+    await last;
+    await expect(homePage.pagination.item(lastPage)).toHaveClass(CURRENT_PAGE);
+
+    await expect(homePage.pagination.next, 'A11Y-03: Next is disabled on the last page').toBeDisabled({ timeout: 5_000 });
   });
 
   test.describe('when everything fits on one page', { tag: ['@mocked'] }, () => {

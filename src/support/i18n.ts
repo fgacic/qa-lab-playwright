@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Request } from '@playwright/test';
 import type { Language } from '@components/LanguageSwitcher';
 
 /**
@@ -22,22 +22,33 @@ export const describeUiText = ({ kind, text }: UiText): string => (kind === 'tex
  * descriptions, specs, prices, the country list (an ISO reference list), names of external
  * products, product images (their alt text is the product's name), the build line, and the
  * training-aid bar laid over the shop for testers. Their text and their descendants' attributes
- * are not checked. CSS, because these are containers with no
- * role to find them by.
+ * are not checked. A product card is not in the list as a whole: only its name, price and image are
+ * data, so the Compare button and the stock label on it are scanned. CSS, because these are
+ * containers with no role to find them by.
  */
 const DATA = [
   // A product's name, description, prices, and its spec table with its title.
   '[data-test="product-name"]', '[data-test="product-description"]', '[data-test="product-price"]', '[data-test="unit-price"]',
-  // A product card in a grid: its test id is `product-<ULID>`, and the shop's ULIDs all start with "0".
-  '[data-test^="product-0"]', '[data-test="product-title"]', '[data-test="product-specs"]',
+  // A cart line's product title, and the product page's spec table.
+  '[data-test="product-title"]', '[data-test="product-specs"]',
   // A card's title (a product's or a related product's name) and the <figure> around the product page's image, whose caption credits the photographer.
+  // Not the card itself: its Compare button, its CO2 scale and its "Out of stock" label are the shop's own text and are read.
   '.card-title', 'figure',
   // The filter checkboxes' labels: the names of categories and brands.
   'label:has([data-test^="category-"])', 'label:has([data-test^="brand-"])',
   // The footer's "Learn & Explore" block: names and blurbs of external training products.
   '[data-test="footer-explore"]',
-  // The box around a product image: its alt text is the product's name.
-  '.card-img-wrapper',
+  // A card's image (in the grid, among the related products, in the rentals list): its alt text and tooltip are the product's name.
+  // Not the wrapper around it, which also holds the Compare button.
+  '.card img',
+  // A rental's description, under its name.
+  '.card-text',
+  // The comparison table's data: brand, category, spec values and descriptions, the spec names that head those rows (the rows of
+  // "Price", "Brand" or "Availability" are the shop's own words and are read), and the product images in its header.
+  '[data-test="compare-brand"]', '[data-test="compare-category"]', '[data-test="compare-spec"]', '[data-test="compare-description"]',
+  'tr:has([data-test="compare-spec"]) > th', 'img.comparison-img',
+  // What the visitor typed into the search box, echoed back above the results, and the signed-in customer's name on the account menu.
+  '[data-test="search-term"]', '[data-test="nav-menu"]',
   // The country <option>s: an ISO reference list.
   '[data-test="country"]',
   // The photographer's credit in the footer, a link to an external site.
@@ -111,11 +122,43 @@ export async function visibleUiText(page: Page): Promise<UiText[]> {
 }
 
 /**
- * The UI text once it has stopped changing: two reads in a row, 250 ms apart, are the same. The
- * route's own content, the translation file and the toasts all arrive on their own schedule, so
- * a single read can be taken before they are in.
+ * The shop's own data requests of a page, counted while they are in flight: `fetch` and XHR only,
+ * so the live-activity widget's event stream, which never ends, is not one. The route's content,
+ * the translation file (`assets/i18n/<language>.json`) and every list the page loads are such
+ * requests, so "none in flight" is the page's own signal that it has what it is going to show.
+ * Start it before the navigation, or the requests the page sends first are never seen.
  */
-export async function settledUiText(page: Page): Promise<UiText[]> {
+export interface DataTraffic {
+  inFlight(): number;
+  stop(): void;
+}
+
+export function watchDataTraffic(page: Page): DataTraffic {
+  const pending = new Set<Request>();
+  const isData = (request: Request) => ['fetch', 'xhr'].includes(request.resourceType());
+  const started = (request: Request) => void (isData(request) && pending.add(request));
+  const ended = (request: Request) => void pending.delete(request);
+  page.on('request', started);
+  page.on('requestfinished', ended);
+  page.on('requestfailed', ended);
+  return {
+    inFlight: () => pending.size,
+    stop: () => {
+      page.off('request', started);
+      page.off('requestfinished', ended);
+      page.off('requestfailed', ended);
+    },
+  };
+}
+
+/**
+ * The UI text once the page has stopped loading and changing: no data request is in flight
+ * (`traffic`, from `watchDataTraffic`, when the caller watched the page from its navigation) and two
+ * reads in a row, 250 ms apart, are the same. The route's own content, the translation file and the
+ * toasts all arrive on their own schedule, so a single read can be taken before they are in; the
+ * quiet period only covers what no request announces (a render after the last answer, a fade).
+ */
+export async function settledUiText(page: Page, traffic?: DataTraffic): Promise<UiText[]> {
   let previous = '';
   let latest: UiText[] = [];
   await expect
@@ -123,7 +166,7 @@ export async function settledUiText(page: Page): Promise<UiText[]> {
       async () => {
         latest = await visibleUiText(page);
         const now = JSON.stringify(latest);
-        const settled = now === previous;
+        const settled = now === previous && (traffic?.inFlight() ?? 0) === 0;
         previous = now;
         return settled;
       },
@@ -135,17 +178,29 @@ export async function settledUiText(page: Page): Promise<UiText[]> {
 
 /**
  * Dotted translation keys that leaked into the page ("nav.home", "page.forgot-password.confirm",
- * "errors.404.title", "page.forgotPassword", "nav.Home"): a lowercase first segment, then more
- * segments of letters, digits, "_" and "-" in any case, standing alone, so an email, a URL, a
- * price, a version or a filename inside a sentence is not one. A dot followed by a space ends a
- * sentence, so it never continues a key. Domain-like, version-like and abbreviation-like matches are dropped.
+ * "errors.404.title", "page.forgotPassword", "nav.Home", "navBar.home", "NAV.HOME", "2fa.title"):
+ * segments of letters, digits, "_" and "-" in any case joined by dots, standing alone or glued to
+ * punctuation ("Error:nav.home"), so an email, a URL, a price, a version or a filename inside a
+ * sentence is not one. A key needs at least two segments with a letter in them, which is what
+ * keeps a number ("1,234.56", "2.5kg", "0800.123.456", "v5.3.1", "17.00") from being one. A dot
+ * followed by a space ends a sentence, so it never continues a key. Abbreviation-like, domain-like
+ * and file-like matches are dropped (NOT_KEYS).
  */
-const KEY = /(?<![\p{L}\p{N}@/.:_-])\p{Ll}[\p{Ll}\p{N}_-]*(?:\.[\p{L}\p{N}][\p{L}\p{N}_-]*)+(?![\p{L}\p{N}@/_-]|\.[\p{L}\p{N}])/gu;
-// Abbreviations are letters in twos: e.g, i.e, d.h (German), π.χ (Greek "e.g."). A version is "v5.3.1".
-const NOT_KEYS = /^\p{L}{1,2}(?:\.\p{L}{1,2})+$|^v\d+(?:\.\d+)+$|\.(?:com|dev|io|org|net|txt|png|jpg|pdf)$/iu;
+const SEGMENT = String.raw`[\p{L}\p{N}][\p{L}\p{N}_-]*`;
+const KEY = new RegExp(String.raw`(?<![\p{L}\p{N}@/._-])${SEGMENT}(?:\.${SEGMENT})+(?![\p{L}\p{N}@/_-]|\.[\p{L}\p{N}])`, 'gu');
+const hasLetter = (segment: string) => /\p{L}/u.test(segment);
+
+/** Domains the shop's own text names: its demo shop, its maker, the reserved example domains and the training links. */
+const SHOWN_DOMAINS = ['practicesoftwaretesting.com', 'testsmith.io', 'example.com', 'example.org', 'github.com', 'unsplash.com'];
+// Abbreviations are letters in twos: e.g, i.e, d.h (German), π.χ (Greek "e.g."). Anything else dotted that
+// is no key is a hostname of SHOWN_DOMAINS (itself or a subdomain) or a file name with one of the extensions the contact form accepts or the shop serves.
+const NOT_KEYS = new RegExp(
+  String.raw`^\p{L}{1,2}(?:\.\p{L}{1,2})+$|^(?:[\p{L}\p{N}-]+\.)*(?:${SHOWN_DOMAINS.map((d) => d.replace(/\./g, String.raw`\.`)).join('|')})$|^[\p{L}\p{N}_-]+\.(?:txt|png|jpg|pdf)$`,
+  'iu',
+);
 
 export function untranslatedKeys(texts: string[]): string[] {
-  return texts.flatMap((t) => t.match(KEY) ?? []).filter((k) => !NOT_KEYS.test(k));
+  return texts.flatMap((t) => t.match(KEY) ?? []).filter((k) => k.split('.').filter(hasLetter).length >= 2 && !NOT_KEYS.test(k));
 }
 
 /** Makes the SPA start in a language, as a returning visitor who chose it would. */
@@ -153,16 +208,35 @@ export async function startInLanguage(page: Page, language: Language): Promise<v
   await page.addInitScript((lang) => localStorage.setItem('language', lang), language);
 }
 
+/** A word a translation shares with English, and the kinds of UI text it is allowed as: "Total" as a label is shared, "Total" as a button's `aria-label` is not looked at here. */
+export interface SharedWord {
+  text: string;
+  kinds: UiTextKind[];
+}
+
 /**
  * Words a translation legitimately shares with English: "Contact" in French and Dutch,
- * "Home" and "Item" in Dutch, "Total" in Spanish and French, "Message" in French, the loanword "Webmaster", "Name" in German.
+ * "Home" and "Item" in Dutch, "Total" in Spanish and French, "Message(s)" and "Description" in French, the loanword "Webmaster", "Name" in German.
+ * Per language and per kind: a word shared as visible text says nothing about the same word
+ * left in a tooltip or an aria-label, which a visitor who changed language also expects translated.
  */
-export const SAME_AS_ENGLISH: Partial<Record<Language, string[]>> = {
-  de: ['Webmaster', 'Name (A - Z)', 'Name (Z - A)'],
-  es: ['Webmaster', 'Total'],
-  fr: ['Contact', 'Message *', 'Webmaster', 'Total'],
-  nl: ['Home', 'Contact', 'Webmaster', 'Item'],
+export const SAME_AS_ENGLISH: Partial<Record<Language, SharedWord[]>> = {
+  de: [{ text: 'Webmaster', kinds: ['text', 'option'] }, { text: 'Name (A - Z)', kinds: ['option'] }, { text: 'Name (Z - A)', kinds: ['option'] }],
+  es: [{ text: 'Webmaster', kinds: ['text', 'option'] }, { text: 'Total', kinds: ['text'] }],
+  fr: [
+    { text: 'Contact', kinds: ['text'] },
+    { text: 'Message *', kinds: ['text'] },
+    { text: 'Messages', kinds: ['text'] },
+    { text: 'Description', kinds: ['text'] },
+    { text: 'Webmaster', kinds: ['text', 'option'] },
+    { text: 'Total', kinds: ['text'] },
+  ],
+  nl: [{ text: 'Home', kinds: ['text'] }, { text: 'Contact', kinds: ['text'] }, { text: 'Webmaster', kinds: ['text', 'option'] }, { text: 'Item', kinds: ['text'] }],
 };
+
+/** Whether `language` legitimately shows this text as it is in English. */
+export const isSharedWithEnglish = (language: Language, { kind, text }: UiText): boolean =>
+  !!SAME_AS_ENGLISH[language]?.some((word) => word.text === text && word.kinds.includes(kind));
 
 /**
  * Tokens that are not words of any language: the accepted file extension on the contact form,
@@ -170,3 +244,6 @@ export const SAME_AS_ENGLISH: Partial<Record<Language, string[]>> = {
  * hint must not be localised).
  */
 export const SAME_IN_EVERY_LANGUAGE = ['txt', 'YYYY-MM-DD', 'CVV'];
+
+/** An invoice number the order confirmation names: an identifier the shop issues, not a word. */
+export const REFERENCE_NUMBER = /^INV-\d+$/;

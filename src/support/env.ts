@@ -1,3 +1,5 @@
+import seeded from './seeded-accounts.json';
+
 /**
  * Where the suite runs. Two targets:
  * - `local` (the default, and what CI gates on): the self-hosted Toolshop from docker-compose.yml,
@@ -39,9 +41,8 @@ export const IS_SELF_HOSTED = TARGET === 'local' && isLocalHost(BASE_URL) && isL
  * Accounts the self-hosted shop is seeded with (database/seeders/UserSeeder.php at the commit in .env.toolshop).
  * Test values of our own environment, never used against the live site.
  */
-const SEEDED = {
-  admin: { email: 'admin@practicesoftwaretesting.com', password: 'welcome01' },
-};
+// In a JSON file so scripts/wait-for-toolshop.mjs reads the very same values.
+const SEEDED = seeded;
 
 /** Real-account specs: always on the self-hosted target, opt-in (RUN_ACCOUNT_TESTS=1) on live. */
 export const RUN_ACCOUNT_TESTS = IS_SELF_HOSTED || process.env.RUN_ACCOUNT_TESTS === '1';
@@ -67,5 +68,5 @@ export const ADMIN_CREDENTIALS = {
 export function apiPath(url: string): string {
   const prefix = new URL(API_URL).pathname.replace(/\/$/, '');
   const { pathname } = new URL(url);
-  return prefix && pathname.startsWith(prefix) ? pathname.slice(prefix.length) || '/' : pathname;
+  return prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`)) ? pathname.slice(prefix.length) || '/' : pathname;
 }

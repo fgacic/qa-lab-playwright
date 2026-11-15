@@ -1,5 +1,6 @@
 import { expect, test } from '@fixtures';
 import { ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
+import { escapeRegExp } from '@support/regexp';
 
 /**
  * Reflected input: what a visitor types is shown back without being stored anywhere, so these
@@ -13,6 +14,8 @@ test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => 
       await homePage.search.searchFor(payload);
 
       await expect(homePage.search.caption).toHaveText(`Searched for: ${payload}`);
+      // The count line echoes the term too, in a second place a sink could be.
+      await expect(homePage.search.resultCount).toHaveText(new RegExp(`^\\s*\\d+ products? found for '${escapeRegExp(payload)}'\\s*$`));
       await xss.expectNoInjectedElements();
       await xss.expectNotExecuted();
     });
@@ -36,8 +39,6 @@ test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => 
 test.describe('Injection, reflected through the route (read-only)', { tag: ['@security'] }, () => {
   test.use({ xssWatch: true });
 
-  const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
   for (const [name, payload] of Object.entries(ROUTE_XSS_PAYLOADS)) {
     test(`a category named ${name} is shown as text, not run`, async ({ categoryPage, xss }) => {
       await categoryPage.open(encodeURIComponent(payload));
@@ -50,8 +51,13 @@ test.describe('Injection, reflected through the route (read-only)', { tag: ['@se
 
     // The product page asks for the id and, finding nothing, shows no part of it: nothing to read back, but still to survive.
     test(`a product id of ${name} is not run`, async ({ productPage, xss }) => {
-      await productPage.open(encodeURIComponent(payload));
+      const slug = encodeURIComponent(payload);
+      await productPage.open(slug);
 
+      // Anchored on the page having rendered (its address is kept, and the related-products block, which needs no product, is drawn),
+      // so "no text" below is read off a finished page and not a blank one.
+      await expect(productPage.page).toHaveURL(new RegExp(`/product/${escapeRegExp(slug)}$`));
+      await expect(productPage.relatedHeading).toBeVisible();
       await expect(productPage.page.getByText(payload)).toHaveCount(0);
       await xss.expectNoInjectedElements();
       await xss.expectNotExecuted();
