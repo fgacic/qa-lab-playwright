@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { expect, mock, test, withMocks } from '@fixtures';
-import type { A11yScan } from '../../fixtures/a11y';
+import type { A11yScan } from '@fixtures/a11y';
+import { customer } from '@support/admin-payloads';
 import { KNOWN_VIOLATIONS } from '@support/a11y-baseline';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
@@ -16,22 +17,30 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
 async function expectNoNewViolations(scan: A11yScan, page: string): Promise<void> {
   // A11Y_RECORD=<file> appends every finding as JSON lines: how the baseline is (re)built.
   if (process.env.A11Y_RECORD) {
+    // A recording is a deliberate local act: on CI it would turn every violation into "known".
+    if (process.env.CI) throw new Error('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
     for (const finding of scan.findings) fs.appendFileSync(process.env.A11Y_RECORD, JSON.stringify({ page, ...finding }) + '\n');
     return;
   }
-  const known = (f: { rule: string; target: string }) => KNOWN_VIOLATIONS.some((k) => k.rule === f.rule && k.target === f.target);
-  const unexpected = scan.findings.filter((f) => !known(f)).map((f) => `${f.rule} (${f.impact}) on ${f.target}`);
-  expect(unexpected, `new accessibility violations on ${page}`).toEqual([]);
+  // A known violation is known on the pages it was recorded on, and for as many elements as it was recorded with.
+  const problems = scan.findings.flatMap((f) => {
+    const known = KNOWN_VIOLATIONS.find((k) => k.rule === f.rule && k.target === f.target && k.pages.includes(page));
+    if (!known) return [`${f.rule} (${f.impact}) on ${f.target}`];
+    return f.nodes > known.nodes ? [`${known.id} spreads: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}`] : [];
+  });
+  // Soft, so a test that scans several states reports every state's violations, not just the first.
+  expect.soft(problems, `new accessibility violations on ${page}`).toEqual([]);
 }
 
 test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('home', async ({ homePage, a11y }) => {
     await expect(homePage.grid.cards.first()).toBeVisible();
+    await expect(homePage.filters.categories).toBeVisible();
     await expectNoNewViolations(await a11y.scan('home'), 'home');
   });
 
-  test('search results', async ({ homePage, a11y }) => {
-    await homePage.search.searchFor('pliers');
+  test('search results', async ({ homePage, product, a11y }) => {
+    await homePage.search.searchFor(product.name);
     await expect(homePage.grid.cards.first()).toBeVisible();
     await expectNoNewViolations(await a11y.scan('search-results'), 'search results');
   });
@@ -56,8 +65,8 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     });
   });
 
-  test('category page', async ({ categoryPage, a11y }) => {
-    await categoryPage.open('hand-tools');
+  test('category page', async ({ categoryPage, product, a11y }) => {
+    await categoryPage.open(product.category.slug);
     await expect(categoryPage.grid.cards.first()).toBeVisible();
     await expectNoNewViolations(await a11y.scan('category'), 'category');
   });
@@ -221,7 +230,7 @@ test.describe('Accessibility scan: back office (mocked admin)', { tag: ['@a11y',
     await expect(adminUsers.table.rows.first()).toBeVisible();
     await expectNoNewViolations(await a11y.scan('admin-users'), 'admin users');
 
-    const form = await adminUsers.edit('testy.mctestface@example.com');
+    const form = await adminUsers.edit(customer.email);
     await expect(form.email).not.toBeEmpty();
     await expectNoNewViolations(await a11y.scan('admin-user-form'), 'admin user form');
   });
@@ -230,7 +239,7 @@ test.describe('Accessibility scan: back office (mocked admin)', { tag: ['@a11y',
     await expect(adminMessages.table.rows.first()).toBeVisible();
     await expectNoNewViolations(await a11y.scan('admin-messages'), 'admin messages');
 
-    const message = await adminMessages.details('Testy McTestface');
+    const message = await adminMessages.details(`${customer.first_name} ${customer.last_name}`);
     await expect(message.replyBox).toBeVisible();
     await expectNoNewViolations(await a11y.scan('admin-message'), 'admin message');
   });

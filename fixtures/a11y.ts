@@ -21,7 +21,8 @@ export const EXCLUDED = [
  * One violation on one kind of element, the unit the known-violation baseline is kept in.
  * `target` is axe's CSS path with `:nth-child()` indices removed, so the same defect on repeated
  * elements (cards, filter groups) counts once, and the shared demo data adding a category
- * cannot turn a known violation into a "new" one.
+ * cannot turn a known violation into a "new" one. `nodes` is how many elements the finding
+ * stands for, so a defect that spreads to more elements of the same kind is still seen.
  */
 export interface Finding {
   rule: string;
@@ -29,6 +30,15 @@ export interface Finding {
   target: string;
   wcag: string[];
   help: string;
+  nodes: number;
+}
+
+/** axe's tags name a success criterion without dots: wcag143 is 1.4.3, wcag1410 is 1.4.10, wcag2411 is 2.4.11. */
+export function wcagCriteria(tags: string[]): string[] {
+  return tags.flatMap((tag) => {
+    const [, principle, guideline, criterion] = /^wcag(\d)(\d)(\d+)$/.exec(tag) ?? [];
+    return criterion ? [`${principle}.${guideline}.${criterion}`] : [];
+  });
 }
 
 export interface A11yScan {
@@ -55,18 +65,16 @@ export const test = base.extend<A11yFixtures>({
         if (within) builder = builder.include(within);
         const results = await builder.analyze();
         await testInfo.attach(`axe-${name}.json`, { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
-        const seen = new Set<string>();
-        const findings = results.violations.flatMap((v) =>
-          v.nodes
-            .map((n) => ({
-              rule: v.id,
-              impact: v.impact ?? 'unknown',
-              target: n.target.join(' ').replace(/:nth-child\(\d+\)/g, ''),
-              wcag: v.tags.filter((t) => /^wcag\d{3,}$/.test(t)).map((t) => t.slice(4).split('').join('.')),
-              help: v.help,
-            }))
-            .filter((f) => !seen.has(f.rule + f.target) && seen.add(f.rule + f.target)),
-        );
+        const byTarget = new Map<string, Finding>();
+        for (const v of results.violations) {
+          for (const n of v.nodes) {
+            const target = n.target.join(' ').replace(/:nth-child\(\d+\)/g, '');
+            const found = byTarget.get(v.id + target);
+            if (found) found.nodes++;
+            else byTarget.set(v.id + target, { rule: v.id, impact: v.impact ?? 'unknown', target, wcag: wcagCriteria(v.tags), help: v.help, nodes: 1 });
+          }
+        }
+        const findings = [...byTarget.values()];
         return { results, violations: results.violations, findings };
       },
     });
