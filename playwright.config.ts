@@ -34,7 +34,7 @@ export default defineConfig({
   timeout: 90_000,
   expect: {
     timeout: 15_000,
-    toHaveScreenshot: { animations: 'disabled', caret: 'hide', scale: 'css', maxDiffPixelRatio: 0.002 },
+    toHaveScreenshot: { animations: 'disabled', caret: 'hide', scale: 'css', maxDiffPixels: 150 },
   },
   // Baselines are Linux renderings from the official image only, so the path has no platform.
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
@@ -98,7 +98,16 @@ export default defineConfig({
     { name: 'perf', use: { ...devices['Desktop Chrome'] }, grep: perfOnly, grepInvert: notOnThisTarget, fullyParallel: false, workers: 1 },
     // Screenshots: only inside the Playwright image (scripts/visual.sh), against our own Toolshop.
     ...(IN_PLAYWRIGHT_IMAGE && IS_SELF_HOSTED
-      ? [{ name: 'visual', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 }, grep: /@visual/ }]
+      ? [{ name: 'visual', use: {
+          ...devices['Desktop Chrome'],
+          viewport: { width: 1280, height: 800 },
+          deviceScaleFactor: 1,
+          // Pinned so a baseline never depends on the machine's locale, clock zone or motion settings.
+          locale: 'en-US',
+          timezoneId: 'UTC',
+          colorScheme: 'light' as const,
+          reducedMotion: 'reduce' as const,
+        }, grep: /@visual/ }]
       : []),
   ],
 });

@@ -8,8 +8,10 @@ import { fakeGuest } from '@support/test-data';
  * Animations are off; anything that can change between runs is masked.
  */
 test.describe('Visual regression', { tag: ['@visual'] }, () => {
-  test('home page', async ({ homePage, page }) => {
-    await expect(homePage.grid.cards).toHaveCount(9);
+  test('home page', async ({ homePage, api, page }) => {
+    // A full first page: as many cards as the API serves for it, so the shot is not taken mid-render.
+    const firstPage = await api.listProducts();
+    await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
     await expect(page).toHaveScreenshot('home.png', { fullPage: true, mask: [page.getByRole('slider')] });
   });
 
@@ -86,7 +88,8 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     test('admin product form', async ({ adminProducts, backOffice, page }) => {
       const form = await adminProducts.edit(backOffice.product.id);
       await expect(form.name).toHaveValue(backOffice.product.name);
-      await expect(page).toHaveScreenshot('admin-product-form.png', { fullPage: true });
+      // The form shows the product's id, which the self-hosted shop makes anew on every reseed.
+      await expect(page).toHaveScreenshot('admin-product-form.png', { fullPage: true, mask: [form.chrome.id] });
     });
   });
 });
