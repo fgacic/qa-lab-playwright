@@ -19,12 +19,16 @@ import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
 import { postcodeLookupMock } from '@fixtures/pages';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { brand, customer } from '@support/admin-payloads';
+import { holdTimer } from '@support/clock';
 import { diffFindings, KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
 import { IS_SELF_HOSTED } from '@support/env';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { horizontalOverflow } from '@support/page-metrics';
 import { acceptedGuestInvoice, fakeUser } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
+
+/** How long the shop's alerts stay before they fade (its own 3 s timer): what `holdTimer` keeps from firing during a scan. */
+const ALERT_FADE_MS = 3_000;
 
 /**
  * Fails the test on what a scan found that the baseline does not know, and on a known violation that changed
@@ -71,7 +75,9 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   });
 
   test('every excluded training aid that a control opens is still drawn by it', async ({ homePage }) => {
+    // Each aid is opened on a fresh page: the panel one control opens could cover the next control.
     for (const { selector, reason, shownBy } of EXCLUDED.flatMap((excluded) => (excluded.shownBy ? [{ ...excluded, shownBy: excluded.shownBy }] : []))) {
+      await homePage.page.reload();
       await homePage.page.locator(shownBy).click();
       await expect(homePage.page.locator(selector).first(), `${selector} (${reason}) is drawn once ${shownBy} is clicked`).toBeAttached();
     }
@@ -182,12 +188,8 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     test.use(withMocks(mock.respond('POST', '/users/forgot-password', { success: true })));
 
     test('no new violations on the forgot-password confirmation', async ({ page, forgotPasswordPage, a11y }) => {
-      // The alert fades out after three seconds, which a slow scan can outlast, and a frozen clock would stall axe's own timers: so the
-      // page's timers of two seconds or more never fire (the alert's among them) and every shorter one runs as usual.
-      await page.addInitScript(() => {
-        const setTimeoutNow = window.setTimeout.bind(window);
-        window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => (timeout !== undefined && timeout >= 2_000 ? 0 : setTimeoutNow(handler, timeout, ...args))) as typeof window.setTimeout;
-      });
+      // The alert fades out after three seconds, which a slow scan can outlast: that one timer never fires (a paused clock would stall axe's own).
+      await holdTimer(page, ALERT_FADE_MS);
       await forgotPasswordPage.open();
       await forgotPasswordPage.requestReset(fakeUser.email);
       await expectNoNewViolations(await a11y.scan('forgot password sent', { ready: [forgotPasswordPage.alert] }), 'forgot password sent');

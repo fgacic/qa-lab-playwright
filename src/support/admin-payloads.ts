@@ -71,6 +71,12 @@ export const spec = { id: '01QALABSPEC00000000000000', product_id: product.id, s
 /** A price as the back office draws it: dollars, two decimals. */
 export const dollars = (amount: number): string => `$${amount.toFixed(2)}`;
 
+/** What an order's total field shows: the amount in dollars, a space after the sign ("$ 19.98"). */
+export const orderTotalField = (amount: number): string => dollars(amount).replace('$', '$ ');
+
+/** The statuses a refused save (a conflict, a server failure) is mocked with: each must be shown, and neither may read as saved. */
+export const REFUSED_STATUSES = [409, 500] as const;
+
 /** A record the mocked search answers with: not in the full list, so a table that shows it has really been replaced. */
 export const SEARCH_HIT = 'Qa Lab Search Hit';
 

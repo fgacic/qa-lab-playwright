@@ -11,12 +11,15 @@ import { httpsUrl } from '@support/urls';
 const PAYMENT_ENDPOINT = httpsUrl('payments.example.com', '/check');
 
 test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => {
-  test('statistics show the four reports', async ({ adminStatistics }) => {
+  test('statistics show the four reports, each row with its figure', async ({ adminStatistics }) => {
     await expect(adminStatistics.heading).toBeVisible();
-    await expect(adminStatistics.report('Top 10 Best Selling Categories')).toContainText(reports.bestSellingCategories[0].category_name);
-    await expect(adminStatistics.report('Top 10 Most Purchased Products')).toContainText(reports.purchasedProducts[0].name);
-    await expect(adminStatistics.report('Customers By Country')).toContainText(reports.customersByCountry[0].country);
-    await expect(adminStatistics.report('Total Sales Per Country')).toContainText(`$${reports.salesPerCountry[0].total_sales}`);
+    // The whole row of each report, figure included: a swapped, dropped or reformatted column fails. Money is written with a
+    // dollar sign and no decimals (the API sends the amount as a string, "1234"); counts are plain numbers.
+    const { bestSellingCategories, purchasedProducts, customersByCountry, salesPerCountry } = reports;
+    await expect(adminStatistics.cells('Top 10 Best Selling Categories')).toHaveText([bestSellingCategories[0].category_name, `$${bestSellingCategories[0].total_earned}`]);
+    await expect(adminStatistics.cells('Top 10 Most Purchased Products')).toHaveText([purchasedProducts[0].name, String(purchasedProducts[0].count)]);
+    await expect(adminStatistics.cells('Customers By Country')).toHaveText([customersByCountry[0].country, String(customersByCountry[0].amount)]);
+    await expect(adminStatistics.cells('Total Sales Per Country')).toHaveText([salesPerCountry[0].billing_country, `$${salesPerCountry[0].total_sales}`]);
   });
 
   test.describe('with no sales yet', () => {
@@ -132,7 +135,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect.poll(() => storedToken(adminSettings.page)).not.toBeNull();
   });
 
-  test('switching the CO₂ features off hides the CO₂ sorting in the shop', async ({ adminSettings, shop, apiMock }) => {
+  test('settings reach the shop: switching the CO₂ features off hides the CO₂ sorting in the shop', async ({ adminSettings, shop, apiMock }) => {
     // The shop's home asks for its products, filters and spec names: all answered here, so nothing depends on the real catalogue.
     await apiMock.use(
       mock.respond('QUERY', '/products', paginated([product], 9)),
@@ -154,7 +157,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(sort.getByRole('option', { name: /CO₂/ })).toHaveCount(0);
   });
 
-  test('switching the eco-friendly badge off removes it from an eco product in the shop', async ({ adminSettings, apiMock }) => {
+  test('settings reach the shop: switching the eco-friendly badge off removes it from an eco product in the shop', async ({ adminSettings, apiMock }) => {
     const eco = { ...product, is_eco_friendly: true };
     await apiMock.use(mock.respond('GET', /^\/products\/[^/]+$/, eco), mock.respond('GET', /^\/products\/[^/]+\/related$/, []));
     const shopProduct = new ProductPage(adminSettings.page);

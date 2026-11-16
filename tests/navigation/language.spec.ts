@@ -1,6 +1,7 @@
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
 import type { NavKey } from '@components/Header';
 import { expect, test } from '@fixtures';
+import { BASE_URL } from '@support/env';
 
 /**
  * What the header says in each language (as shipped on the site, typos included). Dutch "Home" and
@@ -63,4 +64,33 @@ test.describe('Language switcher', () => {
     await expect(header.navItem('home')).toHaveText('Start');
     await expect(page.getByRole('heading', { name: 'Kontakt', exact: true })).toBeVisible();
   });
+
+  // What a visitor's browser may hold under "language": a value the shop does not offer (a language it dropped, another case, an
+  // empty string, JSON from another app). The shop must open in English, its default, not in a half-translated page.
+  const storedLanguage = (value: string) => ({ storageState: { cookies: [], origins: [{ origin: new URL(BASE_URL).origin, localStorage: [{ name: 'language', value }] }] } });
+  // The control: the same seeding with a language the shop offers is used, so the English below is a fallback and not the seeding being ignored.
+  test.describe('with a supported language stored as the language', () => {
+    test.use(storedLanguage('fr'));
+
+    test('the shop opens in that language', async ({ homePage, page }) => {
+      await expect(homePage.header.language.button).toHaveText('FR');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+      await expect(homePage.header.navItem('home')).toHaveText(NAV_LABELS.fr.home);
+    });
+  });
+
+  const unsupported: [string, string][] = [['a language the shop does not offer', 'xx'], ['an upper-case code', 'DE'], ['an empty value', ''], ['JSON', '{"language":"de"}']];
+  for (const [what, stored] of unsupported) {
+    test.describe(`with ${what} stored as the language`, () => {
+      test.use(storedLanguage(stored));
+
+      test('the shop opens in English', async ({ homePage, page }) => {
+        await expect(homePage.header.language.button).toHaveText('EN');
+        await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+        for (const key of LABELLED_KEYS) {
+          await expect(homePage.header.navItem(key)).toHaveText(NAV_LABELS.en[key]);
+        }
+      });
+    });
+  }
 });

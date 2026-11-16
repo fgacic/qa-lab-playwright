@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test';
 import { describeError, isApiResourceFailure, PINNED_DEFECT_LOGS, SUITE_WIDE_ALLOWANCES, unexpectedErrors } from '@support/console-guard';
 import { API_URL } from '@support/env';
 import { httpUrl } from '@support/urls';
+import { LOGGED_FAILED_REQUEST } from '@pages/admin/alerts';
 
 test.describe('the console guard', { tag: ['@framework'] }, () => {
   const logged = (text: string, url?: string) => ({ kind: 'console' as const, text, url });
@@ -122,6 +123,26 @@ test.describe('the console guard', { tag: ['@framework'] }, () => {
     };
     expect(PINNED_DEFECT_LOGS.map(({ id }) => id).sort()).toEqual(Object.keys(lines).sort());
     for (const { id, pattern } of PINNED_DEFECT_LOGS) for (const line of lines[id]) expect(pattern.test(line), `${id} should match "${line}"`).toBe(true);
+  });
+
+  test('the line the SPA logs for a failed request is allowed in both its shapes, and only in a test in which a request failed', () => {
+    const allowance = [{ pattern: LOGGED_FAILED_REQUEST, reason: 'a mocked failure', requiresFailure: true }];
+    const chromium = logged('ERROR Error: Server Error');
+    const firefox = { ...logged('ERROR Error'), args: '"ERROR" Error: Server Error' };
+    const firefoxObject = { ...logged('ERROR JSHandle@object'), args: `"ERROR" {"status":500,"url":"${API('/brands/1')}","name":"HttpErrorResponse"}` };
+    const firefoxBody = { ...logged('ERROR JSHandle@object'), args: '"ERROR" {"message":"Server Error"}' };
+    const service = { ...logged('BrandService Error: JSHandle@object'), args: '"BrandService Error:" {"status":500}' };
+    const unrelated = { ...logged('ERROR Error'), args: '"ERROR" TypeError: x is undefined' };
+    const mockedFailure = [{ pathname: '/brands/1', outcome: 500 as const }];
+    const refused = [answer('GET', '/brands/1', 500)];
+    for (const [shape, error] of Object.entries({ chromium, firefox, firefoxObject, firefoxBody, service })) {
+      expect(unexpectedErrors([error], allowance, mockedFailure), `${shape}: a mock answered with a failure`).toEqual([]);
+      expect(unexpectedErrors([error], allowance, [], refused), `${shape}: the shop answered with a failure`).toEqual([]);
+      expect(unexpectedErrors([error], allowance, [{ pathname: '/brands/1', outcome: 'aborted' }]), `${shape}: a mock aborted the request`).toEqual([]);
+      expect(unexpectedErrors([error], allowance), `${shape}: no request failed`).toEqual([error]);
+      expect(unexpectedErrors([error], allowance, [{ pathname: '/brands/1', outcome: 200 }], [answer('GET', '/brands/1', 200)]), `${shape}: every answer was a success`).toEqual([error]);
+    }
+    expect(unexpectedErrors([unrelated], allowance, mockedFailure, refused), 'another error is not this line, failure or not').toEqual([unrelated]);
   });
 
   test('an error is described on one line, with its URL', () => {

@@ -16,6 +16,8 @@ export class ContactPage {
   readonly shell: AppShell;
   readonly form: Locator;
   readonly heading: Locator;
+  /** What a signed-in customer is told in place of the name and email fields: "Hello <name>, please fill out this form ...". */
+  readonly greeting: Locator;
   readonly firstName: FormField;
   readonly lastName: FormField;
   readonly email: FormField;
@@ -31,6 +33,7 @@ export class ContactPage {
     const form = page.locator('form');
     this.form = form;
     this.heading = page.getByRole('heading', { name: 'Contact', exact: true });
+    this.greeting = form.getByText('please fill out this form to submit your message');
     this.firstName = new FormField(form, 'First name', 'first-name-error');
     this.lastName = new FormField(form, 'Last name', 'last-name-error');
     this.email = new FormField(form, 'Email address', 'email-error');
@@ -67,6 +70,14 @@ export class ContactPage {
     await this.submit();
   }
 
+  /** A signed-in customer's message: the form already knows who is writing, so it asks for the subject and the message only. */
+  @step('Send a "{0}" message as the signed-in customer')
+  async sendAsCustomer(subject: ContactSubject, message: string): Promise<void> {
+    await this.subject.input.selectOption({ label: subject });
+    await this.message.input.fill(message);
+    await this.submit();
+  }
+
   /** The same message, submitted from the keyboard: Enter in the email field (Enter in the message box would only add a line). */
   @step('Send a "{0.subject}" message with the Enter key')
   async sendWithEnter(contact: ContactMessage): Promise<void> {
@@ -74,7 +85,7 @@ export class ContactPage {
     await this.email.input.press('Enter');
   }
 
-  /** Both clicks of a double-click on Send, as an impatient visitor gives them: the second lands while the first request is still open. */
+  /** Both clicks of a double-click on Send, as an impatient visitor gives them. Only delivers the two clicks: the caller holds the answer (`holdAnswers`), so the second lands while the first request is still open. */
   @step('Double-click Send on the contact form')
   async submitTwice(): Promise<void> {
     await this.sendButton.dblclick();

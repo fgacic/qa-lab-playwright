@@ -233,26 +233,13 @@ export async function settledUiText(page: Page, traffic: DataTraffic, readFor: R
 }
 
 /**
- * Stops the page's timers where they are, so a toast or a message that fades on its own is still there however long the reads after
- * it take. The clock must have been installed before the page loaded (`page.clock.install()`); time moves on by a tick only,
- * enough for what is already due.
- * The target lies a quarter of a second ahead of the page's time, not a few milliseconds: the clock keeps running while the
- * call travels to the page, and a target already behind it is refused ("Cannot fast-forward to the past"). The toasts and messages
- * fade after three seconds or more, so what the jump fires is nothing a test is waiting on.
- */
-export async function freezeClock(page: Page): Promise<void> {
-  const now = await page.evaluate(() => Date.now());
-  await page.clock.pauseAt(now + 250);
-}
-
-/**
  * Dotted translation keys that leaked into the page ("nav.home", "page.forgot-password.confirm",
  * "errors.404.title", "page.forgotPassword", "nav.Home", "navBar.home", "NAV.HOME", "2fa.title"):
  * segments of letters, digits, "_" and "-" in any case joined by dots, standing alone or glued to
  * punctuation ("Error:nav.home"), so an email, a URL, a price, a version or a filename inside a
  * sentence is not one. A key needs at least two segments with a letter in them, which is what
  * keeps a number ("1,234.56", "2.5kg", "0800.123.456", "v5.3.1", "17.00") from being one. A dot
- * followed by a space ends a sentence, so it never continues a key. Abbreviation-like, domain-like
+ * followed by a space ends a sentence, so it never continues a key. The listed abbreviations, domain-like
  * and file-like matches are dropped (NOT_KEYS).
  *
  * Documented gap: a key with ONE segment ("home", "HOME", "nav-home", "login_title") has no dot to tell it from a word,
@@ -266,10 +253,11 @@ const hasLetter = (segment: string) => /\p{L}/u.test(segment);
 
 /** Domains the shop's own text names: its demo shop, its maker, the reserved example domains and the training links. */
 const SHOWN_DOMAINS = ['practicesoftwaretesting.com', 'testsmith.io', 'example.com', 'example.org', 'github.com', 'unsplash.com'];
-// Abbreviations are letters in twos: e.g, i.e, d.h (German), π.χ (Greek "e.g."). Anything else dotted that
-// is no key is a hostname of SHOWN_DOMAINS (itself or a subdomain) or a file name with one of the extensions the contact form accepts or the shop serves.
+/** The abbreviations the shop's text holds, written as they stand without their trailing dot: "e.g.", "i.e.", "d.h." and "z.B." (German), "π.χ." (Greek "e.g."), and "U.S." of the country names ("U.S. Virgin Islands"). Only these: a leaked key of two short segments ("ui.ok", "nav.go") is still a key. */
+const ABBREVIATIONS = ['e.g', 'i.e', 'd.h', 'z.B', 'π.χ', 'U.S'];
+// Anything else dotted that is no key is one of those abbreviations, a hostname of SHOWN_DOMAINS (itself or a subdomain) or a file name with one of the extensions the contact form accepts or the shop serves.
 const NOT_KEYS = new RegExp(
-  String.raw`^\p{L}{1,2}(?:\.\p{L}{1,2})+$|^(?:[\p{L}\p{N}-]+\.)*(?:${SHOWN_DOMAINS.map((d) => d.replace(/\./g, String.raw`\.`)).join('|')})$|^[\p{L}\p{N}_-]+\.(?:txt|png|jpg|pdf)$`,
+  String.raw`^(?:${ABBREVIATIONS.map((a) => a.replace(/\./g, String.raw`\.`)).join('|')})$|^(?:[\p{L}\p{N}-]+\.)*(?:${SHOWN_DOMAINS.map((d) => d.replace(/\./g, String.raw`\.`)).join('|')})$|^[\p{L}\p{N}_-]+\.(?:txt|png|jpg|pdf)$`,
   'iu',
 );
 

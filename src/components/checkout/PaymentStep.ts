@@ -90,13 +90,13 @@ export class PaymentStep {
     await this.confirmButton.click();
   }
 
-  /** A shopper who double-clicks "Check payment": both clicks reach the button before the page can react to the first. */
+  /** A shopper who double-clicks "Check payment". Only delivers the two clicks: the caller holds the answer (`holdAnswers`), or a fast one can remove the button before the second lands. */
   @step('Check the payment with a double click')
   async checkPaymentWithDoubleClick(): Promise<void> {
     await this.checkPaymentButton.dblclick();
   }
 
-  /** A shopper who double-clicks Confirm: both clicks reach the button before the page can react to the first. */
+  /** A shopper who double-clicks Confirm. Only delivers the two clicks: the caller holds the answer (`holdAnswers`), or a fast one can replace the button before the second lands. */
   @step('Confirm the order with a double click')
   async confirmWithDoubleClick(): Promise<void> {
     await this.confirmButton.dblclick();

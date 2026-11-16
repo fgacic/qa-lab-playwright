@@ -5,7 +5,11 @@ test.describe('Product grid', () => {
   test('every card of the home grid shows a picture with the product name as alt text', async ({ homePage, api }) => {
     const { data: listed } = await api.listProducts();
 
-    await homePage.grid.expectPicturesNamed(listed);
+    expect(listed, 'the list should hold products').not.toHaveLength(0);
+    await expect(homePage.grid.cards).toHaveCount(listed.length);
+    for (const [index, product] of listed.entries()) {
+      await expect(homePage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
+    }
   });
 
   test('a card of a product that is out of stock says so, and a card of one in stock does not', async ({ homePage, catalog }) => {

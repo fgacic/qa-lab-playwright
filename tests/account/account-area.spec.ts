@@ -112,7 +112,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect.poll(() => apiMock.answers, { message: 'the list was asked for and refused with 401' }).toContainEqual({ pathname: '/invoices', outcome: 401 });
 
       // The SPA leaves the page after the refusal (to the login route or to the address BUG-56 describes): read the token once it has.
-      await page.waitForURL(/auth\/login/);
+      await expect(page, 'the refused customer leaves the invoices page').toHaveURL(/auth\/login/);
 
       await expect.poll(() => storedToken(page), { message: 'BUG-57: the refused token is gone', timeout: BUG_TIMEOUT }).toBeNull();
       await expect(invoicesPage.shell.header.userMenu, 'BUG-57: the account menu is gone').toHaveCount(0, { timeout: BUG_TIMEOUT });
@@ -277,7 +277,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect(profilePage.firstName.input).toHaveValue(fakeUser.first_name);
       await expect(profilePage.lastName.input).toHaveValue(fakeUser.last_name);
       await expect(profilePage.email.input).toHaveValue(fakeUser.email);
+      await expect(profilePage.street.input).toHaveValue(fakeUser.address.street);
+      await expect(profilePage.postalCode.input).toHaveValue(fakeUser.address.postal_code);
       await expect(profilePage.city.input).toHaveValue(fakeUser.address.city);
+      await expect(profilePage.state.input).toHaveValue(fakeUser.address.state);
+      await expect(profilePage.country.input).toHaveValue(fakeUser.address.country);
     });
 
     test('the profile page raises no application error', { tag: ['@bug'] }, async ({ profilePage, apiMock, consoleGuard }) => {
@@ -297,6 +301,27 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       expect((await saved).postDataJSON()).toMatchObject({ first_name: 'Renamed', last_name: fakeUser.last_name });
       await expect(profilePage.alerts.filter({ hasText: 'Your profile is successfully updated!' })).toBeVisible();
+    });
+
+    test('saving sends the edited address', async ({ profilePage, apiMock }) => {
+      const saved = apiMock.waitForRequest('PUT', PROFILE_PATH);
+      await profilePage.country.input.fill('BE');
+      await profilePage.postalCode.input.fill('9000');
+      await profilePage.state.input.fill('Oost-Vlaanderen');
+
+      await profilePage.update();
+
+      expect((await saved).postDataJSON().address).toEqual({ ...fakeUser.address, country: 'BE', postal_code: '9000', state: 'Oost-Vlaanderen' });
+      await expect(profilePage.alerts.filter({ hasText: 'Your profile is successfully updated!' })).toBeVisible();
+    });
+
+    test('an empty postal code is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await profilePage.postalCode.input.fill('');
+
+      await profilePage.update();
+
+      await expect(profilePage.alerts.filter({ hasText: 'Please correct the highlighted fields before saving.' })).toBeVisible();
+      await apiMock.expectNoRequest('PUT', PROFILE_PATH);
     });
 
     test('answering a password change raises no application error', { tag: ['@bug'] }, async ({ profilePage, apiMock, consoleGuard }) => {

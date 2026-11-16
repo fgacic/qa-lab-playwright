@@ -1,11 +1,9 @@
 import { ADMIN_SECTIONS } from '@components/Header';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
+import { ADMIN_SECTION_PATHS } from '@pages/admin/AdminPages';
+import { allowLoggedFailure, appearsWithin } from '@pages/admin/alerts';
 import { ORDER_STATUS, paginated, reports } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-
-/** What only the back office reads: the dashboard's orders and sales report, the user list and the inbox. */
-const ADMIN_ONLY_ENDPOINTS = /^\/(?:invoices|users|messages|reports\/[^/]+)$/;
 
 /**
  * Back office with a mocked admin session and a mocked admin API (fixtures/admin.ts). These
@@ -13,17 +11,41 @@ const ADMIN_ONLY_ENDPOINTS = /^\/(?:invoices|users|messages|reports\/[^/]+)$/;
  * The real journeys are tests/admin-e2e, against the self-hosted Toolshop.
  */
 test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'] }, () => {
-  test('the dashboard shows the sales chart, fed by the yearly sales report', async ({ adminDashboard, apiMock }) => {
-    // The fixture opened the page already; open it again to catch the answer that feeds the chart.
-    const answered = apiMock.waitForResponse('GET', '/reports/total-sales-of-years');
-    await adminDashboard.open();
-    const { response, json } = await answered;
+  // A <canvas> has nothing to read, so the bars the app drew are measured (AdminDashboardPage.drawnBars): there is one per year
+  // of the report and each is as tall as its total, whatever the app coloured it. A canvas that is merely visible proves nothing:
+  // it is just as visible when the report failed (ADM-01).
+  const SALES_REPORTS = {
+    'two years': reports.totalSalesOfYears,
+    'three years': [{ year: 2024, total: 1000 }, { year: 2025, total: 4000 }, { year: 2026, total: 2000 }],
+  };
+  for (const [name, report] of Object.entries(SALES_REPORTS)) {
+    test.describe(`with a report of ${name}`, () => {
+      test.use(withMocks(mock.respond('GET', '/reports/total-sales-of-years', report)));
 
-    // A <canvas> has nothing to read, so the data is checked on the answer that feeds it.
-    expect(response.ok(), 'the sales report was answered').toBe(true);
-    expect(json, 'the report the chart is drawn from').toEqual(reports.totalSalesOfYears);
-    await expect(adminDashboard.salesHeading).toBeVisible();
-    await expect(adminDashboard.salesChart).toBeVisible();
+      test('the sales chart draws one bar per year, as tall as its total', async ({ adminDashboard }) => {
+        await expect(adminDashboard.salesHeading).toBeVisible();
+
+        const bars = await adminDashboard.drawnBars();
+
+        expect(bars, 'one bar per year of the report').toHaveLength(report.length);
+        const tallest = Math.max(...bars);
+        const highest = Math.max(...report.map(({ total }) => total));
+        // The axis starts a little above zero, so the heights are proportional to the totals only approximately (to within 0.05 of the tallest bar).
+        bars.forEach((height, index) => expect(height / tallest, `the bar of ${report[index].year} against the tallest`).toBeCloseTo(report[index].total / highest, 1));
+      });
+    });
+  }
+
+  test.describe('with a report that fails', { tag: ['@negative'] }, () => {
+    test.use(withMocks(mock.fail('GET', '/reports/total-sales-of-years', 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+    // Not the pin (ADM-01 is below): it says what the chart does draw, so a failed report is told from a healthy one by more than "the canvas is there".
+    test('the sales chart has no bars', async ({ adminDashboard }) => {
+      await expect(adminDashboard.salesHeading).toBeVisible();
+
+      expect(await adminDashboard.drawnBars(), 'a failed report draws axes and no bars').toEqual([]);
+    });
   });
 
   test('the dashboard asks for the orders awaiting fulfilment and lists them', async ({ adminDashboard, backOffice, apiMock }) => {
@@ -41,7 +63,7 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
     await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toBeVisible();
     await expect(adminDashboard.salesChart).toBeVisible();
 
-    expect(await alertAppears(adminDashboard.failure), 'no failure message appears on a healthy dashboard').toBe(false);
+    expect(await appearsWithin(adminDashboard.failure), 'no failure message appears on a healthy dashboard').toBe(false);
   });
 
   test('an order on the dashboard opens for editing', async ({ adminDashboard, backOffice, page }) => {
@@ -58,11 +80,11 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
 
     test(`the admin menu reaches ${section}`, async ({ adminDashboard, page }) => {
       await adminDashboard.shell.header.openAdminSection(startsFrom);
-      await expect(page).toHaveURL(`/admin/${startsFrom.toLowerCase()}`);
+      await expect(page, `the menu moved to ${startsFrom}`).toHaveURL(ADMIN_SECTION_PATHS[startsFrom]);
 
       await adminDashboard.shell.header.openAdminSection(section);
 
-      await expect(page).toHaveURL(`/admin/${section.toLowerCase()}`);
+      await expect(page, `the menu moved to ${section}`).toHaveURL(ADMIN_SECTION_PATHS[section]);
       await expect(adminDashboard.sectionHeading(section)).toBeVisible();
     });
   }
@@ -87,15 +109,5 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
       // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording (a healthy dashboard shows none, see above).
       await expect(adminDashboard.failure, 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
     });
-  });
-});
-
-test.describe('Admin access control (mocked customer session)', { tag: ['@mocked'] }, () => {
-  test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, adminEntrance, page, apiMock }) => {
-    await adminEntrance.tryToOpen();
-
-    await expect(page).toHaveURL('/auth/login');
-    // Turned away before the dashboard asked for anything: no order list, report, user list or inbox was requested.
-    await expect(apiMock.expectNoRequest('GET', ADMIN_ONLY_ENDPOINTS), 'no admin endpoint was called for a customer').resolves.toBeUndefined();
   });
 });

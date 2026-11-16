@@ -45,7 +45,7 @@ test.describe('A search that spans several pages', { tag: ['@api'] }, () => {
     const names = namesOf(pages);
     expect(names, 'no product is listed twice').toEqual([...new Set(names)]);
     expect(names.length + ownedIn(pages), 'the pages hold every match the first page counted').toBe(first.json.total);
-    expect(pages.flatMap((page) => page.data).every((p) => p.name.toLowerCase().includes(SPANNING_TERM)), 'every product matches the term').toBe(true);
+    expect(pages.flatMap((page) => page.data).filter((p) => !p.name.toLowerCase().includes(SPANNING_TERM)).map((p) => p.name), 'products that do not match the term').toEqual([]);
   });
 
   test('the later pages, asked of the product list as the shop asks them, hold the same products', { tag: ['@bug'] }, async ({ request }) => {

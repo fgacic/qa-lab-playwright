@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { alertAppears } from '@pages/admin/alerts';
+import { appearsWithin } from '@pages/admin/alerts';
 import { brand, category, contactMessage, customer } from '@support/admin-payloads';
 
 /**
@@ -14,41 +14,41 @@ test.describe('Admin forms and detail pages, healthy (mocked back office)', { ta
     await expect(form.name).toHaveValue(backOffice.product.name);
     await expect(form.specRows).toHaveCount(1);
 
-    expect(await alertAppears(form.chrome.failure), 'no failure message appears on a healthy product form').toBe(false);
+    expect(await appearsWithin(form.chrome.failure), 'no failure message appears on a healthy product form').toBe(false);
   });
 
   test('a loaded brand form shows no failure message', async ({ adminBrands }) => {
     const form = await adminBrands.edit(brand.name);
     await expect(form.name.input).toHaveValue(brand.name);
 
-    expect(await alertAppears(form.chrome.failure), 'no failure message appears on a healthy brand form').toBe(false);
+    expect(await appearsWithin(form.chrome.failure), 'no failure message appears on a healthy brand form').toBe(false);
   });
 
   test('a loaded category form shows no failure message', async ({ adminCategories }) => {
     const form = await adminCategories.edit(category.name);
     await expect(form.name.input).toHaveValue(category.name);
 
-    expect(await alertAppears(form.chrome.failure), 'no failure message appears on a healthy category form').toBe(false);
+    expect(await appearsWithin(form.chrome.failure), 'no failure message appears on a healthy category form').toBe(false);
   });
 
   test('a loaded user form shows no failure message', async ({ adminUsers }) => {
     const form = await adminUsers.edit(customer.email);
     await expect(form.email).toHaveValue(customer.email);
 
-    expect(await alertAppears(form.chrome.failure), 'no failure message appears on a healthy user form').toBe(false);
+    expect(await appearsWithin(form.chrome.failure), 'no failure message appears on a healthy user form').toBe(false);
   });
 
   test('a loaded message shows no failure message', async ({ adminMessages }) => {
     const message = await adminMessages.details(contactMessage.name);
     await expect(message.text(contactMessage.message)).toBeVisible();
 
-    expect(await alertAppears(message.failure), 'no failure message appears on a healthy message page').toBe(false);
+    expect(await appearsWithin(message.failure), 'no failure message appears on a healthy message page').toBe(false);
   });
 
   test('a loaded order shows no failure message', async ({ adminOrders, backOffice }) => {
     const order = await adminOrders.edit(backOffice.order.invoice_number);
     await expect(order.invoiceNumber).toHaveValue(backOffice.order.invoice_number);
 
-    expect(await alertAppears(order.failure), 'no failure message appears on a healthy order page').toBe(false);
+    expect(await appearsWithin(order.failure), 'no failure message appears on a healthy order page').toBe(false);
   });
 });

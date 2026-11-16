@@ -20,6 +20,12 @@ export interface Allowance {
    * logs a "Failed to load resource" for a 401 and Firefox and WebKit do not.
    */
   requiresAnswer?: (answer: ApiAnswer) => boolean;
+  /**
+   * The error is allowed only in a test in which a request of the shop really failed: the browser received an API answer with a
+   * status of 400 or more (a real one or a mocked one, which the browser receives like any other), or a mock of the test aborted
+   * a request (`MockAnswer`). The log the SPA writes for a failed request mirrors that failure, so without one it is a different error.
+   */
+  requiresFailure?: boolean;
 }
 
 /** One response of the shop's API the browser received, in any engine (`context.on('response')`). */
@@ -165,6 +171,11 @@ export function isApiResourceFailure(error: BrowserError, mocked: readonly MockA
   return mocked.some((answer) => answer.pathname === pathname && (answer.outcome === 'aborted' ? /net::ERR_/.test(error.text) : answer.outcome === status));
 }
 
+/** Whether a request of the shop failed in this test: an API answer of 400 or more, or a request a mock aborted. */
+export function requestFailed(mocked: readonly MockAnswer[], answered: readonly ApiAnswer[]): boolean {
+  return answered.some((answer) => answer.status >= 400) || mocked.some((answer) => answer.outcome === 'aborted' || answer.outcome >= 400);
+}
+
 /**
  * The errors no allowance covers, in the order they happened. `mocked` is what the test's mocks answered (`ApiMock.answers`);
  * `answered` is every API response the browser received, which an allowance with `requiresAnswer` looks for.
@@ -181,6 +192,7 @@ export function unexpectedErrors(
       if (!(allowance.pattern.test(error.text) || (error.args !== undefined && allowance.pattern.test(error.args)))) return false;
       if (allowance.route && !(error.route !== undefined && allowance.route.test(error.route))) return false;
       if (allowance.url && !(error.url !== undefined && allowance.url.test(error.url))) return false;
+      if (allowance.requiresFailure && !requestFailed(mocked, answered)) return false;
       return allowance.requiresAnswer === undefined || answered.some(allowance.requiresAnswer);
     });
     return !covered;

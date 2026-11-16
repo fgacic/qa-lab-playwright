@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
-import { customer, paginated } from '@support/admin-payloads';
+import { REFUSED_STATUSES, customer, paginated } from '@support/admin-payloads';
 import { consoleArgsText } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
@@ -135,7 +135,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     });
   });
 
-  for (const status of [409, 500]) {
+  for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edited user is refused (${status})`, { tag: ['@negative'] }, () => {
       test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, status, { message: 'The user could not be saved.' })));
       test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));

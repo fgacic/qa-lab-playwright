@@ -116,7 +116,7 @@ test.describe('Search', () => {
     const { body, json: found } = await sorted;
     expect(body.q, 'the sort request carries the search term').toBe(PLIERS.term);
     expect(found.total, 'the catalogue should contain pliers').toBeGreaterThan(0);
-    expect(found.data.every((p) => new RegExp(PLIERS.term, 'i').test(p.name))).toBe(true);
+    expect(found.data.filter((p) => !new RegExp(PLIERS.term, 'i').test(p.name)).map((p) => p.name), 'products that do not match the term').toEqual([]);
     expect(found.data.map((p) => p.price)).toBeSorted();
     await expect(homePage.search.caption).toHaveText(searchedFor(PLIERS.term));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));

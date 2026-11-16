@@ -1,5 +1,6 @@
 import { expect, test as base, type BrowserContext, type Page } from '@playwright/test';
 import { ContactPage } from '@pages/ContactPage';
+import { HomePage } from '@pages/HomePage';
 import { IS_SELF_HOSTED } from '@support/env';
 
 /**
@@ -77,12 +78,20 @@ export const ATTRIBUTE_XSS_PAYLOADS: Record<string, AttributePayload> = {
  * passing test; a hit ends the wait at once and fails it. The settle step covers every page of every watched context
  * (the test's own, a visitor's, a popup, a second tab); the DOM snapshots (`injectedCount`) read the page the test drives.
  * The window is 1 s because what a payload can still do after the page settled is a timer or a handler on a load
- * that has already finished, which fire within a task or two; a handler that waits longer than the window is not covered.
+ * that has already finished, which fire within a task or two; a handler that waits longer than the window is not covered. That is the
+ * blind spot of every "nothing ran" check here: a payload that fires its script after more than a second (a long timer, a slow
+ * network call it starts itself) is not seen, so a pass says "nothing ran inside the window", not "nothing can ever run".
  */
 export const OBSERVATION_WINDOW_MS = 1_000;
 
 /** How many times `settle` starts over on a page that was navigated away from while it waited. */
 const SETTLE_ATTEMPTS = 3;
+/**
+ * What Chromium says when a page is navigated while a script runs in it (the only engine this runs in: the sentinel is Chromium-only).
+ * Matched by text, as Playwright gives no error class for it. A reworded message does not let a failure pass: the error is thrown on
+ * instead of retried, so an upgrade that changes it shows up as a failing check, never a green one.
+ */
+const CONTEXT_DESTROYED = /execution context was destroyed/i;
 
 declare global {
   interface Window {
@@ -238,7 +247,7 @@ export class XssSentinel {
         return;
       } catch (error) {
         if (this.hits.length || page.isClosed()) return; // the page went away because something ran (or the test closed it): the expectation reports what
-        if (!/execution context was destroyed/i.test(String(error)) || attempt >= SETTLE_ATTEMPTS - 1) throw error;
+        if (!CONTEXT_DESTROYED.test(String(error)) || attempt >= SETTLE_ATTEMPTS - 1) throw error;
       }
     }
   }
@@ -301,6 +310,39 @@ export class XssSentinel {
   }
 }
 
+/** One removal of something a test made, run when the test is over. */
+export type Cleanups = (() => Promise<void>)[];
+
+/**
+ * `cleanups`: the one place a security spec lists what it made in the shared database, so every spec removes it the same way. Push a
+ * removal BEFORE the write that makes the record (a save whose answer never arrives still leaves nothing behind), and find the record by
+ * something the test declared (a name, an e-mail), not by an id the answer would have given. Each entry runs after the test, last made first,
+ * pass or fail; one that throws does not stop the others, and the failures are raised together at the end.
+ *
+ * A pin is an expected failure, and an expected failure swallows a teardown error along with the bug's own: the throw would end in a
+ * green "expected to fail". Each failure is therefore also written into the test's annotations, which the report keeps either way, so a
+ * record that leaked from a pin is never silent. (verify-bugs.mjs additionally refuses a pin whose errors do not come from the spec.)
+ * Fixtures are torn down in the reverse order of their set-up, so a fixture whose removals use `request`, `api` or `adminToken` lists
+ * `cleanups` AFTER them (it is then torn down first, while they still work). It needs no page, so a spec on `apiOnlyTest` merges
+ * `cleanupTest` in alone.
+ */
+export const cleanupTest = base.extend<{ cleanups: Cleanups }>({
+  cleanups: async ({}, use, testInfo) => {
+    const cleanups: Cleanups = [];
+    await use(cleanups);
+    const failures: unknown[] = [];
+    for (const cleanup of cleanups.reverse()) {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    for (const failure of failures) testInfo.annotations.push({ type: 'cleanup failed', description: String(failure instanceof Error ? failure.message : failure) });
+    if (failures.length) throw new AggregateError(failures, `${failures.length} record(s) made by the test could not be removed`);
+  },
+});
+
 export interface SecurityFixtures {
   /**
    * Opt in with `test.use({ xssWatch: true })`. An option, so the sentinel (an auto fixture) is
@@ -317,9 +359,11 @@ export interface SecurityFixtures {
   newVisitor: () => Promise<Page>;
   /** The contact page as a visitor sees it: `newVisitor`'s page, on /contact. The visitor is the sender of a message; nothing here views anything as a victim. */
   visitorContactPage: ContactPage;
+  /** The storefront home page as a visitor sees it: `newVisitor`'s page, not opened yet (the test opens it when what it shows has been made). Nobody is signed in. */
+  visitorHomePage: HomePage;
 }
 
-export const test = base.extend<SecurityFixtures>({
+export const test = cleanupTest.extend<SecurityFixtures>({
   xssWatch: [false, { option: true }],
   // Auto, though only the specs that opt in with `xssWatch` need it: the sentinel must be installed on the context
   // before any page fixture navigates, and Playwright orders only auto fixtures ahead of the ones a test names.
@@ -353,5 +397,8 @@ export const test = base.extend<SecurityFixtures>({
     const contactPage = new ContactPage(await newVisitor());
     await contactPage.open();
     await use(contactPage);
+  },
+  visitorHomePage: async ({ newVisitor }, use) => {
+    await use(new HomePage(await newVisitor()));
   },
 });

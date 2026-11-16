@@ -18,20 +18,19 @@ const MIN_PRICE = 15;
 
 /**
  * What the seeded catalogue offers, by name (the filter menu is read by label). The tests assert
- * against the API's answer for these, so only their existence is assumed here.
+ * against the API's answer for these, so only their existence is assumed here; the subcategories of
+ * `parentCategory` are read from the category tree, not restated.
  */
 const SEED = {
   category: PLIERS.category,
   parentCategory: 'Power Tools',
-  /** The subcategories of `parentCategory`, which ticking the parent ticks too. */
-  children: ['Grinder', 'Sander', 'Saw', 'Drill'],
   /** A category that is not under `parentCategory`. */
   otherCategory: HAMMER.category,
   brand: 'MightyCraft Hardware',
   /** A brand that sells in `otherCategory`. */
   hammerBrand: 'ForgeFlex Tools',
   /** The shop's two brands, and a category of a different parent than `otherCategory`. */
-  brands: ['ForgeFlex Tools', 'MightyCraft Hardware'],
+  brands: ['ForgeFlex Tools', 'MightyCraft Hardware'] as const,
   powerCategory: 'Drill',
 } as const;
 /** The slider test lowers the max to `CROSSED_MAX`, then presses the min up to `CROSSED_MIN`, past it. */
@@ -59,19 +58,22 @@ test.describe('Product filters', () => {
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
-  test('ticking a parent category ticks all of its subcategories and queries them all', async ({ homePage, apiMock }) => {
+  test('ticking a parent category ticks all of its subcategories and queries them all', async ({ homePage, apiMock, api }) => {
     const { filters } = homePage;
+    const parent = (await api.categoryTree()).find((node) => node.name === SEED.parentCategory);
+    expect(parent?.sub_categories, `the category tree should hold subcategories of "${SEED.parentCategory}"`).not.toHaveLength(0);
+    const children = parent!.sub_categories.map((sub) => sub.name);
     const results = apiMock.waitForResponse('QUERY', '/products', (body) => !!body.by_category);
 
     await filters.filterByCategory(SEED.parentCategory);
 
-    for (const child of SEED.children) {
+    for (const child of children) {
       await expect(filters.category(child)).toBeChecked();
     }
     await expect(filters.category(SEED.otherCategory)).not.toBeChecked();
     // The request must carry every ticked box (the parent and its children), not only the one clicked.
     const tickedBoxes = filters.categories.getByRole('checkbox', { checked: true });
-    await expect(tickedBoxes).toHaveCount(SEED.children.length + 1);
+    await expect(tickedBoxes).toHaveCount(children.length + 1);
     const ticked = await Promise.all((await tickedBoxes.all()).map((box) => box.inputValue()));
     const { body } = await results;
     expect(String(body.by_category).split(',').sort()).toEqual(ticked.sort());
@@ -95,7 +97,7 @@ test.describe('Product filters', () => {
 
     const { json: found } = await results;
     expect(found.total).toBeGreaterThan(0);
-    expect(found.data.every((p) => p.is_eco_friendly)).toBe(true);
+    expect(found.data.filter((p) => !p.is_eco_friendly).map((p) => p.name), 'products that are not eco-friendly').toEqual([]);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
@@ -107,7 +109,7 @@ test.describe('Product filters', () => {
 
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain ${SEED.hammerBrand} products in ${SEED.otherCategory}`).toBeGreaterThan(0);
-    expect(found.data.every((p) => p.category.name === SEED.otherCategory && p.brand.name === SEED.hammerBrand)).toBe(true);
+    expect(found.data.filter((p) => p.category.name !== SEED.otherCategory || p.brand.name !== SEED.hammerBrand).map((p) => p.name), 'products outside the category or brand').toEqual([]);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
@@ -161,7 +163,7 @@ test.describe('Product filters', () => {
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain products up to $${MAX_PRICE}`).toBeGreaterThan(0);
     expect(found.total, 'the limit hides the dearer products').toBeLessThan(unfiltered);
-    expect(found.data.every((p) => p.price <= MAX_PRICE)).toBe(true);
+    expect(found.data.filter((p) => p.price > MAX_PRICE).map((p) => p.name), `products dearer than $${MAX_PRICE}`).toEqual([]);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
   });
@@ -176,7 +178,7 @@ test.describe('Product filters', () => {
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain products from $${MIN_PRICE}`).toBeGreaterThan(0);
     expect(found.total, 'the limit hides the cheaper products').toBeLessThan(unfiltered);
-    expect(found.data.every((p) => p.price >= MIN_PRICE)).toBe(true);
+    expect(found.data.filter((p) => p.price < MIN_PRICE).map((p) => p.name), `products cheaper than $${MIN_PRICE}`).toEqual([]);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
   });
@@ -192,7 +194,7 @@ test.describe('Product filters', () => {
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain products from $${MIN_PRICE} to $${MAX_PRICE}`).toBeGreaterThan(0);
     expect(found.total, 'the range hides products on both sides').toBeLessThan(unfiltered);
-    expect(found.data.every((p) => p.price >= MIN_PRICE && p.price <= MAX_PRICE)).toBe(true);
+    expect(found.data.filter((p) => p.price < MIN_PRICE || p.price > MAX_PRICE).map((p) => p.name), 'products outside the range').toEqual([]);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect(homePage.filters.minPrice).toHaveAttribute('aria-valuenow', String(MIN_PRICE));
     await expect(homePage.filters.maxPrice).toHaveAttribute('aria-valuenow', String(MAX_PRICE));

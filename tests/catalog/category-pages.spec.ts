@@ -46,7 +46,11 @@ test.describe('Category pages', () => {
       await categoryPage.open(slug);
       const { json: found } = await results;
 
-      await categoryPage.grid.expectPicturesNamed(found.data);
+      expect(found.data, 'the list should hold products').not.toHaveLength(0);
+      await expect(categoryPage.grid.cards).toHaveCount(found.data.length);
+      for (const [index, product] of found.data.entries()) {
+        await expect(categoryPage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
+      }
     });
   }
 
@@ -86,7 +90,24 @@ test.describe('Category pages', () => {
     const { body, json: found } = await results;
     expect(body.by_category_slug, 'the filtered request still names the category').toBe(PAGED.slug);
     expect(found.total, `"${PAGED.slug}" should hold eco-friendly products`).toBeGreaterThan(0);
-    expect(found.data.every((p) => p.is_eco_friendly)).toBe(true);
+    expect(found.data.filter((p) => !p.is_eco_friendly).map((p) => p.name), 'products that are not eco-friendly').toEqual([]);
+    await expect(categoryPage.grid.names).toHaveText(found.data.map((p) => p.name));
+  });
+
+  test('the brand filter of a category page narrows that category to the brand', async ({ categoryPage, apiMock, api }) => {
+    // The brand is read from the category's own products, so it is one the category holds whatever the seed.
+    const { data: inCategory } = await api.listProducts({ by_category_slug: PAGED.slug });
+    expect(inCategory, `"${PAGED.slug}" should hold products`).not.toHaveLength(0);
+    const brand = inCategory[0].brand.name;
+    await categoryPage.open(PAGED.slug);
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => !!body.by_brand);
+
+    await categoryPage.filters.filterByBrand(brand);
+
+    const { body, json: found } = await results;
+    expect(body.by_category_slug, 'the filtered request still names the category').toBe(PAGED.slug);
+    expect(found.total, `"${PAGED.slug}" should hold ${brand} products`).toBeGreaterThan(0);
+    expect(found.data.filter((p) => p.brand.name !== brand).map((p) => p.name), `products of another brand than ${brand}`).toEqual([]);
     await expect(categoryPage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 

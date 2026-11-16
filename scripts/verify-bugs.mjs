@@ -12,15 +12,23 @@
 //   `knownBug(id, summary, { absence: true })`, which adds an annotation this script reads.
 // Outcomes:
 // - reproduces: failed as pinned.
-// - fixed: it passed, the site fixed the defect. Update the pin, docs/COVERAGE.md and the bug list.
+// - fixed: it passed, twice (the run, then a rerun alone): the site fixed the defect. Update the pin, docs/COVERAGE.md and the bug list.
 // - fails for another reason: a precondition, a locator, a timeout, a teardown error. Such a pin is
 //   run once more before it is reported, so one slow moment does not fail the gate; a pin that
 //   reproduces on the rerun is listed as flaky rather than as reproducing.
+// - a pin that PASSED is rerun the same way: a pin that passes once and reproduces on the rerun is a race that was lost
+//   (it is how BUG-46 reached main), so it is reported as flaky, not as a fix.
+// - mixed: the pin reproduces in one project and passes in another. The defect is engine-specific or the pin is a race.
+// Every project that schedules a pin verifies it (a pin in chromium, firefox and webkit runs three times), because an
+// engine that is never verified here is only judged by the e2e job, which can say red but not why.
 // - flaky / skipped / not run: the pin could not be verified.
 // Which pins exist comes from the config (`--list`), not from a hard-coded project list, so a pin in
 // any project must be verified here or the script fails. The exception is the `@live-only` pins:
 // they are not scheduled on this target, and are printed as "not verifiable on this target".
 // The perf pins run in a pass of their own (the perf project is measured alone).
+// `--project=<name>` (repeatable) verifies only the pins that project schedules; `--skip-project=<name>` (repeatable) leaves a project out.
+// The CI job runs one shard per engine and one for every other project, so no single job takes the whole hour. With neither flag every
+// project is verified. A filter that leaves no pin is an error, not a green run.
 // Exit 1 on any problem, or when no pin ran. Used by the verify-bugs CI job and `npm run test:verify-bugs`.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,12 +37,20 @@ import { join } from 'node:path';
 
 import { afterRerun, escapeRegExp, judge, strip } from './lib/pin-verdict.mjs';
 
-// When a pin is scheduled in several projects, it is verified in the first of these that has it.
-// A pin scheduled only in firefox or webkit is verified there, after installing that browser (see below).
-const PREFERRED = ['chromium', 'admin', 'account', 'firefox', 'webkit', 'mobile', 'perf'];
-const rank = (project) => (PREFERRED.includes(project) ? PREFERRED.indexOf(project) : PREFERRED.length);
-
 const BROWSER_OF = { firefox: 'firefox', webkit: 'webkit' };
+
+// Which projects this run verifies (see the header): `--project=a --project=b`, `--skip-project=c`.
+const only = [];
+const skip = [];
+for (const arg of process.argv.slice(2)) {
+  const [, flag, name] = /^--(project|skip-project)=(.+)$/.exec(arg) ?? [];
+  if (!flag) {
+    console.error(`verify-bugs: unknown argument ${arg} (use --project=<name> or --skip-project=<name>)`);
+    process.exit(1);
+  }
+  (flag === 'project' ? only : skip).push(name);
+}
+const wanted = (project) => (only.length === 0 || only.includes(project)) && !skip.includes(project);
 
 // Playwright empties test-results/ at the start of every run, so each pass writes its report here instead.
 const work = mkdtempSync(join(tmpdir(), 'verify-bugs-'));
@@ -89,7 +105,7 @@ const specId = (spec) => `${spec.file}:${spec.line} ${spec.title}`;
 const keyOf = (spec, project) => `${specId(spec)} [${project}]`;
 const labelOf = (spec, project) => `${spec.file} › ${spec.title} [${project}]`;
 
-// 1. What is scheduled on this target, and where each pin is verified.
+// 1. What is scheduled on this target. A pin is verified in every project that schedules it.
 const scheduled = new Map(); // specId -> { spec, projects: [] }
 for (const spec of pins(playwright(['--list', '--grep', '@bug'], 'list.json'))) {
   const entry = scheduled.get(specId(spec)) ?? { spec, projects: [] };
@@ -98,15 +114,14 @@ for (const spec of pins(playwright(['--list', '--grep', '@bug'], 'list.json'))) 
 }
 const verifyIn = new Map(); // key -> project
 for (const [, { spec, projects }] of scheduled) {
-  const project = [...new Set(projects)].sort((a, b) => rank(a) - rank(b))[0];
-  verifyIn.set(keyOf(spec, project), project);
+  for (const project of new Set(projects)) if (wanted(project)) verifyIn.set(keyOf(spec, project), project);
 }
 const projectsToRun = [...new Set(verifyIn.values())];
 
-// A pin that only firefox or webkit schedules needs that browser: install it now (a no-op when present),
-// instead of letting the run fail with "Executable doesn't exist" and a misleading verdict.
+// A pin scheduled in firefox or webkit needs that browser. CI installs all three before this runs (the verify-bugs job); this is the
+// safety net for a local run: a no-op when present, instead of a run that fails with "Executable doesn't exist" and a misleading verdict.
 for (const browser of new Set(projectsToRun.map((p) => BROWSER_OF[p]).filter(Boolean))) {
-  console.log(`installing ${browser}: a known-bug spec is scheduled only there`);
+  console.log(`making sure ${browser} is installed: a known-bug spec is scheduled there`);
   // --with-deps: a bare CI runner lacks the browser's system libraries as well as the browser.
   const install = spawnSync('npx', ['playwright', 'install', '--with-deps', browser], { stdio: 'inherit' });
   if (install.status !== 0) fail(`could not install ${browser}, which a known-bug spec needs (try: npx playwright install --with-deps ${browser})`);
@@ -150,12 +165,14 @@ for (const { projects, out } of passes) {
   results.push(...collect(report));
 }
 
-// 4. Judge each pin.
+// 4. Judge each pin. A pin that passed, or failed for another reason, is run once more, alone: neither a lucky moment nor a
+// slow one decides the gate.
 const reproduces = [];
 const fixed = [];
 const other = [];
 const notVerified = [];
 let rerun = 0;
+const verdicts = new Map(); // specId -> [{ r, verdict }]
 for (const key of verifyIn.keys()) {
   const r = results.find((x) => x.key === key);
   if (!r) {
@@ -163,8 +180,7 @@ for (const key of verifyIn.keys()) {
     continue;
   }
   let verdict = judge(r);
-  if (verdict.other) {
-    // Once more, alone: a pin that failed for another reason is often one slow moment, and the gate should say which.
+  if (verdict.other || verdict.fixed) {
     rerun += 1;
     const again = collect(playwright(
       [`--project=${r.project}`, '--grep', escapeRegExp(r.title), r.specFile, '--retries=0', '--workers=1'],
@@ -174,10 +190,24 @@ for (const key of verifyIn.keys()) {
     const second = again ? judge(again) : undefined;
     verdict = afterRerun(verdict, second);
   }
-  if (verdict.notVerified) notVerified.push(`${r.label}: ${verdict.notVerified}`);
-  else if (verdict.fixed) fixed.push(r.label);
-  else if (verdict.other) other.push(`${r.label}: ${verdict.other}`);
-  else reproduces.push(r.label);
+  const id = key.slice(0, key.lastIndexOf(' ['));
+  verdicts.set(id, [...(verdicts.get(id) ?? []), { r, verdict }]);
+}
+for (const entries of verdicts.values()) {
+  const reproducing = entries.filter((e) => e.verdict.reproduces);
+  const passing = entries.filter((e) => e.verdict.fixed);
+  if (reproducing.length && passing.length) {
+    // One pin, two engines, two answers: say so once, instead of a "fixed?" that is only true somewhere.
+    notVerified.push(`${entries[0].r.specFile} › ${entries[0].r.title}: mixed, it reproduces in ${reproducing.map((e) => e.r.project).join(', ')} but passes in ${passing.map((e) => e.r.project).join(', ')}`);
+    for (const e of entries) if (!e.verdict.reproduces && !e.verdict.fixed) notVerified.push(`${e.r.label}: ${e.verdict.notVerified ?? e.verdict.other}`);
+    continue;
+  }
+  for (const { r, verdict } of entries) {
+    if (verdict.notVerified) notVerified.push(`${r.label}: ${verdict.notVerified}`);
+    else if (verdict.fixed) fixed.push(r.label);
+    else if (verdict.other) other.push(`${r.label}: ${verdict.other}`);
+    else reproduces.push(r.label);
+  }
 }
 
 mkdirSync('test-results', { recursive: true });

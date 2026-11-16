@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { APIRequestContext, APIResponse } from '@playwright/test';
-import { apiOnlyTest as base, expect } from '@fixtures';
+import { mergeTests, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { apiOnlyTest, expect } from '@fixtures';
+import { cleanupTest } from '@fixtures/security';
+import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, removeLater, type Account, type World } from '@support/authz';
 import { knownBug } from '@support/known-bug';
-import { API_URL } from '@support/env';
 import { base64Url, fakeJwt, fromBase64Url } from '@support/payloads';
-import { fakeCustomer, fakeGuest, uniqueEmail, type Customer } from '@support/test-data';
+import { fakeGuest, uniqueEmail } from '@support/test-data';
 import type { Product, ToolshopApi } from '@support/toolshop-api';
 
 /**
@@ -28,8 +29,7 @@ import type { Product, ToolshopApi } from '@support/toolshop-api';
  *
  * The file runs on `apiOnlyTest`: no browser context is opened, since every check is a plain HTTP call.
  */
-const REFUSED = [401, 403];
-const REFUSED_OR_HIDDEN = [401, 403, 404];
+const test = mergeTests(apiOnlyTest, cleanupTest);
 
 type Caller = 'anonymous' | 'customer';
 const CALLERS: Caller[] = ['anonymous', 'customer'];
@@ -38,74 +38,9 @@ const WHO: Record<Caller, string> = { anonymous: 'an anonymous caller', customer
 /** What creating a record answers. */
 const CREATED = 201;
 
-/** One authenticated-or-not call to the API, asking for JSON (without it Laravel redirects a validation error). */
-function call(request: APIRequestContext, method: string, path: string, { token, data }: { token?: string; data?: object } = {}): Promise<APIResponse> {
-  return request.fetch(`${API_URL}${path}`, { method, data, headers: { accept: 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) } });
-}
-
 /** Whether an answer is a verdict on authorisation at all: accepted (2xx) or refused (401, 403). Anything else is not one. */
 function expectVerdict(response: APIResponse, what: string): void {
   expect(response.ok() || REFUSED.includes(response.status()), `${what} answered ${response.status()}: neither accepted nor refused, so it says nothing about who may call it`).toBe(true);
-}
-
-/** Removes what a test made: each entry is one removal, run last made first after the test, whether it passed or failed. */
-type Cleanups = (() => Promise<void>)[];
-
-const test = base.extend<{ cleanups: Cleanups }>({
-  cleanups: async ({}, use, testInfo) => {
-    const cleanups: Cleanups = [];
-    await use(cleanups);
-    const failures: unknown[] = [];
-    for (const cleanup of cleanups.reverse()) {
-      try {
-        await cleanup();
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-    // A pin is an expected failure, and an expected failure swallows a teardown error along with the bug's own: the throw below would end
-    // in a green "expected to fail". Each failure is also written into the test's annotations, which the report keeps either way, so a
-    // record that leaked from a pin is never silent.
-    for (const failure of failures) testInfo.annotations.push({ type: 'cleanup failed', description: String(failure instanceof Error ? failure.message : failure) });
-    if (failures.length) throw new AggregateError(failures, `${failures.length} record(s) made by the test could not be removed`);
-  },
-});
-
-/** Removes a record by its path through the admin's token; a record already gone is fine. */
-const removeLater = ({ request, adminToken, cleanups }: World, path: string) =>
-  cleanups.push(async () => {
-    const response = await call(request, 'DELETE', path, { token: await adminToken() });
-    if (!response.ok() && response.status() !== 404) throw new Error(`DELETE ${path} answered ${response.status()}`);
-  });
-
-/** What a test needs to arrange: the page-less request context, the API client and the admin's token. */
-interface World {
-  request: APIRequestContext;
-  api: ToolshopApi;
-  adminToken: () => Promise<string>;
-  cleanups: Cleanups;
-}
-
-/** A customer registered for this test and signed in (somebody who is neither anonymous nor an admin), removed afterwards. */
-interface Account {
-  id: string;
-  token: string;
-  customer: Customer;
-}
-
-async function newCustomer({ request, api, adminToken, cleanups }: World): Promise<Account> {
-  const customer = fakeCustomer();
-  // The removal is registered before the registration is made, and finds the account by its e-mail: a registration whose answer never
-  // arrived, or a login that fails, still leaves nothing behind, and no id has to be known first.
-  cleanups.push(async () => {
-    const token = await adminToken();
-    const user = await api.findUserByEmail(token, customer.email);
-    if (user) await api.deleteUser(token, user.id);
-  });
-  await api.registerCustomer(customer);
-  const token = await api.login(customer.email, customer.password);
-  const { id } = await (await call(request, 'GET', '/users/me', { token })).json();
-  return { id, token, customer };
 }
 
 /** The token a caller presents: none for an anonymous one, a freshly registered customer's otherwise. */
@@ -120,12 +55,15 @@ async function tokenFor(world: World, caller: Caller): Promise<string | undefine
 async function contactMessage(world: World, name: string): Promise<string> {
   await world.api.sendContactMessage({ name, email: uniqueEmail('authz'), subject: 'webmaster', message: 'Sent by the authorisation checks to see who may list or change it.' });
   const admin = await world.adminToken();
-  for (let page = 1; ; page++) {
-    const inbox = await (await call(world.request, 'GET', `/messages?page=${page}`, { token: admin })).json();
+  const inboxPage = async (page: number) => (await call(world.request, 'GET', `/messages?page=${page}`, { token: admin })).json();
+  const first = await inboxPage(1);
+  const lastPage = first.last_page as number;
+  for (let page = 1; page <= lastPage; page++) {
+    const inbox = page === 1 ? first : await inboxPage(page);
     const found = (inbox.data as { id: string; name: string }[]).find((message) => message.name === name);
     if (found) return found.id;
-    expect(page, `the message from "${name}" is in the admin's inbox`).toBeLessThan(inbox.last_page);
   }
+  throw new Error(`the message from "${name}" is not in the admin's inbox (${lastPage} page(s) read)`);
 }
 
 test.describe('API authorisation, read access (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
@@ -256,18 +194,31 @@ test.describe('API authorisation, tokens after the session ended (self-hosted on
   });
 
   test.describe('after the account was deleted', { tag: ['@bug'] }, () => {
+    // Every call a signed-in customer makes with the token, each judged on its own: the deleted account is gone for the admin, so any of
+    // them that still answers 200 is a token that outlived it. The pin is soft per call, so one answer cannot hide another.
+    const WITH_A_TOKEN = ['/users/me', '/invoices', '/favorites', '/messages', '/users/refresh'];
+
     test('a token of a deleted account is refused', async ({ request, api, adminToken, cleanups }) => {
-      knownBug('SEC-14', "the token of an account the admin deleted is still accepted: GET /users/me answers 200 with the deleted customer's profile.");
-      const { id, token } = await newCustomer({ request, api, adminToken, cleanups });
-      expect((await call(request, 'GET', '/users/me', { token })).status(), 'the token worked before the account was deleted').toBe(200);
+      knownBug('SEC-14', "the token of an account the admin deleted is still accepted: GET /users/me, /invoices, /favorites, /messages and /users/refresh answer 200 as the deleted customer.");
+      const { id, customer } = await newCustomer({ request, api, adminToken, cleanups });
+      // Every path gets two sign-ins of its own: one used now, as the control that the call works with a token of this account, and one kept
+      // untouched for after the deletion. Not one token for everything: `/users/refresh` retires the token it is called with, so a control
+      // made with the kept token would end it and the pin could pass for that reason, not because the deleted account was refused.
+      const kept: Record<string, string> = {};
+      for (const path of WITH_A_TOKEN) {
+        const control = await api.login(customer.email, customer.password);
+        expect((await call(request, 'GET', path, { token: control })).status(), `GET ${path} worked with a token of this account before it was deleted`).toBe(200);
+        kept[path] = await api.login(customer.email, customer.password);
+      }
       const admin = await adminToken();
       await api.deleteUser(admin, id);
       // Precondition, true whether or not the bug is fixed: the account is gone for the admin, so what is wrong is only that the token outlived it.
       expect((await call(request, 'GET', `/users/${id}`, { token: admin })).status(), 'the admin no longer finds the deleted account').toBe(404);
 
-      const response = await call(request, 'GET', '/users/me', { token });
-
-      expect(REFUSED, `SEC-14: GET /users/me with the token of a deleted account answered ${response.status()}`).toContain(response.status());
+      for (const path of WITH_A_TOKEN) {
+        const response = await call(request, 'GET', path, { token: kept[path] });
+        expect.soft(REFUSED, `SEC-14: GET ${path} with a token of a deleted account answered ${response.status()}`).toContain(response.status());
+      }
     });
   });
 });
@@ -457,15 +408,7 @@ test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@se
  * The control gives the admin the same body on a customer made for the test, and proves the field is honoured at all.
  */
 test.describe('API authorisation, the role field of a profile (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
-  const bodyOf = ({ customer }: Account, role: string) => ({
-    first_name: customer.firstName,
-    last_name: customer.lastName,
-    dob: customer.dateOfBirth,
-    phone: customer.phone,
-    email: customer.email,
-    address: { street: customer.address.street, city: customer.address.city, state: customer.address.state, country: customer.address.country, postal_code: customer.address.postalCode },
-    role,
-  });
+  const bodyOf = (account: Account, role: string) => profileBody(account, { role });
   /** The role in the claims of a fresh sign-in: where the API itself says what the account may do. */
   const roleOf = async (api: ToolshopApi, { customer }: Account) => fromBase64Url<{ role: string }>((await api.login(customer.email, customer.password)).split('.')[1]).role;
 
@@ -496,15 +439,7 @@ test.describe('API authorisation, the role field of a profile (self-hosted only)
  * stay behind, uniquely named; a status a pin shows a customer could set stays on that throwaway record, which nobody reads.
  */
 test.describe('API authorisation, writes to other records (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
-  /** The body PUT /users/{id} accepts, for a customer as registered. */
-  const profileOf = ({ customer }: Account, firstName: string) => ({
-    first_name: firstName,
-    last_name: customer.lastName,
-    dob: customer.dateOfBirth,
-    phone: customer.phone,
-    email: customer.email,
-    address: { street: customer.address.street, city: customer.address.city, state: customer.address.state, country: customer.address.country, postal_code: customer.address.postalCode },
-  });
+  const profileOf = (account: Account, firstName: string) => profileBody(account, { firstName });
   const nameOf = async (request: APIRequestContext, token: string) => ((await (await call(request, 'GET', '/users/me', { token })).json()) as { first_name: string }).first_name;
 
   test("a customer cannot change another customer's profile", async ({ request, api, adminToken, cleanups }) => {

@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
-import { SEARCH_HIT, brand } from '@support/admin-payloads';
+import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { REFUSED_STATUSES, SEARCH_HIT, brand } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
@@ -79,7 +79,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the reason is shown', async ({ adminBrands, apiMock }) => {
-      knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
+      knownBug('ADM-12', ADM_12, { absence: true });
       const form = await adminBrands.add();
       const sent = apiMock.waitForRequest('POST', '/brands');
 
@@ -92,13 +92,13 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   // The refusal of an edit: 409 when the slug is taken, 500 when the server fails.
-  for (const status of [409, 500]) {
+  for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edit is refused (${status})`, { tag: ['@negative', '@bug'] }, () => {
       test.use(withMocks(mock.fail('PUT', BRAND, status, { message: 'The brand could not be saved.' })));
       test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
-      test(`the admin is told the edited brand was not saved`, async ({ adminBrands, apiMock }) => {
-        knownBug('ADM-23', 'a brand or category edit the API refuses to save (409 slug taken, 500) leaves the form as it was: no message, no "saved", nothing (ADM-12 is the same for a new one).', { absence: true });
+      test('the admin is told the edited brand was not saved', async ({ adminBrands, apiMock }) => {
+        knownBug('ADM-23', ADM_23, { absence: true });
         const form = await adminBrands.edit(brand.name);
         await expect(form.name.input).toHaveValue(brand.name);
         const refused = apiMock.waitForResponse('PUT', `/brands/${brand.id}`);

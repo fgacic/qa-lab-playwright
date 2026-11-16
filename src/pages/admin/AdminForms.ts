@@ -104,7 +104,8 @@ export class AdminCategoryForm {
 export interface ProductInput {
   name: string;
   description: string;
-  stock: string;
+  /** Left out for a rental: ticking "Item for rent" clears the stock, so a value typed first would be dead data. */
+  stock?: string;
   price: string;
   co2Rating?: string;
   brand?: string;
@@ -158,7 +159,7 @@ export class AdminProductForm {
   async fillIn(product: ProductInput): Promise<void> {
     await this.name.fill(product.name);
     await this.description.fill(product.description);
-    await this.stock.fill(product.stock);
+    if (product.stock !== undefined) await this.stock.fill(product.stock);
     await this.price.fill(product.price);
     if (product.rental) await this.rental.check();
     if (product.co2Rating) await this.co2Rating.selectOption({ label: product.co2Rating });

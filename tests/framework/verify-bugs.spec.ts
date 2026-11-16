@@ -17,6 +17,7 @@ interface Pin {
   projects: string[];
   onLive?: true;
   runs: ('reproduces' | 'fixed' | 'other')[];
+  runsByProject?: Record<string, ('reproduces' | 'fixed' | 'other')[]>;
   noResult?: true;
 }
 interface Call { args: string[]; listing: boolean; live: boolean; projects: string[]; rerun: boolean; env: { VERIFY_BUGS?: string } }
@@ -25,14 +26,14 @@ interface Outcome { status: number | null; stdout: string; stderr: string; calls
 const pin = (title: string, over: Partial<Pin> = {}): Pin => ({ file: 'tests/x/x.spec.ts', line: 10, title, id: 'PIN-1', projects: ['chromium'], runs: ['reproduces'], ...over });
 
 /** Runs verify-bugs.mjs against the stand-in, in a directory of its own (it writes test-results/ there). */
-function verify(pins: Pin[], runErrors?: string[]): Outcome {
+function verify(pins: Pin[], runErrors?: string[], argv: string[] = []): Outcome {
   const dir = mkdtempSync(join(tmpdir(), 'verify-bugs-spec-'));
   try {
     const scenario = join(dir, 'scenario.json');
     const log = join(dir, 'calls.jsonl');
     writeFileSync(scenario, JSON.stringify({ pins, runErrors }));
     writeFileSync(log, '');
-    const run = spawnSync(process.execPath, [join(ROOT, 'scripts', 'verify-bugs.mjs')], {
+    const run = spawnSync(process.execPath, [join(ROOT, 'scripts', 'verify-bugs.mjs'), ...argv], {
       cwd: dir,
       encoding: 'utf8',
       timeout: 60_000,
@@ -97,12 +98,72 @@ test.describe('verify-bugs orchestration', { tag: ['@framework'] }, () => {
     expect(outcome.summary.notVerified).toHaveLength(1);
   });
 
-  test('a pin that passes is a fix to record, and fails the gate without a rerun', () => {
+  test('a pin that passes twice, the run and a rerun alone, is a fix to record, and fails the gate', () => {
     const outcome = verify([pin('already fixed', { runs: ['fixed'] })]);
     expect(outcome.status).toBe(1);
     expect(outcome.stdout).toMatch(/fixed\? .*already fixed/);
-    expect(outcome.calls.filter((call) => call.rerun)).toEqual([]);
+    expect(outcome.calls.filter((call) => call.rerun), 'a pass is rerun before it is believed').toHaveLength(1);
     expect(outcome.summary.fixed).toHaveLength(1);
+  });
+
+  test('a pin that passes once and reproduces on the rerun is a race that was lost: flaky, not a fix', () => {
+    const outcome = verify([pin('lucky', { runs: ['fixed', 'reproduces'] })]);
+    expect(outcome.status).toBe(1);
+    expect(outcome.stdout).toMatch(/not verified: .*lucky.*flaky: passed once, reproduced on rerun/);
+    expect(outcome.stdout).not.toMatch(/fixed\?/);
+    expect(outcome.summary.fixed).toHaveLength(0);
+    expect(outcome.summary.notVerified).toHaveLength(1);
+  });
+
+  test('a pin scheduled in several projects is verified in each of them, with its own rerun', () => {
+    const outcome = verify([pin('everywhere', { projects: ['chromium', 'firefox', 'webkit'] }), pin('admin only', { line: 20, projects: ['admin'] })]);
+    expect(outcome.status).toBe(0);
+    expect(outcome.stdout).toContain('4 known-bug specs scheduled, 4 ran: 4 still reproduce');
+    const runs = outcome.calls.filter((call) => !call.listing);
+    expect(runs[0].projects.slice().sort(), 'every scheduled project is run').toEqual(['admin', 'chromium', 'firefox', 'webkit']);
+    expect(outcome.summary.reproduces.filter((label) => label.includes('everywhere')).map((label) => label.match(/\[(\w+)\]$/)?.[1]).sort()).toEqual(['chromium', 'firefox', 'webkit']);
+  });
+
+  test('--project and --skip-project shard the run: each shard verifies its own projects, and together they verify every pin once', () => {
+    const pins = [pin('everywhere', { projects: ['chromium', 'firefox', 'webkit'] }), pin('admin only', { line: 20, projects: ['admin'] }), pin('measured', { line: 30, projects: ['perf'] })];
+    const shard = (...argv: string[]) => {
+      const outcome = verify(pins, undefined, argv);
+      expect(outcome.status, argv.join(' ')).toBe(0);
+      return { runs: outcome.calls.filter((call) => !call.listing && !call.rerun).flatMap((call) => call.projects).sort(), reproduces: outcome.summary.reproduces };
+    };
+    const firefox = shard('--project=firefox');
+    expect(firefox.runs).toEqual(['firefox']);
+    expect(firefox.reproduces).toHaveLength(1);
+    const rest = shard('--skip-project=chromium', '--skip-project=firefox', '--skip-project=webkit');
+    expect(rest.runs).toEqual(['admin', 'perf']);
+    const together = [shard('--project=chromium'), firefox, shard('--project=webkit'), rest].flatMap((s) => s.reproduces);
+    expect(together, 'five verifications in all (three engines, admin, perf), none twice').toHaveLength(5);
+    expect(new Set(together).size).toBe(5);
+  });
+
+  test('a filter that leaves no pin, or a flag it does not know, fails the gate', () => {
+    const none = verify([pin('first')], undefined, ['--project=webkit']);
+    expect(none.status).toBe(1);
+    expect(none.stdout).toContain('no known-bug spec is scheduled');
+    const unknown = verify([pin('first')], undefined, ['--projects=chromium']);
+    expect(unknown.status).toBe(1);
+    expect(unknown.stderr).toContain('unknown argument --projects=chromium');
+  });
+
+  test('a pin that reproduces in one engine and passes in another is reported as mixed, once, and fails the gate', () => {
+    const outcome = verify([pin('engine specific', { projects: ['chromium', 'webkit'], runsByProject: { webkit: ['fixed'] } })]);
+    expect(outcome.status).toBe(1);
+    expect(outcome.stdout).toMatch(/not verified: .*engine specific: mixed, it reproduces in chromium but passes in webkit/);
+    expect(outcome.stdout).not.toMatch(/fixed\?/);
+    expect(outcome.summary.reproduces).toHaveLength(0);
+  });
+
+  test('a pin that fails in one engine for another reason is judged there, and the other engines still count', () => {
+    const outcome = verify([pin('webkit slow', { projects: ['chromium', 'webkit'], runsByProject: { webkit: ['other'] } })]);
+    expect(outcome.status).toBe(1);
+    expect(outcome.stdout).toMatch(/fails for another reason: .*webkit slow \[webkit\].*\(the same on a rerun\)/);
+    expect(outcome.summary.reproduces).toHaveLength(1);
+    expect(outcome.calls.filter((call) => call.rerun).map((call) => call.projects)).toEqual([['webkit']]);
   });
 
   test('a pin only the live target schedules is listed as not verifiable here, and does not fail the gate', () => {

@@ -19,15 +19,22 @@ const entriesOf = (node: Json, prefix = ''): [string, string][] =>
 /** The names of the `{{ name }}` placeholders in a value, sorted, one entry per occurrence. */
 const placeholdersOf = (value: string): string[] => [...value.matchAll(/\{\{\s*([^}\s]+)\s*\}\}/g)].map(([, name]) => name).sort();
 
+/** The keys only the six other files define (I18N-27), and the one Greek value that drops a placeholder (I18N-28): the known differences. */
+const I18N_27 = ['fields.address.label', 'fields.address.placeholder', 'fields.address.errors.required'];
+const GREEK: Language = 'el';
+const I18N_28 = ['pages.comparison.remove-product'];
+
 test.describe('Translation files agree with English', { tag: ['@i18n'] }, () => {
   /** Every file as a map of key to value, the English one measured against by the others. */
   const filesOf = async (request: APIRequestContext) => {
-    const files = new Map<Language, Map<string, string>>();
-    for (const language of LANGUAGES) {
-      const response = await request.get(`/assets/i18n/${language}.json`);
-      expect(response.ok(), `${language}.json is served`).toBe(true);
-      files.set(language, new Map(entriesOf((await response.json()) as Json)));
-    }
+    const loaded = await Promise.all(
+      LANGUAGES.map(async (language) => {
+        const response = await request.get(`/assets/i18n/${language}.json`);
+        expect(response.ok(), `${language}.json is served`).toBe(true);
+        return [language, new Map(entriesOf((await response.json()) as Json))] as const;
+      }),
+    );
+    const files = new Map<Language, Map<string, string>>(loaded);
     expect(files.get('en')!.size, 'the English file holds keys at all').toBeGreaterThan(100);
     return files;
   };
@@ -57,17 +64,30 @@ test.describe('Translation files agree with English', { tag: ['@i18n'] }, () => 
     expect(empty, 'keys whose value is empty, so the page shows nothing where a word belongs').toEqual([]);
   });
 
-  test('I18N-28: every language keeps the placeholders of the English value', { tag: ['@bug'] }, async ({ request }) => {
-    knownBug('I18N-28', 'the Greek pages.comparison.remove-product is "Αφαίρεση προϊόντος": it drops the {{ name }} the English "Remove {{ name }} from comparison" fills in');
+  /** Values whose placeholders differ from the English value, among the keys both files define (a missing key is I18N-27's). */
+  const placeholderDiffs = async (request: APIRequestContext) => {
     const files = await filesOf(request);
     const english = files.get('en')!;
-    // Only values both files define (a missing key is I18N-27's), and the English file must carry placeholders at all, or the comparison proves nothing.
+    // The English file must carry placeholders at all, or the comparison proves nothing.
     expect([...english.values()].filter((value) => placeholdersOf(value).length > 0).length, 'the English file holds values with placeholders').toBeGreaterThan(0);
-    const differing = others.flatMap((language) =>
+    return others.flatMap((language) =>
       [...files.get(language)!]
         .filter(([key, value]) => english.has(key) && placeholdersOf(value).join() !== placeholdersOf(english.get(key)!).join())
         .map(([key, value]) => `${language} ${key}: "${value}" has {${placeholdersOf(value)}}, English has {${placeholdersOf(english.get(key)!)}}`),
     );
-    expect(differing, 'I18N-28: values whose placeholders differ from the English value').toEqual([]);
+  };
+
+  test('I18N-28: every language keeps the placeholders of the English value', { tag: ['@bug'] }, async ({ request }) => {
+    knownBug('I18N-28', 'the Greek pages.comparison.remove-product is "Αφαίρεση προϊόντος": it drops the {{ name }} the English "Remove {{ name }} from comparison" fills in');
+    expect(await placeholderDiffs(request), 'I18N-28: values whose placeholders differ from the English value').toEqual([]);
+  });
+
+  // The two pins above stay red for as long as their one known difference stands, and they would stay red just the same for a new one
+  // in another language. These two read what the pins do not: every difference but the known ones, so new drift fails the gate now.
+  test('no translation file drifts from English beyond the known I18N-27 and I18N-28 differences', async ({ request }) => {
+    const unknownKeys = (await comparedWithEnglish(request)).filter((line) => !I18N_27.some((key) => others.some((language) => line === `${language} has ${key}, English does not`)));
+    expect(unknownKeys, 'keys that differ between the translation files, apart from the three I18N-27 lists').toEqual([]);
+    const unknownPlaceholders = (await placeholderDiffs(request)).filter((line) => !I18N_28.some((key) => line.startsWith(`${GREEK} ${key}: `)));
+    expect(unknownPlaceholders, 'values whose placeholders differ from English, apart from the I18N-28 one').toEqual([]);
   });
 });

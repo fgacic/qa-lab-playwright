@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
-import { brand, category, product, spec } from '@support/admin-payloads';
+import { REFUSED_STATUSES, brand, category, product, spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
@@ -173,7 +173,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     });
   });
 
-  for (const status of [409, 500]) {
+  for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edited product is refused (${status})`, { tag: ['@negative'] }, () => {
       test.use(withMocks(mock.fail('PUT', PRODUCT, status, { message: 'The product could not be saved.' })));
       test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));

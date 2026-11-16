@@ -64,7 +64,7 @@ test.describe('Sorting', () => {
 
     const { json: found } = await sorted;
     expect(found.data.length, `the catalogue should hold at least two ${FILTERED_CATEGORY}`).toBeGreaterThan(1);
-    expect(found.data.every((p) => p.category.name === FILTERED_CATEGORY), 'only the ticked category is listed').toBe(true);
+    expect(found.data.filter((p) => p.category.name !== FILTERED_CATEGORY).map((p) => p.name), 'products outside the ticked category').toEqual([]);
     expect(found.data.map(sortKey.price)).toBeSorted();
     await expect(homePage.filters.category(FILTERED_CATEGORY)).toBeChecked();
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));

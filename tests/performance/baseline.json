@@ -2,8 +2,8 @@
   "local-aca6f12f06": {
     "home": {
       "lcp": {
-        "median": 1240,
-        "spread": 24
+        "median": 1224,
+        "spread": 8
       },
       "tbt": {
         "median": 0,
@@ -12,8 +12,8 @@
     },
     "search": {
       "lcp": {
-        "median": 1240,
-        "spread": 16
+        "median": 1224,
+        "spread": 12
       },
       "tbt": {
         "median": 0,
@@ -22,8 +22,8 @@
     },
     "product": {
       "lcp": {
-        "median": 1272,
-        "spread": 36
+        "median": 1264,
+        "spread": 16
       },
       "tbt": {
         "median": 0,
@@ -32,18 +32,18 @@
     },
     "cart": {
       "lcp": {
-        "median": 1052,
+        "median": 1048,
         "spread": 12
       },
       "tbt": {
         "median": 0,
-        "spread": 14
+        "spread": 13
       }
     },
     "contact": {
       "lcp": {
-        "median": 1048,
-        "spread": 20
+        "median": 1044,
+        "spread": 16
       },
       "tbt": {
         "median": 0,
@@ -56,7 +56,12 @@
         "spread": 0
       }
     },
-    "product-slow-api": {},
+    "product-slow-api": {
+      "cls": {
+        "median": 0.316,
+        "spread": 0
+      }
+    },
     "contact-slow-api": {
       "cls": {
         "median": 0.17,
@@ -66,6 +71,26 @@
     "cart-slow-api": {
       "cls": {
         "median": 0.107,
+        "spread": 0
+      }
+    },
+    "home-mobile": {
+      "lcp": {
+        "median": 1216,
+        "spread": 12
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 0
+      }
+    },
+    "product-mobile": {
+      "lcp": {
+        "median": 1260,
+        "spread": 20
+      },
+      "tbt": {
+        "median": 0,
         "spread": 0
       }
     }

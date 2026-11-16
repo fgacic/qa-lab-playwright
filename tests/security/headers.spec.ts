@@ -61,6 +61,11 @@ async function shopHeaders(request: APIRequestContext, testInfo: TestInfo) {
   return (await shopAnswer(request, testInfo)).headers();
 }
 
+/** What the report says of the cookies read: the count, and for none that there was nothing to check (a pass that vouches for no cookie). */
+function cookiesInspected(count: number): string {
+  return count ? String(count) : '0: the shop and its API set no cookie, so there was nothing to check; this pass says so, it does not vouch for a cookie';
+}
+
 test.describe('Security headers of the live shop', { tag: ['@security', '@live-only', '@bug'] }, () => {
   for (const { id, header, ok, accepts, why } of expected) {
     test(`the shop sends ${header}`, async ({ request }, testInfo) => {
@@ -95,7 +100,7 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
 // Not pins, so a describe of their own without @bug (verify-bugs.mjs treats every @bug test as a pin that must fail).
 test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['@security', '@live-only'] }, () => {
   // The checks below are not pins: nothing is known about the live site's answer yet, so each states the behaviour a
-  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-15) then.
+  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-18) then.
   // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
 
   test('every cookie the shop and its API set, if any, is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
@@ -106,7 +111,7 @@ test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['
     const answers = [await shopAnswer(request, testInfo), api];
     const cookies = answers.flatMap((answer) => answer.headersArray().filter(({ name }) => name.toLowerCase() === 'set-cookie').map(({ value }) => value));
     // A shop that sets no cookie has nothing to misconfigure (hence "if any" in the title), but the count is recorded so "none" is a stated fact and not an unread loop.
-    testInfo.annotations.push({ type: 'cookies inspected', description: String(cookies.length) });
+    testInfo.annotations.push({ type: 'cookies inspected', description: cookiesInspected(cookies.length) });
 
     for (const cookie of cookies) {
       const name = cookie.split('=')[0];

@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
-import { SEARCH_HIT, category, subcategory } from '@support/admin-payloads';
+import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { REFUSED_STATUSES, SEARCH_HIT, category, subcategory } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () => {
@@ -77,7 +77,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
     test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the reason is shown', async ({ adminCategories, apiMock }) => {
-      knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
+      knownBug('ADM-12', ADM_12, { absence: true });
       const form = await adminCategories.add();
       const sent = apiMock.waitForRequest('POST', '/categories');
 
@@ -108,13 +108,13 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
   });
 
   // The refusal of an edit: 409 when the slug is taken, 500 when the server fails.
-  for (const status of [409, 500]) {
+  for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edit is refused (${status})`, { tag: ['@negative', '@bug'] }, () => {
       test.use(withMocks(mock.fail('PUT', /^\/categories\/[^/]+$/, status, { message: 'The category could not be saved.' })));
       test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
-      test(`the admin is told the edited category was not saved`, async ({ adminCategories, apiMock }) => {
-        knownBug('ADM-23', 'a brand or category edit the API refuses to save (409 slug taken, 500) leaves the form as it was: no message, no "saved", nothing (ADM-12 is the same for a new one).', { absence: true });
+      test('the admin is told the edited category was not saved', async ({ adminCategories, apiMock }) => {
+        knownBug('ADM-23', ADM_23, { absence: true });
         const form = await adminCategories.edit(category.name);
         await expect(form.name.input).toHaveValue(category.name);
         const refused = apiMock.waitForResponse('PUT', `/categories/${category.id}`);

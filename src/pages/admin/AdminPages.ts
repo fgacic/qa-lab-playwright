@@ -1,4 +1,4 @@
-import type { Locator, Page, Request } from '@playwright/test';
+import { expect, type Locator, type Page, type Request } from '@playwright/test';
 import { AdminTable } from '@components/admin/AdminTable';
 import type { AdminSection } from '@components/Header';
 import { apiPath } from '@support/env';
@@ -17,6 +17,41 @@ const SECTION_HEADINGS: Record<AdminSection, string> = {
   Messages: 'Messages',
   Settings: 'Settings',
 };
+
+/** The address each back-office section opens on, stated once, so a section whose path stops following its name fails under its own name. */
+export const ADMIN_SECTION_PATHS: Record<AdminSection, string> = {
+  Dashboard: '/admin/dashboard',
+  Brands: '/admin/brands',
+  Categories: '/admin/categories',
+  Products: '/admin/products',
+  Orders: '/admin/orders',
+  Users: '/admin/users',
+  Messages: '/admin/messages',
+  Settings: '/admin/settings',
+};
+
+/** The smallest side, in pixels, of a bar of the sales chart: gridlines are thinner, lettering is shorter. */
+const MIN_BAR = 20;
+
+/** Every other address of the back office: the reports, the pages that add a record, and the ones that edit or show one (any id will do for a visitor who is turned away). */
+const OTHER_ADMIN_ADDRESSES = [
+  '/admin/reports/statistics',
+  '/admin/reports/average-sales-per-month',
+  '/admin/reports/average-sales-per-week',
+  '/admin/products/add',
+  '/admin/brands/add',
+  '/admin/categories/add',
+  '/admin/users/add',
+  '/admin/products/edit/qalab',
+  '/admin/brands/edit/qalab',
+  '/admin/categories/edit/qalab',
+  '/admin/users/edit/qalab',
+  '/admin/orders/edit/qalab',
+  '/admin/messages/qalab',
+] as const;
+
+/** Every address of the back office a visitor could type: the eight sections and `OTHER_ADMIN_ADDRESSES`. */
+export const ADMIN_ADDRESSES: readonly string[] = [...Object.values(ADMIN_SECTION_PATHS), ...OTHER_ADMIN_ADDRESSES];
 
 export class AdminDashboardPage {
   readonly shell: AppShell;
@@ -43,15 +78,71 @@ export class AdminDashboardPage {
     return this.page.getByRole('heading', { name: SECTION_HEADINGS[section], exact: true });
   }
 
+  /**
+   * The heights, in pixels and left to right, of the bars the sales chart has drawn, once its animation has ended. A <canvas>
+   * has nothing to read and the app colours each bar at random, so the picture is measured, not compared: a bar is a run
+   * of non-white pixels at least `MIN_BAR` tall and `MIN_BAR` wide (gridlines and lettering are neither), and the chart is
+   * taken as finished when two reads 250 ms apart agree on the bars and something is drawn at all (axes are drawn even
+   * for a report that is empty or failed, so a blank canvas is a chart that has not started).
+   */
+  @step('Measure the bars of the sales chart')
+  async drawnBars(): Promise<number[]> {
+    const read = () => this.salesChart.evaluate((canvas: HTMLCanvasElement, minBar: number) => {
+      const { width, height } = canvas;
+      const { data } = canvas.getContext('2d')!.getImageData(0, 0, width, height);
+      const inked = (x: number, y: number) => {
+        const at = (y * width + x) * 4;
+        return data[at + 3] > 0 && (data[at] < 245 || data[at + 1] < 245 || data[at + 2] < 245);
+      };
+      const longestRun = (x: number) => {
+        let best = 0;
+        for (let y = 0, start = -1; y <= height; y++) {
+          if (y < height && inked(x, y)) {
+            if (start < 0) start = y;
+          } else if (start >= 0) {
+            best = Math.max(best, y - start);
+            start = -1;
+          }
+        }
+        return best;
+      };
+      let anyInk = false;
+      for (let i = 3; i < data.length && !anyInk; i += 4) anyInk = data[i] > 0;
+      const bars: number[] = [];
+      let from = -1;
+      for (let x = 0; x <= width; x++) {
+        const tall = x < width ? longestRun(x) : 0;
+        if (tall >= minBar) {
+          if (from < 0) from = x;
+        } else if (from >= 0) {
+          if (x - from >= minBar) bars.push(longestRun(Math.floor((from + x) / 2)));
+          from = -1;
+        }
+      }
+      return { anyInk, bars };
+    }, MIN_BAR);
+    let previous = '';
+    let bars: number[] = [];
+    await expect.poll(async () => {
+      const read1 = await read();
+      const key = JSON.stringify(read1);
+      const settled = read1.anyInk && key === previous;
+      previous = key;
+      bars = read1.bars;
+      return settled;
+    }, { message: 'the sales chart finished drawing', intervals: [250] }).toBe(true);
+    return bars;
+  }
+
   @step('Open the admin dashboard')
   async open(): Promise<void> {
     await this.shell.gotoAndSettle('/admin/dashboard', 'GET', /^\/invoices$/);
   }
 
-  /** Goes to the dashboard's address without waiting for its data: for a visitor who may be turned away before it asks for any. */
-  @step('Try to open the admin dashboard')
-  async tryToOpen(): Promise<void> {
-    await this.shell.goto('/admin/dashboard');
+  /** Goes to a back-office address (the dashboard's by default) without waiting for its data: for a visitor who may be turned away before it asks for any. */
+  @step('Try to open {0}')
+  async tryToOpen(address: string = ADMIN_SECTION_PATHS.Dashboard): Promise<void> {
+    await this.shell.goto(address);
   }
 }
 
@@ -184,6 +275,11 @@ export class AdminStatisticsPage {
     return this.table(title).getByRole('row').filter({ has: this.page.getByRole('cell') });
   }
 
+  /** The cells of one row of a report, in column order: the name, then the figure as the page writes it. */
+  cells(title: ReportTitle, row = 0): Locator {
+    return this.report(title).nth(row).getByRole('cell');
+  }
+
   /** The column titles of a report (`reportColumns`): all that is left on screen when its answer is empty. */
   columns(title: ReportTitle): Locator {
     return this.table(title).getByRole('columnheader');
@@ -239,7 +335,7 @@ export class AdminSalesReportPage {
     return other;
   }
 
-  /** The year of the browser's own clock: the year the picker has to reach, and the one the page itself reads. */
+  /** The year of the page's own clock (not the test runner's, and so still the one the picker reads if the suite ever installs `page.clock`): the year the picker has to reach. */
   async currentYear(): Promise<string> {
     return String(await this.page.evaluate(() => new Date().getFullYear()));
   }

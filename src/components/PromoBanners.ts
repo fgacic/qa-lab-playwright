@@ -5,7 +5,6 @@ import { step } from '@support/step';
 export class PromoBanners {
   readonly documentationLink: Locator;
   readonly testingGuideButton: Locator;
-  readonly bugHuntingButton: Locator;
   readonly coursePromoLink: Locator;
   readonly guide: Locator;
   readonly guideNext: Locator;
@@ -15,7 +14,6 @@ export class PromoBanners {
   constructor(private readonly page: Page) {
     this.documentationLink = page.getByRole('link', { name: 'Documentation' });
     this.testingGuideButton = page.getByRole('button', { name: 'Testing Guide' });
-    this.bugHuntingButton = page.getByRole('button', { name: /Bug Hunting/ });
     this.coursePromoLink = page.getByRole('link', { name: 'Explore courses' });
     // The guide opens as a split-screen panel with no landmark role; its heading identifies it.
     this.guide = page.getByRole('heading', { name: '📋 Testing Guide', level: 1 });

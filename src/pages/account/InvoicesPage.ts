@@ -56,8 +56,4 @@ export class InvoiceDetailsPage {
     const column = headers.findIndex((header) => header.trim() === 'Quantity');
     return this.productLines.filter({ hasText: productName }).getByRole('cell').nth(column);
   }
-
-  field(label: string): Locator {
-    return this.page.getByLabel(label, { exact: true });
-  }
 }

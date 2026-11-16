@@ -5,9 +5,9 @@
 #   npm run test:visual:update     re-record only the baselines whose pixels changed beyond the tolerance (--update-snapshots=changed),
 #                                  so a re-run does not rewrite every PNG and churn the repository (commit the result)
 #
-# Baseline storage: the 25 PNGs under tests/__screenshots__ weigh about 5.9 MB together and are committed as plain files.
+# Baseline storage: the 30 PNGs under tests/__screenshots__ weigh about 7.4 MB together and are committed as plain files.
 # Every re-record of a page adds its new PNG to the history (home alone is 1.2 MB), and `changed` keeps that to the pages
-# that really moved; a full re-record would add the whole 5.9 MB again. Plain git carries that easily for now.
+# that really moved; a full re-record would add the whole 7.4 MB again. Plain git carries that easily for now.
 # Recommendation: stay on plain files while the whole set is under roughly 25 MB; past that, move tests/__screenshots__
 # to Git LFS (`git lfs track "tests/__screenshots__/**"`) and set `lfs: true` on the CI checkout. History is not migrated until then.
 set -euo pipefail

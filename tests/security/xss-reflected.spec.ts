@@ -6,7 +6,9 @@ import { escapeRegExp } from '@support/regexp';
 
 /**
  * Reflected input: what a visitor types is shown back without being stored anywhere, so these
- * run on both targets, the public site included (they only search and read).
+ * run on both targets, the public site included (they only search and read). The chat tests send each payload to the chat's "find a
+ * product" reply, which is a product search like the search box: one read per payload and run, nothing is written, and the bot
+ * is a scripted menu (see ChatWidget), so no model or third party is asked.
  *
  * Checked, so not covered: the app reads no query string or fragment into a page. A probe marker sent as `?q=`, `?search=`,
  * `?query=`, `?page=`, `?by_category=`, `?returnUrl=`, `?subject=` and `#fragment` appears nowhere in the rendered text, so

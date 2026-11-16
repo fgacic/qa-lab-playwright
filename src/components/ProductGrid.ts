@@ -60,15 +60,6 @@ export class ProductGrid {
     return this.names.allInnerTexts();
   }
 
-  /** Every card of `products`, in order, shows a picture whose alt text is the product's name. */
-  async expectPicturesNamed(products: { name: string }[]): Promise<void> {
-    expect(products, 'the list should hold products').not.toHaveLength(0);
-    await expect(this.cards).toHaveCount(products.length);
-    for (const [index, product] of products.entries()) {
-      await expect(this.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
-    }
-  }
-
   /** Card prices as numbers, in display order. */
   async priceValues(): Promise<number[]> {
     return (await this.prices.allInnerTexts()).map((text) => Number(text.replace(/[^0-9.]/g, '')));

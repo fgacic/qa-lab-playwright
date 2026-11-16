@@ -47,13 +47,17 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
     expect(untranslatedKeys(['Write to info@testsmith.io or see nav.home', 'Visit www.practicesoftwaretesting.com, then login.title'])).toEqual(['nav.home', 'login.title']);
   });
 
-  // Two shapes the detector is built not to flag, pinned so a change to it is a decision and not an accident: a key whose
+  // One shape the detector is built not to flag, pinned so a change to it is a decision and not an accident: a key whose
   // only other segment is a number ("errors.404") looks like a decimal, a version or an order number ("12.345", "2.5kg",
-  // "v5.3.1"), and a key of two short segments ("ui.ok") looks like an abbreviation ("e.g", "i.e", "d.h", "π.χ").
-  // Both limits end at a longer name, which is flagged.
-  test('documented limits: a number segment and two short segments are not flagged', () => {
-    expect(untranslatedKeys(['errors.404', 'ui.ok'])).toEqual([]);
+  // "v5.3.1"). The limit ends at a longer name, which is flagged. The abbreviations the shop's text holds are listed by name
+  // ("e.g", "i.e", "d.h", "z.B", "π.χ", "U.S"), so a key of two short segments ("ui.ok") is flagged.
+  test('documented limit: a key with one number segment is not flagged', () => {
+    expect(untranslatedKeys(['errors.404'])).toEqual([]);
     expect(untranslatedKeys(['errors.notFound', 'ui.okay', 'errors.404.title'])).toEqual(['errors.notFound', 'ui.okay', 'errors.404.title']);
+  });
+
+  test('a key of two short segments is flagged, an abbreviation is not', () => {
+    expect(untranslatedKeys(['ui.ok', 'nav.go', 'id.no', 'e.g', 'i.e', 'd.h', 'z.B', 'π.χ', 'U.S'])).toEqual(['ui.ok', 'nav.go', 'id.no']);
   });
 
   test('real page text holds no key', () => {

@@ -1,4 +1,5 @@
 import { expect, test } from '@fixtures';
+import { RegisterPage } from '@pages/RegisterPage';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Routing', () => {
@@ -37,5 +38,30 @@ test.describe('Routing', () => {
 
     await expect(page).toHaveURL('/');
     await expect(shop.home.shell.header.brandLink).toBeVisible();
+  });
+
+  // The mocked session (a fake token and a mocked GET /users/me) is enough: the page decides on the token it holds, and nothing is
+  // written. The pages are opened by the tests, after the session is in place (a page fixture would open them first).
+  test.describe('a signed-in customer opens an auth page', { tag: ['@negative', '@bug'] }, () => {
+    test('/auth/login does not show the login form again', async ({ signedIn: _, shop, page }) => {
+      knownBug('BUG-64', 'a signed-in customer who opens /auth/login is shown the login form instead of being sent on to the account.');
+      await shop.login.open();
+      // Precondition, true whether or not the bug is fixed: the customer is signed in (the account menu is in the header).
+      await expect(shop.login.shell.header.userMenu).toBeVisible();
+
+      await expect(shop.login.heading, 'BUG-64: the login form is not offered to a signed-in customer').toBeHidden({ timeout: BUG_TIMEOUT });
+      await expect(page, 'BUG-64: the signed-in customer is sent away from /auth/login').not.toHaveURL('/auth/login');
+    });
+
+    test('/auth/register does not show the registration form again', async ({ signedIn: _, shop, page }) => {
+      knownBug('BUG-65', 'a signed-in customer who opens /auth/register is shown the registration form instead of being sent on to the account.');
+      const register = new RegisterPage(page);
+      await register.open();
+      // Precondition, true whether or not the bug is fixed: the customer is signed in (the account menu is in the header).
+      await expect(shop.login.shell.header.userMenu).toBeVisible();
+
+      await expect(register.heading, 'BUG-65: the registration form is not offered to a signed-in customer').toBeHidden({ timeout: BUG_TIMEOUT });
+      await expect(page, 'BUG-65: the signed-in customer is sent away from /auth/register').not.toHaveURL('/auth/register');
+    });
   });
 });

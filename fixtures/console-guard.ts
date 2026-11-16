@@ -9,8 +9,9 @@ export interface ConsoleGuard {
    * allowance covers). The pattern is recorded as a test annotation. The defects that have a pin of their own are allowed
    * suite-wide (src/support/console-guard.ts), but only on the route of the page that raises them, and the "Unauthorized" echo of
    * `GET /users/me` only in a test whose browser received that 401; everything else is declared here, per test.
+   * With `requiresFailure` the line is allowed only in a test in which a request really failed (see `Allowance.requiresFailure`).
    */
-  allow(pattern: RegExp, reason: string): void;
+  allow(pattern: RegExp, reason: string, options?: { requiresFailure?: boolean }): void;
   /**
    * The errors the browser has logged or thrown so far in this test that match `pattern`, as one line each. How a pin of a
    * defect that shows only in the console reads it, including the ones the suite allows (console-guard.ts): the guard has
@@ -54,8 +55,8 @@ export const test = mocksTest.extend<ConsoleGuardFixtures>({
           await Promise.all(reading);
           return seen.filter((error) => pattern.test(error.text) || (error.args !== undefined && pattern.test(error.args))).map(describeError);
         },
-        allow(pattern, reason) {
-          allowances.push({ pattern, reason });
+        allow(pattern, reason, options) {
+          allowances.push({ pattern, reason, requiresFailure: options?.requiresFailure });
           testInfo.annotations.push({ type: 'console error allowed', description: `${pattern}: ${reason}` });
         },
       });

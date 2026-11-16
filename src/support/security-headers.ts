@@ -23,7 +23,11 @@ export function directivesOf(policy: string): Map<string, string[]> {
  */
 export const UNSAFE_SCRIPT_SOURCES = ["'unsafe-inline'", "'unsafe-eval'", '*', 'https:', 'http:', 'data:'];
 
-/** Whether a Content-Security-Policy limits where scripts may come from: it names a script source (`script-src`, else `default-src`), and none of the unsafe ones. */
+/**
+ * Whether a Content-Security-Policy limits where scripts may come from: it names a script source (`script-src`, else `default-src`), and none of the unsafe ones.
+ * Deliberately only that (SEC-01 is "limits where scripts load from"): `object-src`, `base-uri`, `script-src-elem`, `frame-ancestors` and
+ * the rest are not read, so a pass here is not a full audit of the policy.
+ */
 export function limitsScripts(policy: string): boolean {
   const directives = directivesOf(policy);
   const scripts = directives.get('script-src') ?? directives.get('default-src');

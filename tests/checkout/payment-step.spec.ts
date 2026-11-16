@@ -1,6 +1,7 @@
 import { INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/pages';
+import { holdAnswers } from '@support/answer-gate';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { acceptedGuestInvoice } from '@support/payloads';
@@ -200,20 +201,18 @@ test.describe('Checkout: payment step', () => {
     // The order is answered too: if the second click lands on Confirm, which replaces the button, no real write can happen.
     test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
 
-    // The answer is held back so that both clicks of the double click land while the check is still pending. Answered at once, the
-    // page may already have replaced the button when WebKit delivers the second click, and one check would be sent whatever the page does.
-    const CHECK_ANSWER_DELAY_MS = 500;
-
-    test('a double click on Check payment sends one check', async ({ checkout, apiMock }) => {
+    test('a double click on Check payment sends one check', async ({ checkout, page }) => {
       knownBug('BUG-53', 'a double click on "Check payment" sends the check twice.');
-      await apiMock.delay('POST', '/payment/check', () => true, CHECK_ANSWER_DELAY_MS);
+      // Held until both clicks have landed: answered at once, the page may already have replaced the button when WebKit
+      // delivers the second click, and one check would be sent whatever the page does.
+      const check = await holdAnswers(page, /\/payment\/check$/, PAYMENT_PASSED, 200);
       await checkout.payment.choose('cash-on-delivery');
-      const before = await apiMock.mark();
 
       await checkout.payment.checkPaymentWithDoubleClick();
+      check.release();
 
       await expect(checkout.payment.successMessage).toHaveText(PAYMENT_PASSED.message);
-      expect(apiMock.requestsTo('POST', '/payment/check', { since: before }), 'BUG-53: one check is sent for one decision').toBe(1);
+      expect(check.reached, 'BUG-53: one check is sent for one decision').toBe(1);
     });
   });
 

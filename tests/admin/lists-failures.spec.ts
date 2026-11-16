@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { AdminListName } from '@pages/admin/admin-lists';
 import { LIST_ANSWERS, contactMessage, customer, order, paginated, product } from '@support/admin-payloads';
-import { alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
+import { allowLoggedFailure, appearsWithin } from '@pages/admin/alerts';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /**
@@ -26,7 +26,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
         await expect(list.table.columnHeader(column)).toBeVisible();
         await expect(list.table.rows).toHaveCount(0);
 
-        expect(await alertAppears(list.failure), `no failure message appears on an empty ${name} list`).toBe(false);
+        expect(await appearsWithin(list.failure), `no failure message appears on an empty ${name} list`).toBe(false);
       });
     });
 
@@ -70,7 +70,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
 
         await expect(list.table.rows).toHaveCount(0);
         await expect(list.table.columnHeader(column)).toBeVisible();
-        expect(await alertAppears(list.failure), `no failure message appears when a ${name} search finds nothing`).toBe(false);
+        expect(await appearsWithin(list.failure), `no failure message appears when a ${name} search finds nothing`).toBe(false);
       });
     });
 

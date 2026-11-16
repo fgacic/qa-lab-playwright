@@ -1,8 +1,9 @@
 import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
-import { PAYMENT_METHODS } from '@components/checkout/PaymentStep';
-import { expect, test, withMocks } from '@fixtures';
+import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock, twoProductCart } from '@fixtures/pages';
+import { holdAnswers } from '@support/answer-gate';
 import { knownBug } from '@support/known-bug';
+import { acceptedGuestInvoice } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /** What the three-product flow changes: the first product goes to this quantity, the second is removed. */
@@ -42,7 +43,6 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
       await checkout.proceedToPayment(fakeGuest(), fakeAddress());
 
       await expect(checkout.payment.heading).toBeVisible();
-      await expect(checkout.payment.method.getByRole('option')).toHaveCount(Object.keys(PAYMENT_METHODS).length + 1);
       await expect(checkout.payment.checkPaymentButton).toBeDisabled();
     });
   });
@@ -130,18 +130,25 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     });
   });
 
-  test('a double click on Confirm places one order', { tag: ['@self-hosted', '@bug'] }, async ({ checkout, apiMock }) => {
-    knownBug('BUG-46', 'a double click on Confirm sends the order twice, so two invoices are created for one cart.');
-    await checkout.proceedToPayment(fakeGuest(), fakeAddress());
-    await checkout.payment.choose('cash-on-delivery');
-    await checkout.payment.checkPayment();
-    await expect(checkout.payment.confirmButton).toBeEnabled();
-    const before = await apiMock.mark();
+  test.describe('when Confirm is double-clicked', { tag: ['@mocked', '@bug'] }, () => {
+    // The check and the lookup are answered, and so is the cart's deletion: the order is answered by the gate below, so no real order is placed.
+    test.use({ ...withMocks(postcodeLookupMock, mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.respond('DELETE', /^\/carts\/[^/]+$/, undefined, 204)), refuseUnmockedWrites: true });
 
-    await checkout.payment.confirmWithDoubleClick();
+    test('a double click on Confirm places one order', async ({ checkout, page }) => {
+      knownBug('BUG-46', 'a double click on Confirm sends the order twice, so two invoices are created for one cart.');
+      // Held until both clicks have landed: answered at once, the page may replace Confirm before the second click (it does on WebKit) and one order is sent whatever the page does.
+      const order = await holdAnswers(page, /\/invoices\/guest$/, acceptedGuestInvoice);
+      await checkout.proceedToPayment(fakeGuest(), fakeAddress());
+      await checkout.payment.choose('cash-on-delivery');
+      await checkout.payment.checkPayment();
+      await expect(checkout.payment.confirmButton).toBeEnabled();
 
-    await expect(checkout.wizard.confirmation).toBeVisible();
-    expect(apiMock.requestsTo('POST', '/invoices/guest', { since: before }), 'BUG-46: one order is sent for one cart').toBe(1);
+      await checkout.payment.confirmWithDoubleClick();
+      order.release();
+
+      await expect(checkout.wizard.confirmationFor(acceptedGuestInvoice.invoice_number)).toBeVisible();
+      expect(order.reached, 'BUG-46: one order is sent for one cart').toBe(1);
+    });
   });
 
   test('browser Back from the sign-in step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {

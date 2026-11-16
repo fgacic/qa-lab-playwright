@@ -9,10 +9,10 @@ import type { ConsoleGuard } from '@fixtures/console-guard';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 import type { ApiMock, MockRoute } from '@support/api-mock';
 import { skipIfBotChallenge } from '@support/bot-challenge';
+import { freezeClock } from '@support/clock';
 import { KNOWN, languagesOf } from '@support/i18n-baseline';
 import {
   REFERENCE_NUMBER,
-  freezeClock,
   SAME_IN_EVERY_LANGUAGE,
   describeUiText,
   isSharedWithEnglish,
@@ -95,6 +95,9 @@ interface Visit {
 /** The header's "Categories" menu in each language: proof that the translation file is in, whatever else is on the page (signed in or not). */
 const CATEGORIES_MENU: Record<Language, string> = { de: 'Kategorien', el: 'Κατηγορίες', en: 'Categories', es: 'Categorías', fr: 'Catégories', nl: 'Categorieën', tr: 'Kategoriler' };
 
+/** A well-formed product id (26 characters) no product has: the shop's nearest error state for a product page. */
+const NO_SUCH_PRODUCT_ID = '0'.repeat(26);
+
 /** An empty page of each list the account pages ask for, and the two-factor setup the profile starts. */
 const accountData = [
   mock.respond('GET', '/favorites', []),
@@ -150,7 +153,7 @@ const VISITS: Visit[] = [
     name: 'product not found', pageStrings: 1,
     logs: { pattern: /^Failed to load resource: the server responded with a status of 500/, reason: 'the one request this visit makes that fails is the related products of an id the shop does not know: it answers 500, and the browser logs the failed request' },
     // There is no 404 page: an unknown route redirects home (BUG-02). An unknown product id is the nearest error state.
-    path: '/product/00000000000000000000000000',
+    path: `/product/${NO_SUCH_PRODUCT_ID}`,
     // All the page draws is the "Related products" heading.
     ready: (page) => [page.getByRole('heading', { level: 2 })],
   },

@@ -4,6 +4,7 @@
 // scenario = { pins: [{ file, line, title, id, projects, onLive?: true, runs: [outcome, ...] }] }
 // A pin may also set `noResult: true` (listed, but absent from the run's report) and the scenario `runErrors: [message]` (a report
 // whose `errors` is set when the run is not a listing). The log records every argument the runner was given.
+// A pin may give `runsByProject: { webkit: [outcome, ...] }` to answer differently in one project (the others take `runs`); runs are counted per pin and project.
 // An outcome is 'reproduces' | 'fixed' | 'other' (a failure that does not name the id); the nth run of a pin takes the nth outcome
 // (the last repeats), so [other, reproduces] is a pin that fails for another reason and then reproduces on its rerun.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -31,9 +32,11 @@ for (const pin of scenario.pins) {
   if (rerun && !new RegExp(grep).test(pin.title)) continue;
   const tests = here.map((projectName) => {
     if (listing) return { projectName, status: 'skipped', annotations: [], results: [] };
-    const n = counts.get(pin.title) ?? 0;
-    counts.set(pin.title, n + 1);
-    const outcome = pin.runs[Math.min(n, pin.runs.length - 1)];
+    const countKey = `${pin.title}|${projectName}`;
+    const n = counts.get(countKey) ?? 0;
+    counts.set(countKey, n + 1);
+    const runs = pin.runsByProject?.[projectName] ?? pin.runs;
+    const outcome = runs[Math.min(n, runs.length - 1)];
     const location = { file: `/repo/${pin.file}` };
     const assertion = (text) => ({ message: `Error: ${text}\n\nexpect(received).toBe(expected)`, location });
     const annotations = [{ type: 'known bug', description: `${pin.id}: a defect` }];

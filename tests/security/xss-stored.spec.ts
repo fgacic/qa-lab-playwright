@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test as base } from '@fixtures';
-import { HomePage } from '@pages/HomePage';
 import { ProfilePage } from '@pages/account/ProfilePage';
 import { ATTRIBUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { API_URL } from '@support/env';
@@ -12,8 +11,8 @@ import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/
  * the user themselves. These submit attack strings, so they only ever run against the
  * self-hosted Toolshop, our own environment, never the public site (@self-hosted).
  *
- * Cleanup: the brand, the product and the customer are deleted again through the admin API after every test (fixtures
- * `brandNames`, `productIds` and `customerEmails`), pass or fail, and a failed cleanup fails the test. One kind of record is
+ * Cleanup: the brand, the product and the customer are deleted again through the admin API after every test (the shared
+ * `cleanups` fixture, fed by `removeBrandLater`, `makeRental` and `removeCustomerLater`), pass or fail, and a failed cleanup fails the test. One kind of record is
  * deliberately left behind, uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
  * for every CI run (the same trade-off as tests/admin-e2e): a contact message per contact test, because the API cannot
  * delete a message (DELETE /messages/{id} answers 405).
@@ -37,32 +36,39 @@ const uniqueKey = () => randomUUID().slice(0, 8);
 /**
  * What a test saved in the shared database is removed again by the admin API, whether an assertion failed or not, and even
  * when the save went out but its answer never arrived: a brand is found by the name the test declared before saving, a
- * product by the id the test arranged, a customer by the e-mail the test registered with. A cleanup that fails fails the test,
- * so a leak is never silent.
+ * product by the id the test arranged, a customer by the e-mail the test registered with. The removals are entries of the
+ * shared `cleanups` fixture (fixtures/security.ts), which runs them last made first and fails the test if one fails, so a leak is
+ * never silent.
  */
-const test = base.extend<{ brandNames: Set<string>; productIds: Set<string>; customerEmails: Set<string>; makeRental: (product: { name: string; description?: string }) => Promise<string> }>({
-  brandNames: async ({ request, api, adminToken }, use) => {
-    const names = new Set<string>();
-    await use(names);
-    if (!names.size) return;
-    const token = await adminToken();
-    const brands = (await (await request.get(`${API_URL}/brands`)).json()) as { id: string; name: string }[];
-    const outcomes = await Promise.allSettled(brands.filter((brand) => names.has(brand.name)).map((brand) => api.deleteBrand(token, brand.id)));
-    const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
-    if (failures.length) throw new AggregateError(failures, 'Cleaning up the brands this test saved failed');
+const test = base.extend<{
+  removeBrandLater: (name: string) => void;
+  removeCustomerLater: (email: string) => void;
+  makeRental: (product: { name: string; description?: string }) => Promise<string>;
+}>({
+  removeBrandLater: async ({ request, api, adminToken, cleanups }, use) => {
+    await use((name) =>
+      cleanups.push(async () => {
+        const token = await adminToken();
+        const brands = (await (await request.get(`${API_URL}/brands`)).json()) as { id: string; name: string }[];
+        await Promise.all(brands.filter((brand) => brand.name === name).map((brand) => api.deleteBrand(token, brand.id)));
+      }),
+    );
   },
-  productIds: async ({ api, adminToken }, use) => {
-    const ids = new Set<string>();
-    await use(ids);
-    const outcomes = await Promise.allSettled([...ids].map(async (id) => api.deleteProduct(await adminToken(), id)));
-    const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
-    if (failures.length) throw new AggregateError(failures, 'Cleaning up the products this test made failed');
+  removeCustomerLater: async ({ api, adminToken, cleanups }, use) => {
+    await use((email) =>
+      cleanups.push(async () => {
+        const token = await adminToken();
+        // Found by e-mail: a registration whose answer never arrived has no id the test could have kept. None found means nothing was saved.
+        const user = await api.findUserByEmail(token, email);
+        if (user) await api.deleteUser(token, user.id);
+      }),
+    );
   },
   /**
-   * Makes a rental of the test's own through the admin API, removed after the test by `productIds`, and returns its id. A rental, because
+   * Makes a rental of the test's own through the admin API, removed after the test, and returns its id. A rental, because
    * the shop's default list shows none, so no catalogue spec sees it while it exists.
    */
-  makeRental: async ({ api, catalog, adminToken, productIds }, use) => {
+  makeRental: async ({ api, catalog, adminToken, cleanups }, use) => {
     await use(async ({ name, description = 'Made by the stored-input checks.' }) => {
       const template = await catalog.inStock();
       const { id } = await api.createProduct(await adminToken(), {
@@ -74,24 +80,9 @@ const test = base.extend<{ brandNames: Set<string>; productIds: Set<string>; cus
         product_image_id: template.product_image.id,
         is_rental: true,
       });
-      productIds.add(id);
+      cleanups.push(async () => api.deleteProduct(await adminToken(), id));
       return id;
     });
-  },
-  customerEmails: async ({ api, adminToken }, use) => {
-    const emails = new Set<string>();
-    await use(emails);
-    if (!emails.size) return;
-    const token = await adminToken();
-    const outcomes = await Promise.allSettled(
-      [...emails].map(async (email) => {
-        // Found by e-mail: a registration whose answer never arrived has no id the test could have kept. None found means nothing was saved.
-        const user = await api.findUserByEmail(token, email);
-        if (user) await api.deleteUser(token, user.id);
-      }),
-    );
-    const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
-    if (failures.length) throw new AggregateError(failures, 'Cleaning up the customers this test registered failed');
   },
 });
 
@@ -133,9 +124,9 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     await xss.expectNotExecuted();
   });
 
-  test('a brand name is shown as text where the admin and the storefront list it', async ({ adminBrands, adminProducts, newVisitor, brandNames, xss }) => {
+  test('a brand name is shown as text where the admin and the storefront list it', async ({ adminBrands, adminProducts, visitorHomePage, removeBrandLater, xss }) => {
     const name = `Qa Lab ${payload} ${uniqueKey()}`;
-    brandNames.add(name); // before the save, so the fixture removes it even if the save's answer never arrives
+    removeBrandLater(name); // before the save, so the fixture removes it even if the save's answer never arrives
     // Both lists are fixtures here, so the page may be on either: start from the brands.
     await adminBrands.open();
     const form = await adminBrands.add();
@@ -155,10 +146,9 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     await xss.expectNoInjectedElements();
 
     // 3. The storefront's filter sidebar, as a shopper sees it: a context of their own with nobody signed in, not the admin's.
-    const shopper = new HomePage(await newVisitor());
-    await shopper.open();
-    await expect(shopper.filters.brand(name)).toBeVisible();
-    await xss.expectNoInjectedElements(shopper.page);
+    await visitorHomePage.open();
+    await expect(visitorHomePage.filters.brand(name)).toBeVisible();
+    await xss.expectNoInjectedElements(visitorHomePage.page);
 
     await xss.expectNotExecuted();
   });
@@ -211,10 +201,10 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
 test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@security', '@account', '@self-hosted'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] }, xssWatch: true });
 
-  test('a name chosen at registration is shown in the header and on the profile as text', async ({ registerPage, customerEmails, xss }) => {
+  test('a name chosen at registration is shown in the header and on the profile as text', async ({ registerPage, removeCustomerLater, xss }) => {
     // The API caps a first name at 40 characters; this payload stays under it.
     const customer = { ...fakeCustomer(), firstName: `Qa${breakout}` };
-    customerEmails.add(customer.email); // before the registration, so the fixture removes the account even if its answer never arrives
+    removeCustomerLater(customer.email); // before the registration, so the fixture removes the account even if its answer never arrives
 
     const loginPage = await registerPage.register(customer);
     const account = await loginPage.login(customer.email, customer.password);
@@ -231,9 +221,9 @@ test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@se
     await xss.expectNotExecuted();
   });
 
-  test('a last name and an address saved on the profile are shown as text, in the header and in the profile fields', async ({ api, loginPage, customerEmails, xss }) => {
+  test('a last name and an address saved on the profile are shown as text, in the header and in the profile fields', async ({ api, loginPage, removeCustomerLater, xss }) => {
     const customer = fakeCustomer();
-    customerEmails.add(customer.email); // before the registration, so the fixture removes the account even if its answer never arrives
+    removeCustomerLater(customer.email); // before the registration, so the fixture removes the account even if its answer never arrives
     await api.registerCustomer(customer);
     const account = await loginPage.login(customer.email, customer.password);
     await expect(account.header.userMenu, 'signed in before the profile is opened').toHaveText(`${customer.firstName} ${customer.lastName}`);

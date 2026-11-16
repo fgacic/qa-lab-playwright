@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, mock, test, withMocks } from '@fixtures';
+import { SUITE_OWNED_NAME } from '@support/catalog-terms';
 import { settleImages } from '@support/visual';
 import { emptyProductPage } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
@@ -12,9 +13,9 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
  * are off, a shot waits for every image to be decoded, and anything that can change between runs is masked.
  *
  * What this covers, and what it does not: ONE engine (Chromium, no Firefox or WebKit rendering), ONE theme (the shop has a
- * single, light one: colour scheme is pinned to light), ONE language (English), ONE desktop width (1280×800) and ONE phone width
- * (390×844, the home page only). A layout break that only shows in another engine, another width or another language is
- * not seen here; the functional specs and the axe reflow check (tests/a11y) carry what they can of that.
+ * single, light one: colour scheme is pinned to light), ONE language for every page but one (English; the home page is also taken in German, whose words run longest),
+ * ONE desktop width (1280×800) and ONE phone width (390×844, the home page and the cart). A layout break that only shows in another
+ * engine, another width or another language is not seen here; the functional specs and the axe reflow check (tests/a11y) carry what they can of that.
  *
  * Two kinds of budget, because they prove different things. The full-page shots use the default `maxDiffPixels`
  * of playwright.config.ts (150): a net for layout, colour and missing or moved blocks. It does NOT catch a
@@ -24,6 +25,11 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
  */
 /** No pixel may differ, by any amount: for the regions a customer reads to decide (see the header). */
 const ZERO_BUDGET = { maxDiffPixels: 0, threshold: 0 } as const;
+/**
+ * For a shot of one small element, not a page: the default 150 differing pixels would be a large share of it (a changed word is about
+ * that many), so the budget is tighter, 30 pixels, which still absorbs the anti-aliasing of rounded corners.
+ */
+const SMALL_ELEMENT_BUDGET = { maxDiffPixels: 30 } as const;
 
 test.describe('Visual regression', { tag: ['@visual'] }, () => {
   test('home page', async ({ homePage, api, page }) => {
@@ -50,10 +56,23 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await expect(page).toHaveScreenshot('category.png', { fullPage: true });
   });
 
-  test('rentals', async ({ rentalsPage, page }) => {
-    await expect(rentalsPage.grid.cards.first()).toBeVisible();
-    await settleImages(page);
-    await expect(page).toHaveScreenshot('rentals.png', { fullPage: true });
+  // The rentals list is the one page that shows the suite's own temporary rentals ("QaLab ...", made for the moments the back-office and
+  // stored-XSS specs run), so the shot depends on what else is running. The page is answered with the seeded rentals only: the same list
+  // the shop gives when nothing else is running, so the baseline is the real page, and no other spec can change it.
+  test.describe('rentals', () => {
+    test.use({
+      apiMocks: async ({ api }, use) => {
+        const rentals = await api.listProducts({ is_rental: 'true' });
+        const seeded = rentals.data.filter((product) => !SUITE_OWNED_NAME.test(product.name));
+        await use({ routes: [mock.respond('QUERY', '/products', { ...rentals, data: seeded, total: seeded.length })] });
+      },
+    });
+
+    test('rentals', async ({ rentalsPage, page }) => {
+      await expect(rentalsPage.grid.cards.first()).toBeVisible();
+      await settleImages(page);
+      await expect(page).toHaveScreenshot('rentals.png', { fullPage: true });
+    });
   });
 
   test('contact form with errors', async ({ contactPage, page }) => {
@@ -171,6 +190,17 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     });
   });
 
+  test.describe('cart on a phone', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    // The layout AX-15 (tests/a11y) reports as too wide at 320 px: this is the screen it still fits, so the day it is fixed there is a baseline to hold.
+    test('cart on a phone', async ({ checkout, page }) => {
+      await expect(checkout.cart.table.rows).toHaveCount(1);
+      await settleImages(page);
+      await expect(page).toHaveScreenshot('cart-phone.png');
+    });
+  });
+
   test.describe('catalogue with no products (mocked)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));
 
@@ -181,11 +211,41 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     });
   });
 
+  test('home page in German', async ({ homePage, api, page }) => {
+    // The longest words of the shop's seven languages: where a header or a button that is sized for English would overflow or wrap.
+    await homePage.header.language.switchTo('de');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+    await expect(homePage.header.navItem('categories')).toHaveText('Kategorien');
+    const firstPage = await api.listProducts();
+    await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
+    await settleImages(page);
+    await expect(page).toHaveScreenshot('home-de.png', { fullPage: true, mask: [page.getByRole('slider')] });
+  });
+
+  test('language menu open', async ({ homePage }) => {
+    const { language } = homePage.header;
+    await language.button.click();
+    await expect(language.menu).toBeVisible();
+    await expect(language.option('de')).toBeVisible();
+    await expect(language.menu).toHaveScreenshot('language-menu.png', SMALL_ELEMENT_BUDGET);
+  });
+
+  test('a button hovered', async ({ productPage }) => {
+    await productPage.addToCartButton.hover();
+    // The hover colour is the state under test: the pointer rests on the button and nothing moves.
+    await expect(productPage.addToCartButton).toHaveScreenshot('add-to-cart-hovered.png', SMALL_ELEMENT_BUDGET);
+  });
+
+  test('a field focused', async ({ loginPage }) => {
+    await loginPage.email.input.focus();
+    await expect(loginPage.email.input).toBeFocused();
+    await expect(loginPage.email.input).toHaveScreenshot('email-focused.png', SMALL_ELEMENT_BUDGET);
+  });
+
   test('chat open', async ({ homePage }) => {
     await homePage.shell.chat.open();
     await expect(homePage.shell.chat.greeting).toBeVisible();
-    // An element shot of a small window, not a page: the default 150 differing pixels would be a large share of it (a changed word is about that many), so the budget is tighter, 30 pixels, which still absorbs the anti-aliasing of its rounded corners.
-    await expect(homePage.shell.chat.window).toHaveScreenshot('chat.png', { maxDiffPixels: 30 });
+    await expect(homePage.shell.chat.window).toHaveScreenshot('chat.png', SMALL_ELEMENT_BUDGET);
   });
 
   test.describe('signed in (mocked session)', { tag: ['@mocked'] }, () => {

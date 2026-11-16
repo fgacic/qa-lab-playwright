@@ -1,4 +1,5 @@
-import { expect, test } from '@fixtures';
+import { CartRow } from '@components/CartTable';
+import { expect, mock, test, withMocks } from '@fixtures';
 import type { Locator, Page } from '@playwright/test';
 import { focusRingDrawn, focusWithin } from '@support/focus';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -88,6 +89,42 @@ test.describe('Keyboard: tab order', { tag: ['@a11y', '@axe'] }, () => {
 
     expect(missed, 'Tab follows the order of the product page controls').toEqual([]);
   });
+
+  test('the cart: the quantity, then Continue Shopping and Proceed to checkout', async ({ checkout, page }) => {
+    const { cart } = checkout;
+    await expect(cart.table.rows).toHaveCount(1);
+    await new CartRow(cart.table.rows.first()).quantity.focus();
+
+    // Two presses allowed for the first stop: the line's remove control (A11Y-01, not focusable today) would sit between the quantity and the buttons.
+    const missed = await missedInTabOrder(
+      page,
+      [
+        { name: 'Continue Shopping', control: cart.continueShoppingButton },
+        { name: 'Proceed to checkout', control: cart.proceedButton },
+      ],
+      2,
+    );
+
+    expect(missed, 'Tab goes from the quantity to the buttons under the cart').toEqual([]);
+  });
+
+  test('the checkout sign-in step: the two tabs, then the sign-in form down to its links', async ({ checkout, page }) => {
+    await checkout.cart.proceed();
+    await expect(checkout.signIn.signInTab).toBeVisible();
+    await checkout.signIn.signInTab.focus();
+
+    const missed = await missedInTabOrder(
+      page,
+      [
+        { name: 'the Continue as Guest tab', control: checkout.signIn.guestTab },
+        { name: 'the email field', control: checkout.signIn.email.input },
+        { name: 'the password field', control: checkout.signIn.password.input },
+        { name: 'the Login button', control: checkout.signIn.loginButton },
+      ],
+    );
+
+    expect(missed, 'Tab reaches the checkout sign-in step in its reading order').toEqual([]);
+  });
 });
 
 test.describe('Keyboard: focus is visible', { tag: ['@a11y', '@axe'] }, () => {
@@ -121,6 +158,20 @@ test.describe('Keyboard: focus is visible', { tag: ['@a11y', '@axe'] }, () => {
       ['the password field', loginPage.password.input],
       ['the Login button', loginPage.loginButton],
       ['the register link', loginPage.registerLink],
+    ];
+
+    for (const [name, control] of controls) {
+      await expect.poll(() => focusRingDrawn(page, control), { message: `${name} looks different when it has the keyboard focus` }).toBe(true);
+    }
+  });
+
+  test('the cart draws a focus indicator on its quantity and its two buttons', async ({ checkout, page }) => {
+    await expect(checkout.cart.table.rows).toHaveCount(1);
+    await page.keyboard.press('Tab');
+    const controls: [string, Locator][] = [
+      ['the quantity', new CartRow(checkout.cart.table.rows.first()).quantity],
+      ['Continue Shopping', checkout.cart.continueShoppingButton],
+      ['Proceed to checkout', checkout.cart.proceedButton],
     ];
 
     for (const [name, control] of controls) {
@@ -201,5 +252,40 @@ test.describe('Keyboard: menus and widgets', { tag: ['@a11y', '@axe'] }, () => {
     await expect(chat.window).toBeVisible();
 
     await expect.poll(() => focusWithin(chat.window), { message: 'AX-14: the keyboard focus is inside the chat window once it is open', timeout: BUG_TIMEOUT }).toBe(true);
+  });
+});
+
+test.describe('Keyboard: the account menu', { tag: ['@a11y', '@axe', '@mocked'] }, () => {
+  test.use(withMocks(mock.respond('GET', '/favorites', [])));
+
+  test('opens with Enter, Tab walks its links, and Escape closes it with the focus back on its button', async ({ accountPage, page }) => {
+    const { header } = accountPage.shell;
+    await header.userMenu.focus();
+    await page.keyboard.press('Enter');
+    await expect(header.userMenuItem('My account')).toBeVisible();
+
+    // "Sign out" is not a stop (A11Y-04, pinned in account-area): the walk is the five links above it.
+    const missed = await missedInTabOrder(
+      page,
+      (['My account', 'My favorites', 'My profile', 'My invoices', 'My messages'] as const).map((name) => ({ name, control: header.userMenuItem(name) })),
+    );
+    expect(missed, 'Tab goes down the account menu in the order it is drawn').toEqual([]);
+
+    await header.userMenu.focus();
+    await page.keyboard.press('Escape');
+
+    await expect(header.userMenuItem('My account')).toBeHidden();
+    await expect(header.userMenu).toBeFocused();
+  });
+
+  test('every link of the account menu draws a focus indicator', async ({ accountPage, page }) => {
+    const { header } = accountPage.shell;
+    await header.userMenu.focus();
+    await page.keyboard.press('Enter');
+    await expect(header.userMenuItem('My account')).toBeVisible();
+
+    for (const name of ['My account', 'My favorites', 'My profile', 'My invoices', 'My messages'] as const) {
+      await expect.poll(() => focusRingDrawn(page, header.userMenuItem(name)), { message: `${name} looks different when it has the keyboard focus` }).toBe(true);
+    }
   });
 });

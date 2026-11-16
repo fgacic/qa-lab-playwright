@@ -22,6 +22,14 @@ export const BUG_TIMEOUT = 5_000;
  * reported as "fails for another reason", and a pass as fixed. A bug assertion on a locator that
  * matches nothing also fails with the id in its message, so verify-bugs rejects that too, unless the
  * defect is itself an absence (a missing heading, an element never rendered): pass `{ absence: true }`.
+ *
+ * A pin must fail deterministically. `test.fail` makes a failure expected, so a pin that reproduces only when it wins a race
+ * is green 99 times in 100 and a red gate on the 100th (BUG-46 did exactly that on WebKit). A pin whose defect depends on
+ * timing (a double submit, a click racing a re-render, a debounce) therefore holds the outcome open instead of racing it:
+ * mock the call and gate its response (`apiMock.delay(...)`, or a route that waits on a promise the test resolves after the
+ * second action), then count the requests that reached the handler, as the BUG-53 pin does. verify-bugs.mjs backs this up: it
+ * verifies a pin in every project that schedules it, and reruns a pin that passed, so a race that is lost once is reported
+ * as flaky, not as a fix. (No `{ timing: true }` flag: it would only repeat what this rule and that rerun already enforce.)
  */
 export function knownBug(id: string, summary: string, { absence = false }: { absence?: boolean } = {}): void {
   // scripts/verify-bugs.mjs finds the pins by the @bug tag: a pin without it would never be verified.

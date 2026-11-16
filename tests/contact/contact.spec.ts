@@ -1,9 +1,10 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { holdAnswers } from '@support/answer-gate';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { failureFeedback } from '@support/feedback';
 import type { ContactMessage, ContactPage } from '@pages/ContactPage';
 import type { ApiMock } from '@support/api-mock';
-import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug } from '@support/payloads';
+import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug, fakeUser } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 /** The subject a test uses when it does not care which one, and a second one for the test that does. */
@@ -124,19 +125,18 @@ test.describe('Contact form', () => {
   });
 
   test.describe('when the API is slow to accept the message', { tag: ['@mocked', '@bug'] }, () => {
-    test.use(withMocks(mock.respond('POST', '/messages', acceptedMessage, 201)));
-
-    test('a double-click on Send sends one message', async ({ contactPage, apiMock }) => {
+    test('a double-click on Send sends one message', async ({ contactPage, page }) => {
       knownBug('BUG-59', 'Send stays enabled while its request is open: a double-click posts the same message twice.');
-      // The answer is held back, so the second click lands while the first request is still open.
-      await apiMock.delay('POST', '/messages', () => true, 500);
+      // Held until both clicks have landed (the pattern of BUG-46 and BUG-53): the second click then meets the same open request on every engine, at any speed.
+      const sent = await holdAnswers(page, /\/messages$/, acceptedMessage);
       await contactPage.fillIn(message());
 
       await contactPage.submitTwice();
-      // Precondition, true whether or not the bug is fixed: the first message was acknowledged. Both clicks have been handled by then.
+      sent.release();
+      // Precondition, true whether or not the bug is fixed: the first message was acknowledged.
       await expect(contactPage.successMessage).toBeVisible();
 
-      expect(apiMock.requestsTo('POST', '/messages'), 'BUG-59: one message, one request').toBe(1);
+      expect(sent.reached, 'BUG-59: one message, one request').toBe(1);
     });
   });
 
@@ -192,6 +192,44 @@ test.describe('Contact form', () => {
       // reports a failure); a bare "error" or "failed" would also match unrelated text.
       const notSent = contactPage.statusMessage(/(?:not|could ?n.?t|unable to|failed to) (?:be )?sen[dt]|went wrong|try again/i).or(failureFeedback(page));
       await expect(notSent.first(), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+  });
+
+  // The mocked session (a fake token, a mocked GET /users/me) is enough: what the form shows and sends depends on the token it holds.
+  // The page is opened by the test, once the session is in place (the `contactPage` fixture would open it first).
+  test.describe('for a signed-in customer', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(mock.respond('POST', '/messages', acceptedMessage, 201)));
+
+    test('the form greets the customer by name and asks for no name or email', async ({ signedIn: _, shop }) => {
+      await shop.contact.open();
+
+      await expect(shop.contact.greeting).toHaveText(`Hello ${fakeUser.first_name} ${fakeUser.last_name}, please fill out this form to submit your message.`);
+      await expect(shop.contact.firstName.input).toHaveCount(0);
+      await expect(shop.contact.lastName.input).toHaveCount(0);
+      await expect(shop.contact.email.input).toHaveCount(0);
+      await expect(shop.contact.subject.input).toBeVisible();
+    });
+
+    test('the message is sent under the customer\'s name, with the customer\'s token', async ({ signedIn: _, shop, apiMock }) => {
+      await shop.contact.open();
+      const sent = apiMock.waitForRequest('POST', '/messages');
+
+      await shop.contact.sendAsCustomer(DEFAULT_SUBJECT, CONTACT_MESSAGE);
+
+      const request = await sent;
+      expect(request.postDataJSON()).toEqual({ name: `${fakeUser.first_name} ${fakeUser.last_name}`, subject: contactSubjectSlug(DEFAULT_SUBJECT), message: CONTACT_MESSAGE });
+      expect((await request.allHeaders()).authorization, 'the request carries the signed-in token').toMatch(/^Bearer \S+/);
+      await expect(shop.contact.successMessage).toBeVisible();
+    });
+
+    test('a message that is too short is stopped by the form', { tag: ['@negative'] }, async ({ signedIn: _, shop, apiMock }) => {
+      await shop.contact.open();
+      const before = await apiMock.mark();
+
+      await shop.contact.sendAsCustomer(DEFAULT_SUBJECT, messageOfLength(MIN_MESSAGE_LENGTH - 1));
+
+      await expect(shop.contact.message.error).toHaveText('Message must be minimal 50 characters');
+      await apiMock.expectNoRequest('POST', '/messages', { since: before });
     });
   });
 });

@@ -38,10 +38,28 @@ export const KNOWN: KnownUntranslated[] = [
   { id: 'I18N-03', title: 'the footer', visit: 'home', everywhere: true, text: /^(Privacy Policy|\| Banner photo by|on)$/, summary: 'the footer ("Privacy Policy", "Banner photo by … on Unsplash") is English in every language' },
   { id: 'I18N-04', title: '"Sign in with Google"', visit: 'login with errors', also: ['login refused'], kinds: ['text', 'aria-label'], text: /^Sign in with Google$/, summary: '"Sign in with Google" is English in every language' },
   { id: 'I18N-05', title: 'the registration and profile forms\' hints', visit: 'registration with errors', also: ['account profile'], text: /^(Please enter a valid date in YYYY-MM-DD format\.|Your password must:|Be at least 8 characters long|Contain both uppercase and lowercase letters|Include at least one number|Have at least one special symbol \(e\.g\., @, #, \$, etc\.\)|Password strength:|Weak|Moderate|Strong|Very Strong|Excellent)$/, summary: 'registration: the date-format error, the password rules and the strength meter are English in every language' },
-  // I18N-06 is the one pin that is a whole page: `/./` with `pageOnly` leaves EVERY string of the privacy policy's route out of the stray-English
-  // check, so a new untranslated string there (a button, a label) is hidden by it, not reported. It is the one pin that cannot be narrower: the
-  // page is one block of legal text, English in full. The key-leak read does not use it (only `leaksKey` pins are left out there), so a raw key on that page still fails.
-  { id: 'I18N-06', title: 'the privacy policy', visit: 'privacy policy', pageOnly: true, text: /./, summary: 'the privacy policy page, headings and paragraphs, is English in every language' },
+  // I18N-06 names the strings of the privacy policy one by one: its headings and effective date in full, each paragraph by its first words.
+  // A new untranslated string on that route (a button, a label, a paragraph that does not start like one below) is not matched, so it is reported
+  // as a stray, not hidden. The key-leak read does not use this pin (only `leaksKey` pins are left out there), so a raw key on that page still fails.
+  {
+    id: 'I18N-06', title: 'the privacy policy', visit: 'privacy policy', pageOnly: true, summary: 'the privacy policy page, headings and paragraphs, is English in every language',
+    text: new RegExp(
+      '^(?:' +
+        [
+          'Privacy Policy for Toolshop',
+          'Effective Date: June 2023',
+          'Information We Collect:',
+          'Use of Google Sign-In:',
+          'Data Removal:',
+          'Third-Party Services:',
+          'Data Security:',
+          'Information Sharing:',
+          'Changes to the Privacy Policy:',
+          'Contact Us:',
+        ].join('|') +
+        '|(?:Thank you for using Toolshop|When you sign in to Toolshop|Toolshop integrates with Google Sign-In|To protect your privacy|Toolshop may use third-party services|We take reasonable measures|We do not sell, trade|We reserve the right to update|If you have any questions or concerns|By using Toolshop, you acknowledge).*)$',
+    ),
+  },
   { id: 'I18N-07', title: 'the product page\'s "Quantity" label', visit: 'product page', also: ['product page with a toast'], text: /^Quantity$/, summary: 'the product page\'s "Quantity" label is hard-coded English' },
   // Found by reading attributes and options too (they were never scanned before).
   { id: 'I18N-08', title: 'the logo\'s tooltip', visit: 'home', everywhere: true, languages: ['de', 'fr'], kinds: ['title'], text: /^Practice Software Testing - Toolshop$/, summary: 'the logo\'s tooltip ("Practice Software Testing - Toolshop") is English in German and French' },

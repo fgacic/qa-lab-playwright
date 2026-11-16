@@ -41,7 +41,7 @@ export function whyNotThePin({ id, errors, specFile, last, absence }) {
   return undefined;
 }
 
-/** The verdict for one result: `{ reproduces }`, `{ fixed }`, `{ notVerified }` or `{ other }` (a problem line). */
+/** The verdict for one run of a pin (scripts/verify-bugs.mjs reruns a pass or another failure before trusting it): `{ reproduces }`, `{ fixed }`, `{ notVerified }` or `{ other }` (a problem line). */
 export function judge(r) {
   if (r.status === 'skipped' || r.last === 'skipped') return { notVerified: 'skipped' };
   if (r.status === 'flaky') return { notVerified: 'flaky (passed on a retry), so it cannot be trusted either way' };
@@ -51,8 +51,18 @@ export function judge(r) {
   return problem ? { other: problem } : { reproduces: true };
 }
 
-/** The verdict after a pin that failed for another reason was run once more: `first` is that verdict, `second` the rerun's (undefined when it produced no result). */
+/**
+ * The verdict after a pin was run once more, alone: `first` is the verdict of the run that was not trusted (`{ other }`, or
+ * `{ fixed }` for a pin that passed), `second` the rerun's (undefined when it produced no result).
+ * Both directions get the rerun: a slow moment must not fail the gate, and a lucky one must not read as a fix.
+ */
 export function afterRerun(first, second) {
+  if (first.fixed) {
+    if (second?.fixed) return first;
+    if (second?.reproduces) return { notVerified: 'flaky: passed once, reproduced on rerun (a pin that depends on timing must hold the request open)' };
+    if (second?.other) return { notVerified: `flaky: passed once, then failed for another reason on a rerun (${second.other})` };
+    return first;
+  }
   if (second?.reproduces) return { notVerified: `failed for another reason, then reproduced on a rerun (${first.other}): flaky` };
   if (second?.fixed) return { notVerified: `failed for another reason, then passed on a rerun (${first.other}): flaky` };
   if (second?.other) return { other: `${first.other} (the same on a rerun)` };

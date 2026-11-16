@@ -28,13 +28,11 @@ export class MessagesPage {
 }
 
 export class MessageDetailsPage {
-  readonly backLink: Locator;
   readonly repliesHeading: Locator;
   readonly reply: Locator;
   readonly replyButton: Locator;
 
   constructor(readonly page: Page) {
-    this.backLink = page.getByRole('link', { name: 'Back' }).or(page.getByRole('button', { name: 'Back' }));
     this.repliesHeading = page.getByRole('heading', { name: 'Replies' });
     this.reply = page.getByRole('textbox', { name: 'Message' });
     this.replyButton = page.getByRole('button', { name: 'Reply' });

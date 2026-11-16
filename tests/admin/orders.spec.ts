@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADMIN_MESSAGES, alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
+import { ADMIN_MESSAGES, allowLoggedFailure, appearsWithin } from '@pages/admin/alerts';
 import { ORDER_STATUSES } from '@pages/admin/AdminPages';
-import { ORDER_STATUS, dollars, orderLine, orderPayment, paginated } from '@support/admin-payloads';
+import { ORDER_STATUS, dollars, orderLine, orderPayment, orderTotalField, paginated } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
@@ -29,7 +29,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     const order = await adminOrders.edit(backOffice.order.invoice_number);
 
     await expect(order.invoiceNumber).toHaveValue(backOffice.order.invoice_number);
-    await expect(order.total).toHaveValue(dollars(backOffice.order.total).replace('$', '$ '));
+    await expect(order.total).toHaveValue(orderTotalField(backOffice.order.total));
     await expect(order.paymentMethod).toHaveValue(orderPayment.label);
     await expect(order.billingCity).toHaveValue(backOffice.order.billing_city);
     await expect(order.lines).toHaveCount(1);
@@ -66,23 +66,26 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
 
       // A server error is not "not found": any other wording, an alert or nothing would do. The pin only refuses the wrong claim,
       // and the claim may be drawn a moment after the link, so it is watched for over a window.
-      expect(await alertAppears(order.notFoundNotice, BUG_TIMEOUT), 'ADM-13: a failed order load does not say the invoice does not exist').toBe(false);
+      expect(await appearsWithin(order.notFoundNotice, BUG_TIMEOUT), 'ADM-13: a failed order load does not say the invoice does not exist').toBe(false);
     });
   });
 
-  test.describe('when the status update fails', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('PUT', /^\/invoices\/[^/]+\/status$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+  // Refused as a conflict (the order changed meanwhile), as invalid, and failed outright: each is shown, none is reported as saved.
+  for (const status of [409, 422, 500]) {
+    test.describe(`when the status update is answered ${status}`, { tag: ['@negative'] }, () => {
+      test.use(withMocks(mock.fail('PUT', /^\/invoices\/[^/]+\/status$/, status)));
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
-    test('the admin is told the status was not saved', async ({ adminOrders, backOffice }) => {
-      const order = await adminOrders.edit(backOffice.order.invoice_number);
-      await expect(order.status).toHaveValue(backOffice.order.status);
+      test('the admin is told the status was not saved', async ({ adminOrders, backOffice }) => {
+        const order = await adminOrders.edit(backOffice.order.invoice_number);
+        await expect(order.status).toHaveValue(backOffice.order.status);
 
-      await order.updateStatus('SHIPPED');
+        await order.updateStatus('SHIPPED');
 
-      // The page shows the raw HTTP error today; any alert would do, as long as the update is not confirmed.
-      await expect(order.failure).toBeVisible();
-      await expect(order.feedback.filter({ hasText: ADMIN_MESSAGES.statusUpdated })).toBeHidden();
+        // The page shows the raw HTTP error today; any alert would do, as long as the update is not confirmed.
+        await expect(order.failure).toBeVisible();
+        await expect(order.feedback.filter({ hasText: ADMIN_MESSAGES.statusUpdated })).toBeHidden();
+      });
     });
-  });
+  }
 });

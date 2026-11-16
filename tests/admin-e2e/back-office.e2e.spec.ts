@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@fixtures';
 import type { AdminProductForm } from '@pages/admin/AdminForms';
 import type { AdminListPage } from '@pages/admin/AdminListPage';
-import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { ADM_12, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import type { HomePage } from '@pages/HomePage';
+import { dollars } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 import { contactSubjectSlug } from '@support/payloads';
@@ -11,7 +12,8 @@ import { contactSubjectSlug } from '@support/payloads';
 /**
  * Real back-office journeys against the real admin API, signed in from the `admin` project's
  * storageState (the seeded admin on the self-hosted Toolshop). They create, change and delete
- * data, so on the live site they only run with RUN_ADMIN_TESTS=1 and ADMIN_EMAIL / ADMIN_PASSWORD.
+ * data, so every test that writes is tagged @self-hosted and is never scheduled against the live site (config: `notOnThisTarget`);
+ * on the live site, with RUN_ADMIN_TESTS=1 and ADMIN_EMAIL / ADMIN_PASSWORD, only the two read-only report tests at the end run.
  * Every product a test creates carries a unique "QaLab" name and is a rental ("Item for rent"): the
  * shop's default list, categories, filters, sorting and pagination leave rentals out, so no catalogue spec
  * running at the same time (the `mobile` smoke set shares this project's pass) can see it or have its
@@ -21,7 +23,7 @@ import { contactSubjectSlug } from '@support/payloads';
  * it in teardown, pass or fail, so even a test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
  * message (DELETE /invoices/{id} and /messages/{id} answer 405), so those two tests leave one
  * record each behind, named so that it can be told from anyone's data (`LEFTOVER`: the guest's last name, the sender's name).
- * They are tagged @self-hosted, never run on the live site, and rely on the throwaway database of the
+ * They rely on the throwaway database of the
  * self-hosted target: CI builds and seeds it fresh for every job, and a local one is rebuilt with
  * `scripts/toolshop.sh reseed`. Nothing else in the suite counts orders or messages, so the leftovers cost no spec anything.
  * (Arranging them through the API is also refused on a shop that is not ours.) A user the form creates is removed by `createdUsers`.
@@ -34,10 +36,14 @@ const unique = () => randomUUID().slice(0, 8);
 /** What marks the records no API call can remove (a guest order, a contact message) as this suite's. */
 const LEFTOVER = 'QaLab leftover';
 
+/** The price the product is created with, then repriced to (what the form takes as typed; the shop shows it in dollars). */
+const PRICE_ON_CREATE = '12.34';
+const PRICE_AFTER_REPRICE = '23.45';
+
 const PRODUCT_DESCRIPTION = 'Created by the qa-lab suite; removed when the test ends.';
 
 /** Creates a rental product through the back office's form and waits for the confirmation. */
-async function createProduct(adminProducts: AdminListPage<AdminProductForm>, input: { name: string; stock: string; price: string }): Promise<void> {
+async function createProduct(adminProducts: AdminListPage<AdminProductForm>, input: { name: string; price: string }): Promise<void> {
   const form = await adminProducts.add();
   await form.fillIn({ ...input, description: PRODUCT_DESCRIPTION, rental: true });
   await form.chrome.save();
@@ -70,24 +76,24 @@ async function searchShopFor(home: HomePage, name: string): Promise<void> {
 test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   // No word under three letters in this name: search requires every word, and MariaDB's full-text
   // index ignores short ones (BUG-28, pinned below).
-  test('a product created in the back office is listed in the shop, repriced, then deleted', { tag: ['@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
+  test('a product created in the back office is listed in the shop, repriced, then deleted', { tag: ['@self-hosted', '@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
     const name = `QaLab Product ${unique()}`;
 
     await test.step('Create the product in the back office', async () => {
-      await createProduct(adminProducts, { name, stock: '3', price: '12.34' });
+      await createProduct(adminProducts, { name, price: PRICE_ON_CREATE });
       await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
     });
 
     await test.step('The shop lists it at the entered price', async () => {
       await searchShopFor(shop.home, name);
-      await expect(shop.home.grid.card(name).price).toHaveText('$12.34');
+      await expect(shop.home.grid.card(name).price).toHaveText(dollars(Number(PRICE_ON_CREATE)));
     });
 
-    await test.step('Reprice it in the back office', () => repriceProduct(adminProducts, name, '23.45'));
+    await test.step('Reprice it in the back office', () => repriceProduct(adminProducts, name, PRICE_AFTER_REPRICE));
 
     await test.step('The shop shows the new price', async () => {
       await searchShopFor(shop.home, name);
-      await expect(shop.home.grid.card(name).price).toHaveText('$23.45');
+      await expect(shop.home.grid.card(name).price).toHaveText(dollars(Number(PRICE_AFTER_REPRICE)));
     });
 
     await test.step('Delete it in the back office; the shop no longer finds it', async () => {
@@ -101,10 +107,10 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     });
   });
 
-  test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, createdProducts, apiMock }) => {
+  test('a product with a short word in its name is found by its full name', { tag: ['@self-hosted', '@bug'] }, async ({ adminProducts, shop, createdProducts, apiMock }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
     const name = `Set of QaLab Pliers ${unique()}`;
-    await createProduct(adminProducts, { name, stock: '1', price: '5.00' });
+    await createProduct(adminProducts, { name, price: '5.00' });
     await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
     await shop.home.open();
@@ -118,8 +124,8 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(shop.home.grid.card(name).root, 'BUG-28: a full-name search finds the product').toBeVisible();
   });
 
-  test('a brand whose slug is taken is refused by the real API', { tag: ['@negative', '@bug'] }, async ({ adminBrands, brandFactory, apiMock, consoleGuard }) => {
-    knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
+  test('a brand whose slug is taken is refused by the real API', { tag: ['@self-hosted', '@negative', '@bug'] }, async ({ adminBrands, brandFactory, apiMock, consoleGuard }) => {
+    knownBug('ADM-12', ADM_12, { absence: true });
     allowLoggedFailure(consoleGuard); // the SPA logs the 409 it is about to say nothing about
     const taken = await brandFactory.create();
     const form = await adminBrands.add();
@@ -135,7 +141,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
-  test('a brand is renamed in the back office and the real API lists the new name', async ({ adminBrands, brandFactory, api, apiMock }) => {
+  test('a brand is renamed in the back office and the real API lists the new name', { tag: ['@self-hosted'] }, async ({ adminBrands, brandFactory, api, apiMock }) => {
     const brand = await brandFactory.create();
     const renamed = `${brand.name} renamed`;
     await adminBrands.open();
@@ -152,7 +158,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect.poll(async () => (await api.listBrands()).find(({ id }) => id === brand.id)?.name, 'the real API lists the brand under its new name').toBe(renamed);
   });
 
-  test('a brand deleted in the back office is gone from the real API', async ({ adminBrands, brandFactory, api, apiMock }) => {
+  test('a brand deleted in the back office is gone from the real API', { tag: ['@self-hosted'] }, async ({ adminBrands, brandFactory, api, apiMock }) => {
     const brand = await brandFactory.create();
     await adminBrands.open();
     await adminBrands.search.searchFor(brand.name);
@@ -202,7 +208,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(order.status).toHaveValue('SHIPPED');
   });
 
-  test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, adminToken }) => {
+  test('a contact message arrives in the inbox, is taken in progress and is answered', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, adminToken }) => {
     const sender = `${LEFTOVER} sender ${unique()}`;
     const text = `Sent by the qa-lab suite (${unique()}) and safe to delete, long enough to be a real message.`;
     await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: contactSubjectSlug('Webmaster'), message: text });
@@ -221,6 +227,14 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
 
     await message.page.reload();
     await expect(message.status).toHaveValue('IN_PROGRESS');
+
+    // The answer: the real API stores it and the page lists it under the message once it asks again.
+    const answer = `Answered by the qa-lab suite (${unique()}).`;
+    const replied = apiMock.waitForResponse('POST', /^\/messages\/[^/]+\/reply$/);
+    await message.reply(answer);
+    expect((await replied).response.ok(), 'the real API accepted the reply').toBe(true);
+    await expect(message.text(answer), 'the reply is listed under the message').toBeVisible();
+    await expect(message.replyBox).toHaveValue('');
   });
 
   test('the statistics list the real top-selling products', async ({ adminStatistics, apiMock }) => {

@@ -84,4 +84,12 @@ test.describe('verify-bugs verdicts', { tag: ['@framework'] }, () => {
     expect(afterRerun(first, undefined), 'the rerun produced no result').toEqual(first);
     expect(afterRerun(first, { notVerified: 'skipped' }), 'a rerun that was skipped keeps the first verdict').toEqual(first);
   });
+
+  test('afterRerun: a pin that passed is a fix only if the rerun passes too', () => {
+    const first = { fixed: true as const };
+    expect(afterRerun(first, { fixed: true })).toEqual({ fixed: true });
+    expect(afterRerun(first, { reproduces: true }).notVerified, 'it reproduced the second time: a race that was lost once').toMatch(/flaky: passed once, reproduced on rerun/);
+    expect(afterRerun(first, { other: 'the test timed out' }).notVerified).toMatch(/flaky: passed once, then failed for another reason.*timed out/);
+    expect(afterRerun(first, undefined), 'the rerun produced no result').toEqual(first);
+  });
 });

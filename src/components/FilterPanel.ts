@@ -45,7 +45,8 @@ export class FilterPanel {
   }
 
   brand(name: string): Locator {
-    return this.brands.getByRole('checkbox', { name, exact: true });
+    // Not scoped to the "Brands" group: a category page lists the brands under a heading, in no group. No brand shares a name with a category.
+    return this.root.getByRole('checkbox', { name, exact: true });
   }
 
   @step('Unfold the filters if they are folded away')
@@ -74,7 +75,7 @@ export class FilterPanel {
   @step('Show only eco-friendly products')
   async showOnlyEcoFriendly(): Promise<void> {
     await this.expand();
-    await this.ecoFriendly.check();
+    await this.refiltering(() => this.ecoFriendly.check());
   }
 
   @step('Raise the minimum price to ${0}')

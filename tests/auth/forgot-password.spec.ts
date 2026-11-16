@@ -55,12 +55,11 @@ test.describe('Forgot password', () => {
     test('a readable confirmation is shown', async ({ forgotPasswordPage }) => {
       knownBug('BUG-20', 'the success message is the raw translation key "page.forgot-password.confirm".');
       await forgotPasswordPage.requestReset(fakeUser.email);
-      // Whatever it says, the form answers the request with a message.
-      await expect(forgotPasswordPage.alert).toBeVisible();
 
-      // One assertion on the same alert: it is not a raw key and it says something. The alert fades out after
-      // three seconds, so the window stays under that (BUG_TIMEOUT would outlive it and end on "element not found"); a fixed site
-      // passes on the first look, whatever the wording.
+      // One assertion on the alert, with no look before it: a separate "is visible" would start the fade (3 s) before the window
+      // does and could leave it with nothing to read. It waits for the alert, and for text that is not a raw key and says something;
+      // the window stays under the fade (BUG_TIMEOUT would outlive it and end on "element not found"), and a fixed site passes
+      // on the first look, whatever the wording.
       await expect(forgotPasswordPage.alert, 'BUG-20: the confirmation is readable text, not a raw translation key').toHaveText(READABLE, { timeout: ALERT_FADE_WINDOW });
     });
   });
