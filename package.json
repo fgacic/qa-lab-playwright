@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Playwright UI suite for the Toolshop practice web shop",
   "scripts": {
-    "test": "playwright test --project=chromium --project=firefox --project=webkit --project=mobile && playwright test --project=perf && playwright test --project=account --project=admin",
-    "test:parallel": "TARGET=local playwright test --project=chromium --project=firefox --project=webkit --project=mobile --workers=6",
+    "test": "node scripts/test-all.mjs",
+    "test:parallel": "playwright test --project=chromium --project=firefox --project=webkit --project=mobile",
     "test:chromium": "playwright test --project=chromium",
-    "test:smoke": "playwright test --grep @smoke",
-    "test:mocked": "playwright test --grep @mocked",
+    "test:smoke": "playwright test --project=chromium --project=firefox --project=webkit --project=mobile --grep @smoke",
+    "test:mocked": "playwright test --project=chromium --project=firefox --project=webkit --grep @mocked",
     "test:verify-bugs": "node scripts/verify-bugs.mjs",
     "test:account": "playwright test --project=account",
     "typecheck": "tsc --noEmit",
@@ -20,22 +20,30 @@
     "toolshop:down": "scripts/toolshop.sh down",
     "test:live": "TARGET=live playwright test --project=chromium --project=firefox --project=webkit --project=mobile",
     "test:visual": "scripts/visual.sh",
-    "test:visual:update": "scripts/visual.sh --update-snapshots",
-    "test:security": "playwright test --grep @security",
+    "test:visual:update": "scripts/visual.sh --update-snapshots=changed",
+    "test:security": "playwright test --project=chromium --project=firefox --project=webkit --grep @security",
     "test:perf": "playwright test --project=perf",
-    "test:i18n": "playwright test --project=chromium --grep @i18n"
+    "test:i18n": "playwright test --project=chromium --grep @i18n",
+    "lint": "eslint . --max-warnings=0"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
+    "@eslint/js": "10.0.1",
     "@playwright/test": "1.64.1",
     "@types/node": "22.10.2",
     "allure": "3.21.0",
     "allure-js-commons": "3.14.0",
     "allure-playwright": "3.14.0",
-    "typescript": "5.7.2"
+    "eslint": "10.15.0",
+    "eslint-plugin-playwright": "2.12.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  }
 }
