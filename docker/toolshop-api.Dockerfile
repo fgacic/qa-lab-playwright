@@ -4,7 +4,7 @@
 # rather than pulled because the published image exists for amd64 only and only per tag.
 ARG TOOLSHOP_REF
 
-FROM alpine/git:v2.47.1 AS source
+FROM alpine/git:v2.54.0 AS source
 ARG TOOLSHOP_REF
 RUN git init /src && cd /src \
  && git remote add origin https://github.com/testsmith-io/practice-software-testing.git \
