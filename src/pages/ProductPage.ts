@@ -59,11 +59,16 @@ export class ProductPage {
     return this.specifications.filter({ has: this.page.getByRole('cell', { name, exact: true }) });
   }
 
-  /** Names of the related products, once they have rendered. */
-  async relatedNames(): Promise<string[]> {
-    const headings = this.relatedProducts.getByRole('heading', { level: 5 });
-    await headings.first().waitFor();
-    return headings.allInnerTexts();
+  /** The ids of the related products, read from their links (`/product/<id>`), once they have rendered. */
+  async relatedIds(): Promise<string[]> {
+    await this.relatedProducts.first().waitFor();
+    const hrefs = await this.relatedProducts.evaluateAll((links) => links.map((link) => link.getAttribute('href') ?? ''));
+    return hrefs.map((href) => href.split('/').pop() ?? '');
+  }
+
+  /** The name a related product's card shows. */
+  relatedName(index: number): Locator {
+    return this.relatedProducts.nth(index).getByRole('heading', { level: 5 });
   }
 
   @step('Open the product page /product/{0}')
@@ -115,8 +120,8 @@ export class ProductPage {
     return comparison;
   }
 
-  @step('Open the related product "{0}"')
-  async openRelated(name: string): Promise<void> {
-    await this.relatedProducts.filter({ has: this.page.getByRole('heading', { name, exact: true }) }).click();
+  @step('Open the related product number {0}')
+  async openRelated(index: number): Promise<void> {
+    await this.relatedProducts.nth(index).click();
   }
 }

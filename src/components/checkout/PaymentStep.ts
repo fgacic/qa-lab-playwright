@@ -10,6 +10,32 @@ export const PAYMENT_METHODS = {
 } as const;
 export type PaymentMethod = keyof typeof PAYMENT_METHODS;
 
+/** The labels of the method-specific inputs, word for word. */
+export const PAYMENT_FIELDS = {
+  bankName: 'Bank Name',
+  accountName: 'Account Name',
+  accountNumber: 'Account Number',
+  cardNumber: 'Credit Card Number',
+  expirationDate: 'Expiration Date',
+  cvv: 'CVV',
+  cardHolder: 'Card Holder Name',
+  instalments: 'Monthly Installments',
+  giftCardNumber: 'Gift Card Number',
+  validationCode: 'Validation Code',
+} as const;
+
+/** What the step says about an input it refuses, and about a check it could not pass. */
+export const PAYMENT_MESSAGES = {
+  accountNumber: 'Account number must be numeric.',
+  cardNumber: 'Invalid card number format.',
+  expirationDate: 'Invalid date format. Use MM/YYYY.',
+  cvv: 'CVV must be 3 or 4 digits.',
+  giftCardNumber: 'Please enter a valid gift card number: exactly 16 letters and/or digits.',
+  validationCode: 'Please enter a valid validation code: exactly 4 letters and/or digits.',
+  declined: 'Payment declined',
+  unknownError: 'Unknown error',
+} as const;
+
 /**
  * Step 4. One button does two jobs: "Check payment" (POST /payment/check), then, once the
  * check passed, "Confirm" (POST /invoices or /invoices/guest).

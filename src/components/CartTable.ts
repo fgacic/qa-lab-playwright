@@ -9,6 +9,7 @@ export const CART_MESSAGES = {
   atMost99: 'You can order at most 99 of this product.',
   notAnInteger: 'The quantity field must be an integer.',
   serverError: 'Server Error',
+  rentalPerHour: 'Item for rent, price per hour',
 } as const;
 
 export class CartRow {
@@ -17,12 +18,15 @@ export class CartRow {
   readonly unitPrice: Locator;
   readonly linePrice: Locator;
   readonly removeButton: Locator;
+  /** A notice on the line that the product cannot be bought. */
+  readonly outOfStock: Locator;
 
   constructor(readonly root: Locator) {
     this.title = root.getByTestId('product-title');
     this.quantity = root.getByRole('spinbutton');
     this.unitPrice = root.getByTestId('product-price');
     this.linePrice = root.getByTestId('line-price');
+    this.outOfStock = root.getByText(/out of stock|unavailable/i);
     // The suite's one CSS locator: the remove control is an <a> with an icon, no href and
     // no accessible name, so neither a role nor a label can reach it (logged as A11Y-01).
     this.removeButton = root.locator('a.btn-danger');

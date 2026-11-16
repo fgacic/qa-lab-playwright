@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { UNKNOWN_EMAIL, UNKNOWN_PASSWORD } from '@support/payloads';
 import { fakeGuest } from '@support/test-data';
 
 /** What the step tells the shopper, word for word. */
@@ -10,6 +11,7 @@ const TEXT = {
   firstNameRequired: 'First name is required',
   lastNameRequired: 'Last name is required',
   loginRefused: 'Invalid email or password',
+  accountLocked: 'Account locked, too many failed attempts. Please contact the administrator.',
 } as const;
 
 test.describe('Checkout: sign-in step', () => {
@@ -46,7 +48,7 @@ test.describe('Checkout: sign-in step', () => {
   // The real refusal is a failed sign-in on the shop's own log, so it runs on the self-hosted shop only;
   // the mocked twin below proves the same page behaviour everywhere, the live site included.
   test('unknown credentials are refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ checkout }) => {
-    await checkout.signIn.signIn('nobody@example.invalid', 'not-a-real-password');
+    await checkout.signIn.signIn(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
     await expect(checkout.signIn.loginError).toHaveText(TEXT.loginRefused);
     await expect(checkout.billing.heading).toBeHidden();
@@ -56,9 +58,31 @@ test.describe('Checkout: sign-in step', () => {
     test.use(withMocks(mock.fail('POST', '/users/login', 401, { error: 'Unauthorized' })));
 
     test('the shopper is told so and stays on the sign-in step', async ({ checkout }) => {
-      await checkout.signIn.signIn('nobody@example.invalid', 'not-a-real-password');
+      await checkout.signIn.signIn(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
       await expect(checkout.signIn.loginError).toHaveText(TEXT.loginRefused);
+      await expect(checkout.billing.heading).toBeHidden();
+    });
+
+    test('spaces around the email are trimmed before it is sent', async ({ checkout, apiMock }) => {
+      const asked = apiMock.waitForRequest('POST', '/users/login');
+
+      await checkout.signIn.signIn(`  ${UNKNOWN_EMAIL}  `, UNKNOWN_PASSWORD);
+
+      expect((await asked).postDataJSON()).toEqual({ email: UNKNOWN_EMAIL, password: UNKNOWN_PASSWORD });
+      await expect(checkout.signIn.loginError).toHaveText(TEXT.loginRefused);
+    });
+  });
+
+  // The shop locks an account after three failed attempts and answers 423 from then on. A mock answers it,
+  // so no real account is locked.
+  test.describe('when the shop has locked the account', { tag: ['@mocked', '@negative'] }, () => {
+    test.use(withMocks(mock.fail('POST', '/users/login', 423, { error: TEXT.accountLocked })));
+
+    test('the shopper is told so and stays on the sign-in step', async ({ checkout }) => {
+      await checkout.signIn.signIn(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
+
+      await expect(checkout.signIn.loginError).toHaveText(TEXT.accountLocked);
       await expect(checkout.billing.heading).toBeHidden();
     });
   });

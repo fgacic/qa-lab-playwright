@@ -18,6 +18,8 @@ export class HomePage {
   readonly grid: ProductGrid;
   readonly pagination: Pagination;
   readonly compareBar: CompareBar;
+  /** The comparison page, not opened: for what the app keeps about the selection (`selectedIds`) and for `openComparison`. */
+  readonly comparison: ComparisonPage;
 
   constructor(readonly page: Page) {
     const body = page.locator('body');
@@ -28,6 +30,7 @@ export class HomePage {
     this.grid = new ProductGrid(body);
     this.pagination = new Pagination(page.getByRole('navigation').filter({ has: page.getByRole('button', { name: 'Previous' }) }));
     this.compareBar = new CompareBar(page.getByTestId('comparison-bar'));
+    this.comparison = new ComparisonPage(page);
   }
 
   get header() {
@@ -59,7 +62,7 @@ export class HomePage {
   @step('Open the comparison from the bar')
   async openComparison(): Promise<ComparisonPage> {
     await this.compareBar.compareNow();
-    return new ComparisonPage(this.page);
+    return this.comparison;
   }
 
   @step('Open the cart from the header')

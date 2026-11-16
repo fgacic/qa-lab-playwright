@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { ADMIN_STORAGE_STATE, BASE_URL, CUSTOMER_STORAGE_STATE, IS_SELF_HOSTED, RUN_ACCOUNT_TESTS, RUN_ADMIN_TESTS, TARGET } from './src/support/env';
+import { ADMIN_STORAGE_STATE, BASE_URL, CUSTOMER_STORAGE_STATE, IS_SELF_HOSTED, PROJECTS, RUN_ACCOUNT_TESTS, RUN_ADMIN_TESTS, TARGET } from './src/support/env';
 
 const isCI = !!process.env.CI;
 const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
@@ -11,9 +11,10 @@ const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
 // Playwright greps "title + tags", so a tag must end at a word edge: a title that merely contains
 // "@perf" or "@admin-panel" must not be rescheduled. Tags are declared in `{ tag }`, never typed into a title.
 const tagged = (...names: string[]) => new RegExp(`@(?:${names.join('|')})(?![\\w-])`);
-const ownProject = tagged('account', 'admin', 'visual', 'perf'); // these have projects of their own
+const ownProject = tagged('account', 'admin', 'visual', 'perf', 'framework'); // these have projects of their own
 const phoneOnly = tagged('mobile');
-const chromiumOnly = tagged('axe', 'i18n');
+// @api: no browser is involved, so running it once per browser would only repeat the same requests.
+const chromiumOnly = tagged('axe', 'i18n', 'api');
 const perfOnly = tagged('perf'); // measured alone, in the perf project
 const notOnThisTarget = IS_SELF_HOSTED ? tagged('live-only') : tagged('self-hosted');
 
@@ -25,10 +26,11 @@ const notOnThisTarget = IS_SELF_HOSTED ? tagged('live-only') : tagged('self-host
  *
  * Projects by tag:
  * - chromium: everything not in a project of its own; firefox / webkit: the same minus the
- *   Chromium-only suites (@axe, @i18n);
+ *   Chromium-only suites (@axe, @i18n, @api: no browser, so once is enough);
  * - perf: @perf budgets, Chromium, one worker and no parallelism, so nothing else competes for the CPU;
  * - mobile: @smoke and @mobile on a Pixel 7;
  * - account / admin: real sign-ins from a setup project's storageState, when they may run;
+ * - framework: the suite's own plumbing (the mock layer, the target configuration, the defect-id bookkeeping), Chromium, once;
  * - visual: screenshot comparisons, inside the Playwright Docker image only.
  * @self-hosted specs never run against the live site, @live-only specs only there.
  */
@@ -63,7 +65,8 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     testIdAttribute: 'data-test',
-    trace: 'on',
+    // Kept for every failure (retries included), not for green tests: a trace of each passing test is most of the report's size.
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     navigationTimeout: IS_SELF_HOSTED ? 30_000 : 90_000,
     actionTimeout: 15_000,
@@ -72,30 +75,30 @@ export default defineConfig({
     // Real sign-ins: always on our own Toolshop, opt-in on the live site.
     ...(RUN_ACCOUNT_TESTS
       ? [
-          { name: 'account-setup', testMatch: /account\.setup\.ts/ },
+          { name: PROJECTS.accountSetup, testMatch: /account\.setup\.ts/ },
           {
-            name: 'account',
+            name: PROJECTS.account,
             use: { ...devices['Desktop Chrome'], storageState: CUSTOMER_STORAGE_STATE },
             grep: tagged('account'),
             grepInvert: notOnThisTarget,
-            dependencies: ['account-setup'],
+            dependencies: [PROJECTS.accountSetup],
           },
         ]
       : []),
     ...(RUN_ADMIN_TESTS
       ? [
-          { name: 'admin-setup', testMatch: /admin\.setup\.ts/ },
+          { name: PROJECTS.adminSetup, testMatch: /admin\.setup\.ts/ },
           {
-            name: 'admin',
+            name: PROJECTS.admin,
             use: { ...devices['Desktop Chrome'], storageState: ADMIN_STORAGE_STATE },
             grep: tagged('admin'),
             grepInvert: notOnThisTarget,
-            dependencies: ['admin-setup'],
+            dependencies: [PROJECTS.adminSetup],
           },
         ]
       : []),
     { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: [ownProject, phoneOnly, notOnThisTarget] },
-    // axe and translations are scoped to Chromium (reasons in their specs' headers).
+    // axe, translations and the browserless @api specs are scoped to Chromium (reasons in their specs' headers).
     { name: 'firefox', use: { ...devices['Desktop Firefox'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },
     { name: 'webkit', use: { ...devices['Desktop Safari'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },
     {
@@ -105,6 +108,8 @@ export default defineConfig({
       grep: tagged('smoke', 'mobile'),
       grepInvert: [ownProject, chromiumOnly, notOnThisTarget],
     },
+    // Tests of the framework itself: they need no browser matrix, and run once.
+    { name: 'framework', use: { ...devices['Desktop Chrome'] }, grep: tagged('framework'), grepInvert: notOnThisTarget },
     // Budgets are measured alone: a project of its own with a single worker. `workers: 1` limits this
     // project only, so it must also run in a pass of its own (`npm run test:perf`, its own CI job);
     // the run-guard reporter refuses a run that schedules it next to another project.

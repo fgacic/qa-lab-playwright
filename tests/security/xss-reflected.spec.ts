@@ -5,6 +5,11 @@ import { escapeRegExp } from '@support/regexp';
 /**
  * Reflected input: what a visitor types is shown back without being stored anywhere, so these
  * run on both targets, the public site included (they only search and read).
+ *
+ * Checked, so not covered: the app reads no query string or fragment into a page. A probe marker sent as `?q=`, `?search=`,
+ * `?query=`, `?page=`, `?by_category=`, `?returnUrl=`, `?subject=` and `#fragment` appears nowhere in the rendered text, so
+ * the sinks below (the search box, the chat and the route segments) are the whole reflected surface. A new reader of the
+ * address bar would need its own case here.
  */
 test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => {
   test.use({ xssWatch: true });

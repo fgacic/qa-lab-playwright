@@ -4,6 +4,9 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { twoProductCart } from '@fixtures/pages';
 import { knownBug } from '@support/known-bug';
 
+/** The units a cart holds in all: what the header link counts. */
+const unitsIn = (items: { quantity: number }[]) => items.reduce((sum, { quantity }) => sum + quantity, 0);
+
 /** The request that saves a quantity, and the one that removes a line. */
 const SAVE_QUANTITY = /^\/carts\/[^/]+\/product\/quantity$/;
 const REMOVE_LINE = /^\/carts\/[^/]+\/product\/[^/]+$/;
@@ -57,13 +60,14 @@ test.describe('Cart', () => {
         await expect(row.linePrice).toShowAmount(product.price * quantity);
       }
       await expect(table.total).toShowAmount(cartItems.reduce((sum, i) => sum + i.product.price * i.quantity, 0));
-      await expect(checkout.header.cartLink).toHaveText('3');
+      await expect(checkout.header.cartLink).toHaveText(String(unitsIn(cartItems)));
     });
 
     test('changing a quantity updates the line, the total and the header count, and the cart keeps it', async ({ checkout, cartItems, apiMock }) => {
       const [first, second] = cartItems;
       const { table } = checkout.cart;
       const total = first.product.price * 4 + second.product.price;
+      const units = 4 + second.quantity;
 
       const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), table.setQuantity(first.product.name, 4)]);
 
@@ -71,13 +75,13 @@ test.describe('Cart', () => {
       await expect(checkout.toast.message(MESSAGES.quantityUpdated)).toBeVisible();
       await expect(table.row(first.product.name).linePrice).toShowAmount(first.product.price * 4);
       await expect(table.total).toShowAmount(total);
-      await expect(checkout.header.cartLink).toHaveText('5');
+      await expect(checkout.header.cartLink).toHaveText(String(units));
       // What the cart saved, not what the page remembers.
       await checkout.page.reload();
       await expect(table.row(first.product.name).quantity).toHaveValue('4');
       await expect(table.row(first.product.name).linePrice).toShowAmount(first.product.price * 4);
       await expect(table.total).toShowAmount(total);
-      await expect(checkout.header.cartLink).toHaveText('5');
+      await expect(checkout.header.cartLink).toHaveText(String(units));
     });
 
     test('removing a line drops it from the cart and the total, and the cart keeps it', async ({ checkout, cartItems, apiMock }) => {
@@ -96,7 +100,7 @@ test.describe('Cart', () => {
       await expect(table.row(second.product.name).title).toBeVisible();
       await expect(table.row(first.product.name).title).toHaveCount(0);
       await expect(table.total).toShowAmount(second.product.price);
-      await expect(checkout.header.cartLink).toHaveText('1');
+      await expect(checkout.header.cartLink).toHaveText(String(second.quantity));
     });
   });
 
@@ -119,7 +123,8 @@ test.describe('Cart', () => {
     const [{ product }] = cartItems;
     const row = checkout.cart.table.row(product.name);
 
-    await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, '2.5')]);
+    const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, '2.5')]);
+    expect(saved.response.status(), 'the shop refuses a fractional quantity').toBe(422);
 
     await expect(row.quantity, 'BUG-42: the quantity is corrected to a whole number').toHaveValue('2', { timeout: 5_000 });
     await expect(row.linePrice, 'BUG-42: the line is priced for the corrected quantity').toShowAmount(product.price * 2, { timeout: 5_000 });
@@ -144,14 +149,20 @@ test.describe('Cart', () => {
 
     await expect(checkout.cart.emptyMessage).toBeVisible();
     await expect(checkout.header.cartLink).toHaveCount(0);
+    // The cart itself is empty, not only the page: a reload still finds it so.
+    await checkout.page.reload();
+    await expect(checkout.cart.emptyMessage).toBeVisible();
+    await expect(checkout.header.cartLink).toHaveCount(0);
   });
 
   test('the remove control is a button with an accessible name', { tag: ['@a11y', '@bug'] }, async ({ checkout, cartItems }) => {
     knownBug('A11Y-01', 'the remove-line control is an <a> with an icon, no href and no accessible name.');
     const row = checkout.cart.table.row(cartItems[0].product.name);
+    // The control exists whatever its role: what is asserted below is its role and name, not its presence.
     await expect(row.removeButton).toBeVisible();
 
-    await expect(row.root.getByRole('button', { name: /remove|delete/i }), 'A11Y-01: the remove control is a button with an accessible name').toBeVisible({ timeout: 2_000 });
+    await expect(row.removeButton, 'A11Y-01: the remove control is a button').toHaveRole('button', { timeout: 2_000 });
+    await expect(row.removeButton, 'A11Y-01: the remove control has an accessible name').toHaveAccessibleName(/remove|delete/i, { timeout: 2_000 });
   });
 
   test('Continue Shopping goes back to the shop', async ({ checkout, page }) => {
@@ -185,10 +196,24 @@ test.describe('Cart', () => {
     test('a 15% combination discount applies and the rental is priced per hour', async ({ checkout }) => {
       const { table } = checkout.cart;
 
-      await expect(table.row('QA Lab Rental Drill').root).toContainText('Item for rent, price per hour');
+      await expect(table.row('QA Lab Rental Drill').root).toContainText(MESSAGES.rentalPerHour);
       await expect(table.subtotal).toShowAmount(80);
       await expect(table.discount).toShowAmount(-12);
       await expect(table.total).toShowAmount(68);
+    });
+  });
+
+  test.describe('with a product that is out of stock', { tag: ['@bug'] }, () => {
+    test.use({ cartItems: async ({ catalog }, use) => use([{ product: await catalog.outOfStock(), quantity: 1 }]) });
+
+    test('the cart tells the shopper the line cannot be bought', { tag: ['@negative'] }, async ({ checkout, cartItems }) => {
+      knownBug('BUG-44', 'a product that is out of stock can sit in the cart: the line is priced like any other, with no notice, and Proceed to checkout stays enabled.', { absence: true });
+      const [{ product }] = cartItems;
+      const row = checkout.cart.table.row(product.name);
+      await expect(row.title).toBeVisible();
+      await expect(row.linePrice).toShowAmount(product.price);
+
+      await expect(row.outOfStock.or(checkout.shell.errorAlert), 'BUG-44: the cart says the out-of-stock line cannot be bought').toBeVisible({ timeout: 5_000 });
     });
   });
 
@@ -196,7 +221,7 @@ test.describe('Cart', () => {
     test.use({ cartItems: [] });
 
     test('the cart page says the cart is empty', { tag: ['@negative', '@bug'] }, async ({ checkout }) => {
-      knownBug('BUG-13', 'a visitor without a cart sees only the step header, not "The cart is empty".');
+      knownBug('BUG-13', 'a visitor without a cart sees only the step header, not "The cart is empty".', { absence: true });
       await expect(checkout.wizard.indicator.steps).toHaveCount(CHECKOUT_STEPS.length);
 
       await expect(checkout.cart.emptyMessage, 'BUG-13: a visitor without a cart is told the cart is empty').toBeVisible({ timeout: 5_000 });
@@ -216,7 +241,7 @@ test.describe('Cart', () => {
     test.use(withMocks(mock.fail('GET', CART, 500)));
 
     test('the shopper is told the cart could not be loaded', async ({ checkout }) => {
-      knownBug('BUG-32', 'a failed cart request shows only the step header: no lines, no message.');
+      knownBug('BUG-32', 'a failed cart request shows only the step header: no lines, no message.', { absence: true });
       await expect(checkout.wizard.indicator.steps).toHaveCount(CHECKOUT_STEPS.length);
 
       await expect(checkout.shell.errorAlert, 'BUG-32: a failed cart request is reported').toBeVisible({ timeout: 5_000 });
@@ -241,7 +266,7 @@ test.describe('Cart', () => {
     test.use(withMocks(mock.fail('DELETE', REMOVE_LINE, 500)));
 
     test('the shopper is told the line was not removed', async ({ checkout, cartItems, apiMock }) => {
-      knownBug('BUG-15', 'a failed remove does nothing visible: no toast, the line just stays.');
+      knownBug('BUG-15', 'a failed remove does nothing visible: no toast, the line just stays.', { absence: true });
 
       const [{ response }] = await Promise.all([
         apiMock.waitForResponse('DELETE', REMOVE_LINE),

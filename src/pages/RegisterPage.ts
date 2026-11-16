@@ -94,6 +94,14 @@ export class RegisterPage {
     return new LoginPage(this.page);
   }
 
+  /** The same registration, submitted from the keyboard: Enter in `field` instead of a click. */
+  @step('Register {0.email} with Enter in the {1} field')
+  async registerWithEnter(customer: Customer, field: 'email' | 'password'): Promise<LoginPage> {
+    await this.fillIn(customer);
+    await this[field].input.press('Enter');
+    return new LoginPage(this.page);
+  }
+
   @step('Submit the registration form')
   async submit(): Promise<void> {
     await this.registerButton.click();

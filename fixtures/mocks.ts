@@ -1,6 +1,6 @@
 import { expect, test as base, type Page } from '@playwright/test';
 import { ApiMock, type MockSet } from '@support/api-mock';
-import { IS_SELF_HOSTED } from '@support/env';
+import { IS_SELF_HOSTED, REAL_WRITE_PROJECTS } from '@support/env';
 
 export interface MockFixtures {
   /**
@@ -17,12 +17,6 @@ export interface MockFixtures {
 
 /** The mock layer of each page, so `apiMock` and the `page` it belongs to are always the same pair. */
 const mockOf = new WeakMap<Page, ApiMock>();
-
-/**
- * These projects sign in and write for real (tests/setup/*, the `account` and `admin` specs), so the
- * write guard that protects the live site from a gap in the mocks must not apply to them.
- */
-const REAL_WRITE_PROJECTS = new Set(['account-setup', 'account', 'admin-setup', 'admin']);
 
 export const test = base.extend<MockFixtures>({
   apiMocks: [{ routes: [] }, { option: true }],

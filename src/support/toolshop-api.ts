@@ -1,7 +1,7 @@
 import { type APIRequestContext, type APIResponse } from '@playwright/test';
 import { API_URL, IS_SELF_HOSTED } from './env';
 import { step } from './step';
-import type { Customer } from './test-data';
+import { fakeAddress, type Customer } from './test-data';
 
 export interface Product {
   id: string;
@@ -14,6 +14,8 @@ export interface Product {
   co2_rating: string;
   brand: { id: string; name: string };
   category: { id: string; name: string; slug: string };
+  /** Only GET /products/{id} sends these: a list entry has none. */
+  specs: { spec_name: string; spec_value: string; spec_unit: string | null }[];
   product_image: { id: string; title: string; file_name: string; by_name: string; by_url: string; source_name: string; source_url: string };
 }
 
@@ -187,12 +189,13 @@ export class ToolshopApi {
   async placeGuestOrder(items: CartItem[], guest: { email: string; firstName: string; lastName: string }): Promise<{ invoice_number: string; id: string }> {
     assertSelfHosted('place an order');
     const cartId = await this.createCart(items);
-    const lookup = await (await this.read(() => this.request.get(`${API_URL}/postcode-lookup`, { params: { country: 'NL', postcode: '1234 AB', house_number: '1' } }))).json();
+    const address = fakeAddress();
+    const lookup = await (await this.read(() => this.request.get(`${API_URL}/postcode-lookup`, { params: { country: address.country, postcode: address.postalCode, house_number: address.houseNumber } }))).json();
     const response = await this.send(() =>
       this.request.post(`${API_URL}/invoices/guest`, {
         data: {
-          billing_street: lookup.street, billing_house_number: '1', billing_city: lookup.city, billing_state: lookup.state,
-          billing_country: 'NL', billing_postal_code: '1234 AB', payment_method: 'cash-on-delivery', payment_details: {},
+          billing_street: lookup.street, billing_house_number: address.houseNumber, billing_city: lookup.city, billing_state: lookup.state,
+          billing_country: address.country, billing_postal_code: address.postalCode, payment_method: 'cash-on-delivery', payment_details: {},
           cart_id: cartId, guest_email: guest.email, guest_first_name: guest.firstName, guest_last_name: guest.lastName,
         },
       }),

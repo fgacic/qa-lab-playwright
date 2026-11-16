@@ -43,6 +43,17 @@ const SEARCH_TERM = 'hammer';
 const RESPONSIVE_METRICS: (keyof Vitals)[] = ['lcp', 'tbt', 'inp'];
 
 /**
+ * How many clicks and key presses each scenario makes, counted the way the collector counts them (trusted `click` and `keydown`
+ * events the page receives; Playwright's `fill` sends none, a click is one, and so is a press of a key). Named so a change to a
+ * scenario shows up as a failing "reached the page" check instead of a quietly different measurement.
+ */
+const HOME_INPUTS = 1; // ticking the category checkbox
+const SEARCH_INPUTS = 1; // the Search button (the term is filled, which sends no key events)
+const PRODUCT_INPUTS = 2; // the quantity button, then Add to cart
+const CART_INPUTS = 1; // Proceed to checkout
+const CONTACT_INPUTS = 1; // Send
+
+/**
  * The cart's fixed layout-shift ceiling, which holds with or without a baseline. The cart shifts by 0.107 in every sample
  * (the same footer bug as PERF-01, sitting a hair over the 0.1 budget), so 0.13 is that value plus about 20%: room for a font or a
  * pixel of rendering, but well under the 0.17 the same bug costs where it is unmistakable, so a cart that
@@ -59,9 +70,13 @@ function expectNoWorseShift(median: Vitals, limit: Partial<Vitals> | undefined, 
  * Speed and responsiveness: the page is loaded, used once, and judged by what that cost. The budgets are the
  * assertion that holds everywhere; the baseline limits below them are a ratchet, applied where one is recorded.
  */
-function expectResponsive({ median, observed }: Measurement, limit: Partial<Vitals> | undefined) {
+function expectResponsive({ median, observed, expectedInputs }: Measurement, limit: Partial<Vitals> | undefined) {
   expect.soft(observed.lcpEntries, 'an LCP entry was observed').toBeGreaterThan(0);
-  expect.soft(observed.interactions, 'an interaction was observed').toBeGreaterThan(0);
+  // What the scenario declared it does is what the page received, and the browser timed an interaction out of it: a click that
+  // stopped landing would leave a load that is judged as if it had been used.
+  expect.soft(observed.inputs, 'the clicks and key presses the scenario makes reached the page').toBe(expectedInputs);
+  expect.soft(observed.interactions, 'an interaction was observed (event timing, which skips the quick ones)').toBeGreaterThan(0);
+  expect.soft(observed.interactions, 'no more interactions were timed than inputs were made').toBeLessThanOrEqual(observed.inputs);
   expect.soft(observed.longTaskObserver, 'the browser reports long tasks, so a TBT of 0 was observed and not assumed').toBe(true);
   expect.soft(median.lcp, 'LCP (ms)').toBeLessThanOrEqual(BUDGET.lcp);
   expect.soft(median.tbt, 'TBT (ms)').toBeLessThanOrEqual(BUDGET.tbt);
@@ -87,29 +102,33 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hoste
       await expect(homePage.grid.cards).toHaveCount(json.data.length);
     };
 
-    const measurement = await vitals.measure('home', visit);
+    const measurement = await vitals.measure('home', visit, { inputs: HOME_INPUTS });
     expectResponsive(measurement, vitals.baseline(measurement, RESPONSIVE_METRICS));
   });
 
   test('search: typing a term and submitting stays within LCP, TBT and INP budgets', async ({ homePage, vitals }) => {
     const visit = async () => {
+      // Main content first: the blocking time of the load is counted up to the first input, and it must be the same moment on every page.
+      await expect(homePage.grid.cards.first()).toBeVisible();
       await homePage.search.searchFor(SEARCH_TERM);
       // The caption appears only once the results have replaced the overview.
       await expect(homePage.search.caption).toHaveText(`Searched for: ${SEARCH_TERM}`);
     };
 
-    const measurement = await vitals.measure('search', visit);
+    const measurement = await vitals.measure('search', visit, { inputs: SEARCH_INPUTS });
     expectResponsive(measurement, vitals.baseline(measurement, RESPONSIVE_METRICS));
   });
 
   test('product page: quantity up and add to cart stays within LCP, TBT and INP budgets', async ({ productPage, vitals }) => {
     const visit = async () => {
+      await expect(productPage.addToCartButton).toBeVisible();
       await productPage.increaseQuantityButton.click();
       await productPage.addToCart();
       await expect(productPage.toast.message('Product added to shopping cart.')).toBeVisible();
     };
 
-    const measurement = await vitals.measure('product', visit);
+    // A cart of its own in every sample: the add would otherwise land in a cart the earlier samples filled.
+    const measurement = await vitals.measure('product', visit, { inputs: PRODUCT_INPUTS, freshCart: true });
     expectResponsive(measurement, vitals.baseline(measurement, RESPONSIVE_METRICS));
   });
 
@@ -120,17 +139,18 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hoste
       await expect(checkout.signIn.loginButton).toBeVisible();
     };
 
-    const measurement = await vitals.measure('cart', visit);
+    const measurement = await vitals.measure('cart', visit, { inputs: CART_INPUTS });
     expectResponsive(measurement, vitals.baseline(measurement, RESPONSIVE_METRICS));
   });
 
   test('contact: submitting an empty form stays within LCP, TBT and INP budgets', async ({ contactPage, vitals }) => {
     const visit = async () => {
+      await expect(contactPage.sendButton).toBeVisible();
       await contactPage.submit();
       await expect(contactPage.firstName.error).toBeVisible();
     };
 
-    const measurement = await vitals.measure('contact', visit);
+    const measurement = await vitals.measure('contact', visit, { inputs: CONTACT_INPUTS });
     expectResponsive(measurement, vitals.baseline(measurement, RESPONSIVE_METRICS));
   });
 });
@@ -140,46 +160,66 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hoste
  * Whether a measurement catches that depends on whether the first paint beats the API, so at
  * full speed it comes and goes (0 to 0.32 across repeats). With a realistic 500 ms API latency the
  * race is decided and the shift is measured every time, which makes it a stable budget.
+ *
+ * Two kinds of test sit on it, kept apart: the pin states the budget the shop should meet (and fails today, as expected),
+ * and the ratchet, a passing test, holds the shift to its own recorded baseline so a pinned page cannot get worse unseen. They
+ * are separate tests because a baseline is only ever recorded from a test that passed, and a pin never does.
  */
+const SHIFTING_FOOTER = 'the footer renders at the top before the page content arrives, then jumps down (CLS 0.17 to 0.38).';
+
 test.describe('Layout stability on a 500 ms API (self-hosted)', { tag: ['@perf', '@self-hosted', '@bug'] }, () => {
   test.use({ apiLatencyMs: 500 });
 
-  const SHIFTING_FOOTER = 'the footer renders at the top before the page content arrives, then jumps down (CLS 0.17 to 0.38).';
-
   test('home keeps its layout', async ({ homePage, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    const measurement = await vitals.measure('home-slow-api', () => expect(homePage.grid.cards.first()).toBeVisible(), { interactive: false });
-    const { median, observed } = measurement;
+    const { median, observed } = await vitals.measure('home-slow-api', () => expect(homePage.grid.cards.first()).toBeVisible(), { inputs: 0 });
 
-    // Preconditions, true whether or not the bug is fixed: the page painted, and it shifts no more than the
-    // recorded shift (a ratchet: the pin is "over 0.1", so without it a worse footer would pass unseen).
+    // Precondition, true whether or not the bug is fixed: the page painted.
     expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
-    expectNoWorseShift(median, vitals.baseline(measurement, ['cls'], { pin: 'PERF-01' }), 'home');
     expect(median.cls, 'PERF-01: CLS of home').toBeLessThanOrEqual(BUDGET.cls);
   });
 
   test('product page keeps its layout', async ({ productPage, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    const measurement = await vitals.measure('product-slow-api', () => expect(productPage.addToCartButton).toBeVisible(), { interactive: false });
-    const { median, observed } = measurement;
+    const { median, observed } = await vitals.measure('product-slow-api', () => expect(productPage.addToCartButton).toBeVisible(), { inputs: 0 });
 
-    // Preconditions, true whether or not the bug is fixed: the page painted, and it shifts no more than the
-    // recorded shift (a ratchet: the pin is "over 0.1", so without it a worse footer would pass unseen).
     expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
-    expectNoWorseShift(median, vitals.baseline(measurement, ['cls'], { pin: 'PERF-01' }), 'product page');
     expect(median.cls, 'PERF-01: CLS of the product page').toBeLessThanOrEqual(BUDGET.cls);
   });
 
   test('contact page keeps its layout', async ({ contactPage, vitals }) => {
     knownBug('PERF-01', SHIFTING_FOOTER);
-    const measurement = await vitals.measure('contact-slow-api', () => expect(contactPage.sendButton).toBeVisible(), { interactive: false });
-    const { median, observed } = measurement;
+    const { median, observed } = await vitals.measure('contact-slow-api', () => expect(contactPage.sendButton).toBeVisible(), { inputs: 0 });
 
-    // Preconditions, true whether or not the bug is fixed: the page painted, and it shifts no more than the
-    // recorded shift (a ratchet: the pin is "over 0.1", so without it a worse footer would pass unseen).
     expect(observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
-    expectNoWorseShift(median, vitals.baseline(measurement, ['cls'], { pin: 'PERF-01' }), 'contact page');
     expect(median.cls, 'PERF-01: CLS of the contact page').toBeLessThanOrEqual(BUDGET.cls);
+  });
+});
+
+// The pinned pages hold their recorded shift. Not pins: the pin above says "over 0.1", so on its own a footer that jumped further
+// would pass unseen. Measured under the same 500 ms API, so these are the baselines of the same three measurements.
+test.describe('Layout shift of the pinned pages against their baseline, on a 500 ms API (self-hosted)', { tag: ['@perf', '@self-hosted'] }, () => {
+  test.use({ apiLatencyMs: 500 });
+
+  test('home shifts no more than its recorded baseline', async ({ homePage, vitals }) => {
+    const measurement = await vitals.measure('home-slow-api', () => expect(homePage.grid.cards.first()).toBeVisible(), { inputs: 0 });
+
+    expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expectNoWorseShift(measurement.median, vitals.baseline(measurement, ['cls']), 'home');
+  });
+
+  test('product page shifts no more than its recorded baseline', async ({ productPage, vitals }) => {
+    const measurement = await vitals.measure('product-slow-api', () => expect(productPage.addToCartButton).toBeVisible(), { inputs: 0 });
+
+    expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expectNoWorseShift(measurement.median, vitals.baseline(measurement, ['cls']), 'the product page');
+  });
+
+  test('contact page shifts no more than its recorded baseline', async ({ contactPage, vitals }) => {
+    const measurement = await vitals.measure('contact-slow-api', () => expect(contactPage.sendButton).toBeVisible(), { inputs: 0 });
+
+    expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
+    expectNoWorseShift(measurement.median, vitals.baseline(measurement, ['cls']), 'the contact page');
   });
 });
 
@@ -192,7 +232,7 @@ test.describe('Layout stability of the cart on a 500 ms API (self-hosted)', { ta
   test.use({ apiLatencyMs: 500 });
 
   test('cart shows no worse a layout shift than its ceiling and its recorded baseline', async ({ checkout, vitals }) => {
-    const measurement = await vitals.measure('cart-slow-api', () => expect(checkout.cart.table.rows.first()).toBeVisible(), { interactive: false });
+    const measurement = await vitals.measure('cart-slow-api', () => expect(checkout.cart.table.rows.first()).toBeVisible(), { inputs: 0 });
     const limit = vitals.baseline(measurement, ['cls']);
 
     expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
@@ -228,7 +268,7 @@ test.describe('Performance collector (control)', { tag: ['@perf', '@self-hosted'
         ms,
       );
 
-    const { median, observed } = await vitals.measure('long-task-control', () => block(BLOCKING_MS), { samples: 3, interactive: false });
+    const { median, observed } = await vitals.measure('long-task-control', () => block(BLOCKING_MS), { inputs: 0, samples: 3 });
 
     expect(observed.longTaskObserver, 'the browser reports long tasks').toBe(true);
     expect(median.tbt, `a ${BLOCKING_MS} ms task counted as blocking time (ms)`).toBeGreaterThanOrEqual(EXPECTED_TBT);

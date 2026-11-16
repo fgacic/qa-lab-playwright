@@ -1,8 +1,13 @@
 import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
 import { PAYMENT_METHODS } from '@components/checkout/PaymentStep';
-import { expect, test } from '@fixtures';
-import { twoProductCart } from '@fixtures/pages';
+import { expect, test, withMocks } from '@fixtures';
+import { postcodeLookupMock, twoProductCart } from '@fixtures/pages';
 import { fakeAddress, fakeGuest } from '@support/test-data';
+
+/** What the three-product flow changes: the first product goes to this quantity, the second is removed. */
+const KEPT_QUANTITY = 3;
+/** How many of the product the browse-and-buy journeys put in the cart. */
+const ORDERED_QUANTITY = 2;
 
 interface GuestInvoice {
   invoice_number: string;
@@ -15,29 +20,36 @@ interface GuestInvoice {
  * Cash on Delivery and an obviously fake example.com guest: no financial details are used.
  * Placing an order leaves a record, so those flows run on the self-hosted shop only
  * (@self-hosted); the journeys up to the payment step write only anonymous carts and run everywhere.
+ * The real orders use the real postcode lookup on purpose: the shop refuses an order whose city does
+ * not belong to the country (422), so only a city the lookup returned makes a valid invoice. Everything
+ * else answers the lookup with a mock, so an outage of it cannot fail a journey that is not about it.
  */
 test.describe('Purchase flows', { tag: ['@flow'] }, () => {
-  test('browse, add a product and reach the payment step as a guest', { tag: ['@smoke'] }, async ({ homePage }) => {
-    const { name, productPage } = await homePage.openFirstInStockProduct();
-    await productPage.addToCart(2);
-    await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
+  test.describe('up to the payment step', () => {
+    test.use(withMocks(postcodeLookupMock));
 
-    const checkout = await productPage.openCart();
-    await expect(checkout.cart.table.row(name).quantity).toHaveValue('2');
-    await checkout.proceedToPayment(fakeGuest(), fakeAddress());
+    test('browse, add a product and reach the payment step as a guest', { tag: ['@smoke'] }, async ({ homePage }) => {
+      const { name, productPage } = await homePage.openFirstInStockProduct();
+      await productPage.addToCart(ORDERED_QUANTITY);
+      await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
 
-    await expect(checkout.payment.heading).toBeVisible();
-    await expect(checkout.payment.method.getByRole('option')).toHaveCount(Object.keys(PAYMENT_METHODS).length + 1);
-    await expect(checkout.payment.checkPaymentButton).toBeDisabled();
+      const checkout = await productPage.openCart();
+      await expect(checkout.cart.table.row(name).quantity).toHaveValue(String(ORDERED_QUANTITY));
+      await checkout.proceedToPayment(fakeGuest(), fakeAddress());
+
+      await expect(checkout.payment.heading).toBeVisible();
+      await expect(checkout.payment.method.getByRole('option')).toHaveCount(Object.keys(PAYMENT_METHODS).length + 1);
+      await expect(checkout.payment.checkPaymentButton).toBeDisabled();
+    });
   });
 
   test('browse, buy one product as a guest and get an invoice number', { tag: ['@smoke', '@self-hosted'] }, async ({ homePage, apiMock }) => {
     const { name, productPage } = await homePage.openFirstInStockProduct();
-    await productPage.addToCart(2);
+    await productPage.addToCart(ORDERED_QUANTITY);
     await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
 
     const checkout = await productPage.openCart();
-    await expect(checkout.cart.table.row(name).quantity).toHaveValue('2');
+    await expect(checkout.cart.table.row(name).quantity).toHaveValue(String(ORDERED_QUANTITY));
     const [{ response, json: invoice }] = await Promise.all([
       apiMock.waitForResponse<GuestInvoice>('POST', '/invoices/guest'),
       checkout.checkOutAsGuest(fakeGuest(), fakeAddress()),
@@ -67,15 +79,25 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     const checkout = await homePage.openCart();
     const { table } = checkout.cart;
     await expect(table.rows).toHaveCount(3);
-    await table.setQuantity(kept.name, 3);
+    await table.setQuantity(kept.name, KEPT_QUANTITY);
     await expect(checkout.toast.message(MESSAGES.quantityUpdated)).toBeVisible();
     await table.remove(removed.name);
     await expect(table.rows).toHaveCount(2);
-    await expect(checkout.header.cartLink).toHaveText('4');
+    const units = KEPT_QUANTITY + 1;
+    await expect(checkout.header.cartLink).toHaveText(String(units));
 
-    // The lines come from the catalogue's prices.
-    await expect(table.row(kept.name).linePrice).toShowAmount(kept.price * 3);
-    await expect(table.row(alsoKept.name).linePrice).toShowAmount(alsoKept.price);
+    // The lines come from the catalogue's prices, and the saved cart (not the page) holds both edits.
+    const expectEdits = async (when: string) => {
+      await expect(table.rows, when).toHaveCount(2);
+      await expect(table.row(kept.name).quantity, when).toHaveValue(String(KEPT_QUANTITY));
+      await expect(table.row(kept.name).linePrice, when).toShowAmount(kept.price * KEPT_QUANTITY);
+      await expect(table.row(alsoKept.name).linePrice, when).toShowAmount(alsoKept.price);
+      await expect(table.row(removed.name).title, when).toHaveCount(0);
+      await expect(checkout.header.cartLink, when).toHaveText(String(units));
+    };
+    await expectEdits('on the page');
+    await checkout.page.reload();
+    await expectEdits('after a reload');
   });
 
   test.describe('ordering what the cart shows', { tag: ['@self-hosted'] }, () => {

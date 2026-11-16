@@ -29,6 +29,9 @@ export interface KnownUntranslated {
   summary: string;
 }
 
+/** A document title: the page's name, then the shop's name and version. */
+const pageTitle = (name: string) => new RegExp(`^${name} - Practice Software Testing - Toolshop - v[\\d.]+$`);
+
 export const KNOWN: KnownUntranslated[] = [
   { id: 'I18N-01', title: 'the notification bar', visit: 'home', everywhere: true, text: /^(View the|Documentation|for this application\.)$/, summary: 'the notification bar ("View the Documentation for this application.") is English in every language' },
   { id: 'I18N-02', title: 'the page heading', visit: 'home', everywhere: true, text: /^Practice Software Testing - Toolshop$/, summary: 'the page heading (visually hidden, read by screen readers) is English in every language' },
@@ -47,7 +50,21 @@ export const KNOWN: KnownUntranslated[] = [
   { id: 'I18N-14', title: 'the product page\'s category and brand labels', visit: 'product page', also: ['product page with a toast'], kinds: ['aria-label'], text: /^(category|brand)$/, summary: 'the aria-labels "category" and "brand" on the product page are English ids in every language' },
   { id: 'I18N-15', title: 'the banner image\'s alt text', visit: 'home', also: ['search without results', 'chat open', 'language menu open'], kinds: ['alt'], text: /^Banner$/, summary: 'the home page banner image\'s alt text ("Banner") is English in every language' },
   // Found by reading the document title, the cart lines, the payment form and the chat window.
-  { id: 'I18N-16', title: 'the page titles', visit: 'privacy policy', everywhere: true, kinds: ['page-title'], text: /^(Checkout|Login|Register|Forgot Password|Contact Us|Privacy Policy|Product Comparison|Rentals Overview|Overview|Favorites|Profile|Invoices|Messages) - Practice Software Testing - Toolshop - v[\d.]+$/, summary: 'the browser tab title of the checkout, login, register, forgot-password, contact, privacy, comparison, rentals and account pages is English in every language' },
+  // One pin per title, on the visit that shows it (and the same title is left out of the stray-English check only there): a title that is fixed
+  // turns its own pin red, and a title that moves to another page is not hidden by an exclusion that covers the whole site.
+  { id: 'I18N-16', title: 'the "Checkout" page title', visit: 'cart with a product', also: ['empty cart', 'checkout billing', 'checkout payment', 'order confirmation'], kinds: ['page-title'], text: pageTitle('Checkout'), summary: 'the browser tab title of the checkout ("Checkout - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Login" page title', visit: 'login with errors', also: ['login refused'], kinds: ['page-title'], text: pageTitle('Login'), summary: 'the browser tab title of the login page ("Login - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Register" page title', visit: 'registration with errors', kinds: ['page-title'], text: pageTitle('Register'), summary: 'the browser tab title of the registration page ("Register - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Forgot Password" page title', visit: 'forgot password', also: ['forgot password sent'], kinds: ['page-title'], text: pageTitle('Forgot Password'), summary: 'the browser tab title of the forgot-password page ("Forgot Password - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Contact Us" page title', visit: 'contact with errors', kinds: ['page-title'], text: pageTitle('Contact Us'), summary: 'the browser tab title of the contact page ("Contact Us - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Privacy Policy" page title', visit: 'privacy policy', kinds: ['page-title'], text: pageTitle('Privacy Policy'), summary: 'the browser tab title of the privacy policy page ("Privacy Policy - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Product Comparison" page title', visit: 'empty comparison', also: ['comparison with products'], kinds: ['page-title'], text: pageTitle('Product Comparison'), summary: 'the browser tab title of the comparison page ("Product Comparison - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Rentals Overview" page title', visit: 'rentals', kinds: ['page-title'], text: pageTitle('Rentals Overview'), summary: 'the browser tab title of the rentals page ("Rentals Overview - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Overview" page title', visit: 'account', kinds: ['page-title'], text: pageTitle('Overview'), summary: 'the browser tab title of the account page ("Overview - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Favorites" page title', visit: 'account favorites', also: ['account favorites with items'], kinds: ['page-title'], text: pageTitle('Favorites'), summary: 'the browser tab title of the favourites page ("Favorites - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Profile" page title', visit: 'account profile', kinds: ['page-title'], text: pageTitle('Profile'), summary: 'the browser tab title of the profile page ("Profile - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Invoices" page title', visit: 'account invoices', also: ['account invoices with items'], kinds: ['page-title'], text: pageTitle('Invoices'), summary: 'the browser tab title of the invoices page ("Invoices - Practice Software Testing - Toolshop - v…") is English in every language' },
+  { id: 'I18N-16', title: 'the "Messages" page title', visit: 'account messages', also: ['account messages with items'], kinds: ['page-title'], text: pageTitle('Messages'), summary: 'the browser tab title of the messages page ("Messages - Practice Software Testing - Toolshop - v…") is English in every language' },
   { id: 'I18N-17', title: 'the cart link\'s label', visit: 'cart with a product', everywhere: true, kinds: ['aria-label'], text: /^cart$/, summary: 'the aria-label of the header cart link ("cart", an internal id) is English in every language' },
   { id: 'I18N-18', title: 'the cart lines\' quantity labels', visit: 'cart with a product', text: /^Quantity for /, summary: 'the cart\'s per-line quantity label ("Quantity for <product>") is English in every language' },
   { id: 'I18N-19', title: 'the card form', visit: 'checkout payment', languages: ['de'], kinds: ['text', 'placeholder'], text: /^(Credit Card Number|Enter your 16-digit credit card number.*|Expiration Date|The CVV is a 3-digit or 4-digit number.*|Card Holder Name)$/, summary: 'the credit-card form\'s labels, hints and placeholders are English in German' },
@@ -58,6 +75,8 @@ export const KNOWN: KnownUntranslated[] = [
   // The same defect as BUG-20 (docs/COVERAGE.md), seen in every language: the text IS the key, so it is also what the key-leak check reports.
   { id: 'I18N-23', title: 'the forgot-password confirmation', visit: 'forgot password sent', leaksKey: true, text: /^page\.forgot-password\.confirm$/, summary: 'the forgot-password confirmation is the raw translation key "page.forgot-password.confirm" in every language (BUG-20)' },
   { id: 'I18N-24', title: 'the profile page\'s TOTP field label', visit: 'account profile', kinds: ['aria-label'], text: /^TOTP code$/, summary: 'the aria-label of the profile page\'s TOTP code field ("TOTP code") is English in every language' },
+  // Found by visiting the account lists with rows in them (mocked invoices, messages).
+  { id: 'I18N-25', title: 'the message status badge', visit: 'account messages with items', text: /^NEW$/, summary: 'the status badge of a message in the account list shows the API\'s raw value ("NEW") in every language' },
 ];
 
 /** The languages a pin is about, and so the languages it is checked in, one test each. */

@@ -14,7 +14,8 @@ permissions:
 
 concurrency:
   group: live
-  cancel-in-progress: true
+  # A queued nightly run must not cancel one that is mid-way through the shared public site: it waits instead.
+  cancel-in-progress: false
 
 env:
   CI: true

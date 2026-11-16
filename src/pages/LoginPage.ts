@@ -51,9 +51,21 @@ export class LoginPage {
   /** Returns the account page, where a successful login lands. */
   @step('Log in as {0}')
   async login(email: string, password: string): Promise<AccountPage> {
-    await this.email.input.fill(email);
-    await this.password.input.fill(password);
+    await this.fillIn(email, password);
     await this.loginButton.click();
     return new AccountPage(this.page);
+  }
+
+  /** The same sign-in, submitted from the keyboard: Enter in the password field instead of a click. */
+  @step('Log in as {0} with the Enter key')
+  async loginWithEnter(email: string, password: string): Promise<AccountPage> {
+    await this.fillIn(email, password);
+    await this.password.input.press('Enter');
+    return new AccountPage(this.page);
+  }
+
+  private async fillIn(email: string, password: string): Promise<void> {
+    await this.email.input.fill(email);
+    await this.password.input.fill(password);
   }
 }

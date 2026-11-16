@@ -67,6 +67,13 @@ export class ContactPage {
     await this.submit();
   }
 
+  /** The same message, submitted from the keyboard: Enter in the email field (Enter in the message box would only add a line). */
+  @step('Send a "{0.subject}" message with the Enter key')
+  async sendWithEnter(contact: ContactMessage): Promise<void> {
+    await this.fillIn(contact);
+    await this.email.input.press('Enter');
+  }
+
   @step('Submit the contact form')
   async submit(): Promise<void> {
     await this.sendButton.click();

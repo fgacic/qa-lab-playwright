@@ -21,11 +21,6 @@ export class ForgotPasswordPage {
     this.alert = form.getByRole('alert');
   }
 
-  /** The result message the form shows (success or error): an alert inside the form. */
-  statusMessage(text: string | RegExp): Locator {
-    return this.form.getByRole('alert').filter({ hasText: text });
-  }
-
   @step('Open the forgot-password page')
   async open(): Promise<void> {
     await this.shell.goto('/auth/forgot-password');
@@ -35,5 +30,12 @@ export class ForgotPasswordPage {
   async requestReset(email: string): Promise<void> {
     await this.email.input.fill(email);
     await this.submitButton.click();
+  }
+
+  /** The same request, submitted from the keyboard: Enter in the email field instead of a click. */
+  @step('Request a new password for {0} with the Enter key')
+  async requestResetWithEnter(email: string): Promise<void> {
+    await this.email.input.fill(email);
+    await this.email.input.press('Enter');
   }
 }

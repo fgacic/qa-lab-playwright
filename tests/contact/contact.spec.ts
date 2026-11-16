@@ -1,7 +1,8 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import type { ContactMessage } from '@pages/ContactPage';
-import { CONTACT_SUBJECTS, contactSubjectSlug } from '@support/payloads';
+import type { ContactMessage, ContactPage } from '@pages/ContactPage';
+import type { ApiMock } from '@support/api-mock';
+import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
@@ -72,8 +73,9 @@ test.describe('Contact form', () => {
     message: contact.message,
   });
 
-  // The real submission lands in the shop's inbox, so it runs on our own Toolshop only.
-  test('a complete message is sent and acknowledged (real)', { tag: ['@smoke', '@flow', '@self-hosted'] }, async ({ contactPage, apiMock }) => {
+  // The same journey twice: the real write lands in the shop's inbox, so that run is on our own Toolshop only;
+  // the mocked twin answers the write itself, so it also runs on the public site.
+  const sendsAndAcknowledges = async ({ contactPage, apiMock }: { contactPage: ContactPage; apiMock: ApiMock }) => {
     const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
     const sent = apiMock.waitForRequest('POST', '/messages');
 
@@ -82,21 +84,23 @@ test.describe('Contact form', () => {
     expect((await sent).postDataJSON()).toMatchObject(sentBody(contact));
     await expect(contactPage.successMessage).toBeVisible();
     await expect(contactPage.sendButton).toBeHidden();
-  });
+  };
+
+  test('a complete message is sent and acknowledged (real)', { tag: ['@smoke', '@flow', '@self-hosted'] }, sendsAndAcknowledges);
 
   test.describe('when the API accepts the message', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.respond('POST', '/messages', { id: '01QALABFAKEMESSAGE0000000', status: 'NEW' }, 201)));
+    test.use(withMocks(mock.respond('POST', '/messages', acceptedMessage, 201)));
 
-    // The same journey with the write answered by a mock, so it also runs on the public site.
-    test('a complete message is sent and acknowledged (mocked)', { tag: ['@smoke', '@flow'] }, async ({ contactPage, apiMock }) => {
-      const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
+    test('a complete message is sent and acknowledged (mocked)', { tag: ['@smoke', '@flow'] }, sendsAndAcknowledges);
+
+    test('Enter in the email field sends the message as the button does', async ({ contactPage, apiMock }) => {
+      const contact = message();
       const sent = apiMock.waitForRequest('POST', '/messages');
 
-      await contactPage.send(contact);
+      await contactPage.sendWithEnter(contact);
 
       expect((await sent).postDataJSON()).toMatchObject(sentBody(contact));
       await expect(contactPage.successMessage).toBeVisible();
-      await expect(contactPage.sendButton).toBeHidden();
     });
   });
 
@@ -115,7 +119,7 @@ test.describe('Contact form', () => {
     test.use(withMocks(mock.fail('POST', '/messages', 422, { message: 'The given data was invalid.', errors: { email: ['The email field must be a valid email address.'] } })));
 
     test('the validation message is readable', async ({ contactPage, apiMock }) => {
-      knownBug('BUG-21', 'a 422 from POST /messages is shown as "The given data was invalid. [object Object]".');
+      knownBug('BUG-21', 'a 422 from POST /messages is shown as "The given data was invalid. [object Object]".', { absence: true });
       const answered = apiMock.waitForResponse('POST', '/messages');
       await contactPage.send(message());
       expect((await answered).response.status()).toBe(422);
@@ -129,13 +133,13 @@ test.describe('Contact form', () => {
     test.use(withMocks(mock.abort('POST', '/messages')));
 
     test('the shopper is told the message was not sent', async ({ contactPage, apiMock }) => {
-      knownBug('BUG-22', 'a network failure on POST /messages shows the literal text "true" as the error.');
+      knownBug('BUG-22', 'a network failure on POST /messages shows the literal text "true" as the error.', { absence: true });
       const attempted = apiMock.waitForRequest('POST', '/messages');
       await contactPage.send(message());
       await attempted;
 
       // Any wording that says the message was not sent will do; a bare "error" or "failed" would also match unrelated text.
-      await expect(contactPage.statusMessage(/(?:not|could ?n.?t|could not|unable to|failed to) (?:be )?sen[dt]|went wrong|try again/i), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
+      await expect(contactPage.statusMessage(/(?:not|could ?n.?t|unable to|failed to) (?:be )?sen[dt]|went wrong|try again/i), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
     });
   });
 });

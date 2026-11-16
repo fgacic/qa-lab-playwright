@@ -29,7 +29,8 @@ env:
   TARGET: local
 
 jobs:
-  typecheck:
+  static:
+    name: typecheck and lint
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -46,12 +47,12 @@ jobs:
       - name: The visual image matches @playwright/test
         run: |
           version=$(node -p "require('@playwright/test/package.json').version")
-          grep -q "mcr.microsoft.com/playwright:v${version}-" scripts/visual.sh \
-            || { echo "::error file=scripts/visual.sh::the pinned Playwright image is not v${version}, the installed @playwright/test"; exit 1; }
+          grep -Eq "mcr.microsoft.com/playwright:v${version}-[a-z]+@sha256:[0-9a-f]{64}" scripts/visual.sh \
+            || { echo "::error file=scripts/visual.sh::the pinned Playwright image is not v${version} pinned by digest (image:vX-flavour@sha256:...), the installed @playwright/test"; exit 1; }
 
   e2e:
     name: e2e (${{ matrix.id }})
-    needs: typecheck
+    needs: static
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -67,8 +68,13 @@ jobs:
           - { id: webkit-2, browsers: webkit, projects: --project=webkit, shard: 2/2 }
           # Performance budgets: one worker on a runner of their own, so no other test competes for the CPU.
           - { id: perf, browsers: chromium, projects: --project=perf, shard: 1/1 }
-          # Real sign-ins against our own Toolshop, and the phone smoke set.
-          - { id: sessions-mobile, browsers: chromium, projects: --project=account --project=admin --project=mobile, shard: 1/1 }
+          # Real sign-ins against our own Toolshop, in a pass of their own: the saved session lives 300 s, so
+          # nothing else may run between the setup and the specs that use it (fixtures/auth.ts, `storage-state`).
+          - { id: sessions, browsers: chromium, projects: --project=account --project=admin, shard: 1/1 }
+          # The suite's own plumbing (the mock layer, the target configuration, the defect-id bookkeeping), once.
+          - { id: framework, browsers: chromium, projects: --project=framework, shard: 1/1 }
+          # The phone smoke set.
+          - { id: mobile, browsers: chromium, projects: --project=mobile, shard: 1/1 }
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -101,7 +107,7 @@ jobs:
 
   visual:
     name: visual (Playwright image)
-    needs: typecheck
+    needs: static
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -112,7 +118,7 @@ jobs:
         with:
           browsers: none
       - uses: ./.github/actions/toolshop
-      # Baselines are recorded in the Playwright image scripts/visual.sh pins (the typecheck job checks
+      # Baselines are recorded in the Playwright image scripts/visual.sh pins (the static job checks
       # it matches @playwright/test); comparing in the same image means the same fonts and rendering.
       - name: Compare screenshots in the Playwright image
         run: npm run test:visual
@@ -135,7 +141,7 @@ jobs:
 
   verify-bugs:
     name: known bugs still reproduce
-    needs: typecheck
+    needs: static
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -163,7 +169,7 @@ jobs:
   record-perf-baseline:
     name: record the ci performance baseline
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline }}
-    needs: typecheck
+    needs: static
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -191,9 +197,9 @@ jobs:
   # and the published report is how a failure gets investigated. The gate itself is the `gate` job below.
   report:
     name: merge reports
-    needs: [typecheck, e2e, visual]
-    # Not after a failed typecheck: e2e and visual never ran then, so there would be no blob to merge.
-    if: ${{ !cancelled() && needs.typecheck.result == 'success' }}
+    needs: [static, e2e, visual]
+    # Not after a failed static job: e2e and visual never ran then, so there would be no blob to merge.
+    if: ${{ !cancelled() && needs.static.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -225,7 +231,7 @@ jobs:
       - name: Fetch the Allure history of earlier runs
         run: |
           mkdir -p allure-history
-          curl -fsSL "https://fgacic.github.io/qa-lab-playwright/history/history.jsonl" -o allure-history/history.jsonl \
+          curl -fsSL "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/history/history.jsonl" -o allure-history/history.jsonl \
             && echo "history: $(wc -l < allure-history/history.jsonl) earlier runs" \
             || { echo "no published history yet, starting one"; rm -f allure-history/history.jsonl; }
           # A truncated download or an error page served with 200 would poison every later report:
@@ -264,7 +270,7 @@ jobs:
   # The one check for branch protection to require: red when any of the gating jobs is red, skipped or cancelled.
   gate:
     name: gate
-    needs: [typecheck, e2e, visual, verify-bugs]
+    needs: [static, e2e, visual, verify-bugs]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

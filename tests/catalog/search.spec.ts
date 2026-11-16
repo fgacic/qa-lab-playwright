@@ -8,6 +8,12 @@ const NO_MATCH = 'qa-lab-no-such-product';
 /** The search box ignores terms outside these lengths (BUG-27, BUG-35). */
 const MIN_TERM = 3;
 const MAX_TERM = 40;
+/** How long the shop gets to either send a search or say why it did not. */
+const REACTION_MS = 3_000;
+/** An alert that explains why a term was not searched (not a toast about something else). */
+const TERM_EXPLANATION = /character|short|long|least|most|term/i;
+/** A term with spaces on both sides, as typed. */
+const PADDED_TERM = '  pliers  ';
 
 test.describe('Search', () => {
   test('lists exactly the products the search found', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
@@ -62,12 +68,13 @@ test.describe('Search', () => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
     await homePage.search.searchFor('pliers');
     const exact = (await results).json;
-    const padded = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search', (body) => body.q === '  pliers  ');
+    const padded = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search', (body) => body.q === PADDED_TERM);
 
-    await homePage.search.searchFor('  pliers  ');
+    await homePage.search.searchFor(PADDED_TERM);
 
     const { json: found } = await padded;
     expect(found.data.map((p) => p.name)).toEqual(exact.data.map((p) => p.name));
+    await expect(homePage.search.caption).toHaveText('Searched for: pliers');
     await expect(homePage.grid.names).toHaveText(exact.data.map((p) => p.name));
   });
 
@@ -129,23 +136,24 @@ test.describe('Search', () => {
   });
 
   for (const { title, term, bug } of [
-    { title: 'a long search term', term: 'x'.repeat(MAX_TERM + 1), bug: ['BUG-27', 'a search term over 40 characters is silently ignored: no request, no message.'] },
-    { title: 'a very short search term', term: 'x'.repeat(MIN_TERM - 1), bug: ['BUG-35', 'a search term under 3 characters is silently ignored: no request, no message.'] },
+    { title: 'a long search term', term: 'x'.repeat(MAX_TERM + 1), bug: { id: 'BUG-27', summary: 'a search term over 40 characters is silently ignored: no request, no message.' } },
+    { title: 'a very short search term', term: 'x'.repeat(MIN_TERM - 1), bug: { id: 'BUG-35', summary: 'a search term under 3 characters is silently ignored: no request, no message.' } },
   ]) {
     test(`${title} is searched or explained`, { tag: ['@negative', '@bug'] }, async ({ homePage, apiMock }) => {
-      const [id, summary] = bug;
-      knownBug(id, summary);
-      const searched = apiMock.waitForRequest('QUERY', '/products/search', { timeout: 3_000 });
-      const explained = expect(homePage.page.getByRole('alert').first()).toBeVisible({ timeout: 3_000 });
+      knownBug(bug.id, bug.summary);
+      const searched = apiMock.waitForRequest('QUERY', '/products/search', { timeout: REACTION_MS });
+      const explained = expect(homePage.page.getByRole('alert').filter({ hasText: TERM_EXPLANATION }).first()).toBeVisible({ timeout: REACTION_MS });
+      // Both race the action below, so both must be handled from the start: if the action throws, neither is left rejecting unobserved.
+      searched.catch(() => undefined);
+      explained.catch(() => undefined);
       await homePage.search.query.fill(term);
       await homePage.search.submitButton.click();
 
       // Either answer is fine: the term goes to the API, or the page shows an alert saying why not.
-      // Promise.any settles on whichever happens first. The loser keeps running until its own 3 s
-      // timeout, but Promise.any has already attached to it, so its rejection is not left unhandled;
-      // only when both fail does the race reject, which `responded` reports as false.
+      // Promise.any settles on whichever happens first; only when both time out does it reject,
+      // which `responded` reports as false.
       const responded = await Promise.any([searched, explained]).then(() => true, () => false);
-      expect(responded, `${id}: the term is searched, or the shopper is told why not`).toBe(true);
+      expect(responded, `${bug.id}: the term is searched, or the shopper is told why not`).toBe(true);
     });
   }
 
@@ -164,7 +172,7 @@ test.describe('Search', () => {
     test.use(withMocks(mock.fail('QUERY', '/products/search', 500)));
 
     test('the shopper is told the search failed', async ({ homePage }) => {
-      knownBug('BUG-03', 'a failed search is shown as "0 products found", as if nothing matched.');
+      knownBug('BUG-03', 'a failed search is shown as "0 products found", as if nothing matched.', { absence: true });
       await homePage.search.searchFor('hammer');
       await expect(homePage.search.caption).toHaveText('Searched for: hammer');
 

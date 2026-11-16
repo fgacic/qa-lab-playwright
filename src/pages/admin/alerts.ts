@@ -10,3 +10,18 @@ import type { Locator } from '@playwright/test';
 export async function alertAppears(alerts: Locator, within = 750): Promise<boolean> {
   return alerts.first().waitFor({ state: 'visible', timeout: within }).then(() => true, () => false);
 }
+
+/** What the back office says back, word for word: the confirmations and the one validation message the specs look for by name. */
+export const ADMIN_MESSAGES = {
+  productSaved: 'Product saved!',
+  productDeleted: 'Product deleted.',
+  brandSaved: 'Brand saved!',
+  brandDeleted: 'Brand deleted.',
+  categorySaved: 'Category saved!',
+  categoryDeleted: 'Category deleted.',
+  userSaved: 'User saved!',
+  userDeleted: 'User deleted.',
+  statusUpdated: 'Status updated!',
+  settingsSaved: 'Settings saved!',
+  quantityRequired: 'Quantity is required',
+} as const;

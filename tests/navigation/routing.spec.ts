@@ -21,9 +21,11 @@ test.describe('Routing', () => {
   });
 
   test('an unknown route lands on a working home page', { tag: ['@negative', '@bug'] }, async ({ page, shop }) => {
-    knownBug('BUG-02', 'an unknown route redirects to / but the product grid never renders.');
+    knownBug('BUG-02', 'an unknown route redirects to / but the product grid never renders.', { absence: true });
     await shop.appShell.goto('/this/route/does/not/exist');
     await expect(page).toHaveURL('/');
+    // The page around the grid is there, so the grid's absence below is the defect and not a page that never loaded.
+    await expect(shop.home.shell.header.brandLink).toBeVisible();
 
     await expect(shop.home.grid.cards.first(), 'BUG-02: the product grid renders').toBeVisible({ timeout: 8_000 });
   });

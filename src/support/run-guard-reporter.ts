@@ -22,7 +22,8 @@ export default class RunGuardReporter implements Reporter {
     const projects = new Set(suite.allTests().map((t) => t.parent.project()?.name));
     if (projects.has('perf') && projects.size > 1) {
       // An error thrown from a reporter is only logged and the run goes on, so this one stops the process itself,
-      // before the first test starts: nothing has been measured next to anything else.
+      // before the first test starts: nothing has been measured next to anything else. The process ends here,
+      // so the other reporters (HTML, blob, Allure) write nothing for this run: its output is partial by design.
       console.error(
         `\nThe perf budgets must run alone, but this run also schedules ${[...projects].filter((p) => p !== 'perf').join(', ')}. ` +
           'Run `npm run test:perf` (--project=perf) in its own pass.',

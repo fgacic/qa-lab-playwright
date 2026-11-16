@@ -53,7 +53,7 @@ test.describe('Banners and footer', () => {
     await expect(privacy.heading).toBeVisible();
   });
 
-  test('the testing guide opens, pages forward and back, and closes on Escape', async ({ homePage, page }) => {
+  test('the testing guide opens and pages forward and back', async ({ homePage }) => {
     const { banners } = homePage.shell;
     await banners.openTestingGuide();
     await expect(banners.guide).toBeVisible();
@@ -64,8 +64,15 @@ test.describe('Banners and footer', () => {
     await expect(banners.guideProgress).toHaveText(/^Step 2 of \d+$/);
     await banners.guidePrevious.click();
     await expect(banners.guideProgress).toHaveText(/^Step 1 of \d+$/);
+  });
+
+  test('the testing guide closes on Escape', async ({ homePage, page }) => {
+    const { banners } = homePage.shell;
+    await banners.openTestingGuide();
+    await expect(banners.guide).toBeVisible();
 
     await page.keyboard.press('Escape');
+
     await expect(banners.guide).toBeHidden();
   });
 });

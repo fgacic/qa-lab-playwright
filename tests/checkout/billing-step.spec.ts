@@ -17,8 +17,11 @@ const RACE = {
   second: { houseNumber: '2', answer: { ...POSTCODE_LOOKUP_RESULT, house_number: '2', street: 'Faststraat', city: 'Faststad' } },
 } as const;
 
-/** Matches the postcode lookup asked for one house number. */
-const lookupFor = (houseNumber: string) => (r: { url(): string }) => r.url().includes('/postcode-lookup') && r.url().includes(`house_number=${houseNumber}`);
+/** Matches the postcode lookup asked for one house number (by its query parameter, not by a piece of the URL). */
+const lookupFor = (houseNumber: string) => (r: { url(): string }) => {
+  const url = new URL(r.url());
+  return url.pathname.endsWith('/postcode-lookup') && url.searchParams.get('house_number') === houseNumber;
+};
 
 test.describe('Checkout: billing address step', () => {
   test.beforeEach(async ({ checkout }) => {
@@ -26,7 +29,7 @@ test.describe('Checkout: billing address step', () => {
     await checkout.signIn.continueAsGuest(fakeGuest());
   });
 
-  test('with an address from the real postcode lookup, Proceed stays disabled until every field is filled', { tag: ['@negative'] }, async ({ checkout }) => {
+  test('with an address from the real postcode lookup, Proceed stays disabled while the street, the city or the state is empty', { tag: ['@negative'] }, async ({ checkout }) => {
     const { billing } = checkout;
     await expect(billing.lookupHint).toHaveText(TEXT.hint);
     await expect(billing.proceedButton).toBeDisabled();
@@ -34,8 +37,13 @@ test.describe('Checkout: billing address step', () => {
     await billing.enterAddress(fakeAddress());
     await expect(billing.proceedButton).toBeEnabled();
 
-    await billing.city.input.clear();
-    await expect(billing.proceedButton).toBeDisabled();
+    for (const field of [billing.street, billing.city, billing.state]) {
+      const filled = await field.input.inputValue();
+      await field.input.clear();
+      await expect(billing.proceedButton).toBeDisabled();
+      await field.input.fill(filled);
+      await expect(billing.proceedButton).toBeEnabled();
+    }
   });
 
   test.describe('when the postcode lookup finds the address', { tag: ['@mocked'] }, () => {

@@ -46,6 +46,15 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
     expect(untranslatedKeys(['Write to info@testsmith.io or see nav.home', 'Visit www.practicesoftwaretesting.com, then login.title'])).toEqual(['nav.home', 'login.title']);
   });
 
+  // Two shapes the detector is built not to flag, pinned so a change to it is a decision and not an accident: a key whose
+  // only other segment is a number ("errors.404") looks like a decimal, a version or an order number ("12.345", "2.5kg",
+  // "v5.3.1"), and a key of two short segments ("ui.ok") looks like an abbreviation ("e.g", "i.e", "d.h", "π.χ").
+  // Both limits end at a longer name, which is flagged.
+  test('documented limits: a number segment and two short segments are not flagged', () => {
+    expect(untranslatedKeys(['errors.404', 'ui.ok'])).toEqual([]);
+    expect(untranslatedKeys(['errors.notFound', 'ui.okay', 'errors.404.title'])).toEqual(['errors.notFound', 'ui.okay', 'errors.404.title']);
+  });
+
   test('real page text holds no key', () => {
     const real = [
       'Have at least one special symbol (e.g., @, #, $, etc.)',

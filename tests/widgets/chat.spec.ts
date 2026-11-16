@@ -1,7 +1,16 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { contactSubjectSlug, emptyProductPage, page as paged } from '@support/payloads';
+import { contactSubjectSlug, emptyProductPage, listOf } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
+
+/** What the visitor asks for, and what the assistant answers when it finds something. */
+const SEARCH_TERM = 'hammer';
+const FOUND_REPLY = 'Here are some products I found:';
+/** The questions the support-ticket dialogue asks, in order, as far as two tests quote them. */
+const EMAIL_PROMPT = 'What is your email address?';
+const SUBJECT_PROMPT = 'Please select a subject for your ticket:';
+const DESCRIPTION_PROMPT = 'Please describe your issue (minimum 50 characters):';
+const ATTACHMENT_PROMPT = 'Would you like to add an attachment?';
 
 test.describe('Chat assistant', () => {
   test('opens with a greeting and a menu, and closes again', async ({ homePage }) => {
@@ -19,13 +28,15 @@ test.describe('Chat assistant', () => {
     await expect(chat.openButton).toBeVisible();
   });
 
-  test('finds products by name', async ({ homePage }) => {
+  // Against the real catalogue, so it runs on our own Toolshop, whose seeded data it knows; the mocked
+  // search below proves the same page behaviour with a product of the test's own choosing, everywhere.
+  test('finds products by name', { tag: ['@self-hosted'] }, async ({ homePage }) => {
     const { chat } = homePage.shell;
     await chat.open();
 
-    await chat.findProduct('hammer');
+    await chat.findProduct(SEARCH_TERM);
 
-    await expect(chat.reply('Here are some products I found:')).toBeVisible();
+    await expect(chat.reply(FOUND_REPLY)).toBeVisible();
     await expect(chat.productResults.first()).toContainText(/hammer/i);
   });
 
@@ -72,13 +83,13 @@ test.describe('Chat assistant', () => {
       await chat.send(guest.firstName);
       await expect(chat.reply('What is your last name?')).toBeVisible();
       await chat.send(guest.lastName);
-      await expect(chat.reply('What is your email address?')).toBeVisible();
+      await expect(chat.reply(EMAIL_PROMPT)).toBeVisible();
       await chat.send(guest.email);
-      await expect(chat.reply('Please select a subject for your ticket:')).toBeVisible();
+      await expect(chat.reply(SUBJECT_PROMPT)).toBeVisible();
       await chat.pick('Webmaster');
-      await expect(chat.reply('Please describe your issue (minimum 50 characters):')).toBeVisible();
+      await expect(chat.reply(DESCRIPTION_PROMPT)).toBeVisible();
       await chat.send(CONTACT_MESSAGE);
-      await expect(chat.reply('Would you like to add an attachment?')).toBeVisible();
+      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', '/messages');
       await chat.pick('Skip');
 
@@ -96,7 +107,7 @@ test.describe('Chat assistant', () => {
     test.use({
       apiMocks: async ({ catalog }, use) => {
         const product = await catalog.inStock();
-        await use({ routes: [mock.respond('QUERY', '/products/search', { ...paged([product]), per_page: 9 })] });
+        await use({ routes: [mock.respond('QUERY', '/products/search', { ...listOf([product]), per_page: 9 })] });
       },
     });
 
@@ -107,7 +118,7 @@ test.describe('Chat assistant', () => {
 
       await chat.findProduct(product.name);
 
-      await expect(chat.reply('Here are some products I found:')).toBeVisible();
+      await expect(chat.reply(FOUND_REPLY)).toBeVisible();
       await expect(chat.productResults).toHaveCount(1);
       await expect(chat.productResult(product.name)).toContainText(`$${product.price.toFixed(2)}`);
     });
@@ -125,12 +136,12 @@ test.describe('Chat assistant', () => {
       const { chat } = homePage.shell;
       await chat.send('Testy');
       await chat.send('McTestface');
-      await expect(chat.reply('What is your email address?')).toBeVisible();
+      await expect(chat.reply(EMAIL_PROMPT)).toBeVisible();
 
       await chat.send('not-an-email');
 
       await expect(chat.reply('Please enter a valid email address.')).toBeVisible();
-      await expect(chat.reply('Please select a subject for your ticket:')).toBeHidden();
+      await expect(chat.reply(SUBJECT_PROMPT)).toBeHidden();
       await apiMock.expectNoRequest('POST', '/messages');
     });
 
@@ -141,12 +152,12 @@ test.describe('Chat assistant', () => {
       await chat.send(guest.lastName);
       await chat.send(guest.email);
       await chat.pick('Webmaster');
-      await expect(chat.reply('Please describe your issue (minimum 50 characters):')).toBeVisible();
+      await expect(chat.reply(DESCRIPTION_PROMPT)).toBeVisible();
 
       await chat.send('too short');
 
       await expect(chat.reply('Your message must be at least 50 characters long.')).toBeVisible();
-      await expect(chat.reply('Would you like to add an attachment?')).toBeHidden();
+      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeHidden();
       await apiMock.expectNoRequest('POST', '/messages');
     });
   });
@@ -158,7 +169,7 @@ test.describe('Chat assistant', () => {
       const { chat } = homePage.shell;
       await chat.open();
 
-      await chat.findProduct('hammer');
+      await chat.findProduct(SEARCH_TERM);
 
       await expect(chat.reply('No products found. Try a different search.')).toBeVisible();
     });
@@ -168,16 +179,16 @@ test.describe('Chat assistant', () => {
     test.use(withMocks(mock.fail('QUERY', '/products/search', 500)));
 
     test('the assistant says it could not search', async ({ homePage, apiMock }) => {
-      knownBug('BUG-25', 'a failed chat search answers "No products found", as if nothing matched.');
+      knownBug('BUG-25', 'a failed chat search answers "No products found", as if nothing matched.', { absence: true });
       const { chat } = homePage.shell;
       await chat.open();
 
       const searched = apiMock.waitForResponse('QUERY', '/products/search');
-      await chat.findProduct('hammer');
+      await chat.findProduct(SEARCH_TERM);
 
       // Evidence that the failure path ran, whatever the chat then says: the search was refused and the question stayed in the transcript.
       expect((await searched).response.status()).toBe(500);
-      await expect(chat.said('hammer')).toBeVisible();
+      await expect(chat.said(SEARCH_TERM)).toBeVisible();
 
       await expect(chat.reply(/could not|went wrong|error|try again later/i), 'BUG-25: the assistant says the search failed').toBeVisible({ timeout: 5_000 });
     });

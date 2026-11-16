@@ -1,4 +1,3 @@
-import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
@@ -6,21 +5,10 @@ import type { ProductPage } from '@support/toolshop-api';
 
 /**
  * Every one-dollar step of the price slider sends its own QUERY /products, and the shop shows
- * whichever answer arrives last (BUG-30). The slider tests below are about the filter, not that
- * race, so they let the answers through in the order they were asked for: each one waits until
- * the previous has been delivered. The race itself is pinned on its own, with a forced delay.
+ * whichever answer arrives last (BUG-30). The slider tests are about the filter, not that race,
+ * so they call `apiMock.serialize('QUERY', '/products')`: the answers reach the page in the order
+ * they were asked for. The race itself is pinned on its own, with `apiMock.delay`.
  */
-async function answerProductQueriesInOrder(page: Page): Promise<void> {
-  let previous: Promise<unknown> = Promise.resolve();
-  await page.route(/\/products$/, async (route) => {
-    if (route.request().method() !== 'QUERY') return route.fallback();
-    const response = route.fetch();
-    const turn = previous.then(() => response).then((fetched) => route.fulfill({ response: fetched }));
-    previous = turn.catch(() => undefined);
-    await turn;
-  });
-}
-
 /** The upper and lower price limits the slider tests set. */
 const MAX_PRICE = 80;
 const MIN_PRICE = 15;
@@ -52,6 +40,16 @@ const LATE_ANSWER_SETTLE_MS = LATE_ANSWER_MS + 1_000;
  * honours it, and the grid shows exactly that answer.
  */
 test.describe('Product filters', () => {
+  test('every card of the home grid shows a picture with the product name as alt text', async ({ homePage, api }) => {
+    const { data: listed } = await api.listProducts();
+    expect(listed, 'the catalogue should list products').not.toHaveLength(0);
+    await expect(homePage.grid.cards).toHaveCount(listed.length);
+
+    for (const [index, product] of listed.entries()) {
+      await expect(homePage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
+    }
+  });
+
   test('a category shows only products of that category', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => !!body.by_category);
 
@@ -125,8 +123,9 @@ test.describe('Product filters', () => {
     await expect(homePage.grid.names).toHaveText(all.data.map((p) => p.name));
   });
 
-  test('the price slider hides products above the maximum', async ({ homePage, apiMock, page }) => {
-    await answerProductQueriesInOrder(page);
+  test('the price slider hides products above the maximum', async ({ homePage, apiMock, api }) => {
+    await apiMock.serialize('QUERY', '/products');
+    const { total: unfiltered } = await api.listProducts();
     // The handle starts at $100 and moves one dollar per key press, each press its own request, so a
     // far target costs a long run of requests (80 for $20). $80 keeps it to 20 and still leaves the
     // dearest products (up to about $90) above the limit.
@@ -136,26 +135,30 @@ test.describe('Product filters', () => {
 
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain products up to $${MAX_PRICE}`).toBeGreaterThan(0);
+    expect(found.total, 'the limit hides the dearer products').toBeLessThan(unfiltered);
     expect(found.data.every((p) => p.price <= MAX_PRICE)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
   });
 
-  test('the price slider hides products below the minimum', async ({ homePage, apiMock, page }) => {
-    await answerProductQueriesInOrder(page);
+  test('the price slider hides products below the minimum', async ({ homePage, apiMock, api }) => {
+    await apiMock.serialize('QUERY', '/products');
+    const { total: unfiltered } = await api.listProducts();
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},100`);
 
     await homePage.filters.setMinPrice(MIN_PRICE);
 
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain products from $${MIN_PRICE}`).toBeGreaterThan(0);
+    expect(found.total, 'the limit hides the cheaper products').toBeLessThan(unfiltered);
     expect(found.data.every((p) => p.price >= MIN_PRICE)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect.poll(() => homePage.grid.priceValues()).toEqual(found.data.map((p) => p.price));
   });
 
-  test('moving both slider handles asks for the range between them', async ({ homePage, apiMock, page }) => {
-    await answerProductQueriesInOrder(page);
+  test('moving both slider handles asks for the range between them', async ({ homePage, apiMock, api }) => {
+    await apiMock.serialize('QUERY', '/products');
+    const { total: unfiltered } = await api.listProducts();
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},${MAX_PRICE}`);
 
     await homePage.filters.setMinPrice(MIN_PRICE);
@@ -163,21 +166,18 @@ test.describe('Product filters', () => {
 
     const { json: found } = await results;
     expect(found.total, `the catalogue should contain products from $${MIN_PRICE} to $${MAX_PRICE}`).toBeGreaterThan(0);
+    expect(found.total, 'the range hides products on both sides').toBeLessThan(unfiltered);
     expect(found.data.every((p) => p.price >= MIN_PRICE && p.price <= MAX_PRICE)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect(homePage.filters.minPrice).toHaveAttribute('aria-valuenow', String(MIN_PRICE));
     await expect(homePage.filters.maxPrice).toHaveAttribute('aria-valuenow', String(MAX_PRICE));
   });
 
-  test('the grid shows the last price step, even when an earlier answer arrives late', { tag: ['@bug'] }, async ({ homePage, apiMock, page }) => {
+  test('the grid shows the last price step, even when an earlier answer arrives late', { tag: ['@bug'] }, async ({ homePage, apiMock }) => {
     knownBug('BUG-30', 'each slider step sends its own request and the grid shows whichever answer arrives last, so a slow answer for an earlier step replaces the final filter.');
+    await expect(homePage.grid.cards.first(), 'the grid shows products before the slider moves').toBeVisible();
     // The answer for the step below the last is held back until after the last one's, as a slow network can do.
-    await page.route(/\/products$/, async (route) => {
-      if (route.request().method() === 'QUERY' && route.request().postDataJSON()?.between === `price,${MIN_PRICE - 1},100`) {
-        await new Promise((resolve) => setTimeout(resolve, LATE_ANSWER_MS));
-      }
-      await route.fallback();
-    });
+    await apiMock.delay('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`, LATE_ANSWER_MS);
     const late = apiMock.waitForResponse('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`);
     const final = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},100`);
 
@@ -203,7 +203,7 @@ test.describe('Product filters', () => {
       test.use(withMocks(failure));
 
       test('the shopper is told the products could not be loaded', async ({ homePage }) => {
-        knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.');
+        knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.', { absence: true });
         await expect(homePage.filters.sort).toBeVisible();
 
         await expect(homePage.shell.errorAlert, 'BUG-04: a failed product list is reported').toBeVisible({ timeout: 5_000 });
@@ -232,7 +232,7 @@ test.describe('Product filters', () => {
     test.use(withMocks(mock.fail('GET', '/categories/tree'), mock.fail('GET', '/brands')));
 
     test('the shopper is told the filters could not be loaded', async ({ homePage }) => {
-      knownBug('BUG-05', 'failed category and brand requests leave empty filter groups with no message.');
+      knownBug('BUG-05', 'failed category and brand requests leave empty filter groups with no message.', { absence: true });
       await expect(homePage.grid.cards.first()).toBeVisible();
 
       await expect(homePage.shell.errorAlert, 'BUG-05: failed category and brand requests are reported').toBeVisible({ timeout: 5_000 });

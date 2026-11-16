@@ -1,12 +1,9 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { AdminListName } from '@pages/admin/admin-lists';
-import { paginated } from '@support/admin-payloads';
+import { contactMessage, customer, order, paginated, product } from '@support/admin-payloads';
 import type { MockRoute } from '@support/api-mock';
 import { alertAppears } from '@pages/admin/alerts';
 import { knownBug } from '@support/known-bug';
-
-/** The second page of orders: an invoice number no other record has. */
-const SECOND_PAGE_INVOICE = 'INV-2026999997';
 
 /** Every back-office list, against an empty answer and a failing one. */
 const lists: { name: AdminListName; feed: [MockRoute['method'], string]; empty: unknown; column: string }[] = [
@@ -35,11 +32,11 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
       });
     });
 
-    test.describe(`${name}, failing`, { tag: ['@bug'] }, () => {
+    test.describe(`${name}, failing`, { tag: ['@negative', '@bug'] }, () => {
       test.use({ adminListName: name, ...withMocks(mock.fail(method, path, 500)) });
 
       test(`a failed ${name} list tells the admin`, async ({ adminList: list }) => {
-        knownBug('ADM-07', 'a failed back-office list shows an empty table and no message, in every section.');
+        knownBug('ADM-07', 'a failed back-office list shows an empty table and no message, in every section.', { absence: true });
         await expect(list.heading).toBeVisible();
 
         // Any alert will do: the pin does not prescribe the wording. A healthy list shows none.
@@ -52,39 +49,47 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
 /** The lists that page: a second page is asked for, and what it answers replaces the first. */
 test.describe('Admin list paging (mocked back office)', { tag: ['@mocked'] }, () => {
   test.describe('products', () => {
-    test.use({ apiMocks: async ({ catalog }, use) => {
-      const product = await catalog.inStock();
-      const first = { ...product, id: '01QALABPAGEONEPRODUCT00000', name: 'Qa Lab Page One Product' };
-      const second = { ...product, id: '01QALABPAGETWOPRODUCT00000', name: 'Qa Lab Page Two Product' };
-      await use({ routes: [{ method: 'QUERY', path: '/products', responses: [{ status: 200, json: paginated([first], 9, { lastPage: 2 }) }, { status: 200, json: paginated([second], 9, { page: 2, lastPage: 2 }) }] }] });
-    } });
+    const first = { ...product, id: '01QALABPAGEONEPRODUCT00000', name: 'Qa Lab Page One Product' };
+    const second = { ...product, id: '01QALABPAGETWOPRODUCT00000', name: 'Qa Lab Page Two Product' };
+    test.use(withMocks(mock.sequence('QUERY', '/products', { status: 200, json: paginated([first], 9, { lastPage: 2 }) }, { status: 200, json: paginated([second], 9, { page: 2, lastPage: 2 }) })));
 
     test('the second page of products is requested and replaces the first', async ({ adminProducts, apiMock }) => {
-      await expect(adminProducts.table.row('Qa Lab Page One Product')).toBeVisible();
+      await expect(adminProducts.table.row(first.name)).toBeVisible();
       const asked = apiMock.waitForRequest('QUERY', '/products');
 
       await adminProducts.pagination.goTo(2);
 
       expect((await asked).postDataJSON()).toEqual({ page: '2' });
-      await expect(adminProducts.table.row('Qa Lab Page Two Product')).toBeVisible();
-      await expect(adminProducts.table.row('Qa Lab Page One Product')).toHaveCount(0);
+      await expect(adminProducts.table.row(second.name)).toBeVisible();
+      await expect(adminProducts.table.row(first.name)).toHaveCount(0);
     });
   });
 
-  test.describe('orders', () => {
-    test('the second page of orders is requested and replaces the first', async ({ adminOrders, backOffice, apiMock }) => {
-      // The mocked order is page 1 of 2; the list is opened again so that the first answer of this sequence is the one it draws.
-      const second = { ...backOffice.order, id: '01QALABORDERPAGETWO000000', invoice_number: SECOND_PAGE_INVOICE };
-      await apiMock.use(mock.sequence('GET', '/invoices', { status: 200, json: paginated([backOffice.order], 15, { lastPage: 2 }) }, { status: 200, json: paginated([second], 15, { page: 2, lastPage: 2 }) }));
-      await adminOrders.open();
-      await expect(adminOrders.table.row(backOffice.order.invoice_number)).toBeVisible();
-      const asked = apiMock.waitForRequest('GET', '/invoices');
+  // Orders, users and messages ask GET /<feed>?page=2. Each sequence answers a page 1 of 2, then the second page;
+  // every row is named by a text only its own record has.
+  const paged: { name: AdminListName; feed: string; first: { row: string; record: unknown }; second: { row: string; record: unknown } }[] = [
+    { name: 'orders', feed: '/invoices', first: { row: order(product).invoice_number, record: order(product) }, second: { row: 'INV-2026999997', record: { ...order(product), id: '01QALABORDERPAGETWO000000', invoice_number: 'INV-2026999997' } } },
+    { name: 'users', feed: '/users', first: { row: customer.email, record: customer }, second: { row: 'second.page@example.com', record: { ...customer, id: '01QALABUSERPAGETWO0000000', email: 'second.page@example.com' } } },
+    { name: 'messages', feed: '/messages', first: { row: contactMessage.subject, record: contactMessage }, second: { row: 'Qa Lab Second Page Subject', record: { ...contactMessage, id: '01QALABMESSAGEPAGETWO0000', subject: 'Qa Lab Second Page Subject' } } },
+  ];
 
-      await adminOrders.pagination.goTo(2);
+  for (const { name, feed, first, second } of paged) {
+    test.describe(name, () => {
+      test.use({
+        adminListName: name,
+        ...withMocks(mock.sequence('GET', feed, { status: 200, json: paginated([first.record], 15, { lastPage: 2 }) }, { status: 200, json: paginated([second.record], 15, { page: 2, lastPage: 2 }) })),
+      });
 
-      expect(new URL((await asked).url()).searchParams.get('page')).toBe('2');
-      await expect(adminOrders.table.row(SECOND_PAGE_INVOICE)).toBeVisible();
-      await expect(adminOrders.table.row(backOffice.order.invoice_number)).toHaveCount(0);
+      test(`the second page of ${name} is requested and replaces the first`, async ({ adminList: list, apiMock }) => {
+        await expect(list.table.row(first.row)).toBeVisible();
+        const asked = apiMock.waitForRequest('GET', feed);
+
+        await list.pagination.goTo(2);
+
+        expect(new URL((await asked).url()).searchParams.get('page')).toBe('2');
+        await expect(list.table.row(second.row)).toBeVisible();
+        await expect(list.table.row(first.row)).toHaveCount(0);
+      });
     });
-  });
+  }
 });

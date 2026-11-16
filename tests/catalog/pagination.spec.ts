@@ -1,5 +1,6 @@
 import type { ApiMock } from '@support/api-mock';
 import { expect, mock, test } from '@fixtures';
+import type { HomePage } from '@pages/HomePage';
 import { knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
@@ -92,19 +93,37 @@ test.describe('Pagination', () => {
     await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
   });
 
-  test('changing the sort on a later page marks page 1 as the current one', { tag: ['@bug'] }, async ({ homePage, apiMock }) => {
-    knownBug('BUG-33', 'after a sort or filter change from a later page the list restarts at page 1 but the pager still marks the old page (or none) as current.');
-    const pageThree = pageAnswer(apiMock, 3);
-    await homePage.pagination.goTo(3);
-    await pageThree;
-    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'name,desc');
+  // The same defect through both ways of changing the list: the sort menu and a filter.
+  for (const { change, from, answer, apply } of [
+    {
+      change: 'the sort',
+      from: 3,
+      answer: (body: Record<string, unknown>) => body.sort === 'name,desc',
+      apply: (home: HomePage) => home.filters.sortBy('Name (Z - A)'),
+    },
+    {
+      change: 'a filter',
+      from: 2,
+      answer: (body: Record<string, unknown>) => body.eco_friendly === 'true',
+      apply: (home: HomePage) => home.filters.showOnlyEcoFriendly(),
+    },
+  ]) {
+    test(`changing ${change} on a later page marks page 1 as the current one`, { tag: ['@bug'] }, async ({ homePage, apiMock }) => {
+      knownBug('BUG-33', 'after a sort or filter change from a later page the list restarts at page 1 but the pager still marks the old page (or none) as current.');
+      const laterPage = pageAnswer(apiMock, from);
+      await homePage.pagination.goTo(from);
+      await laterPage;
+      const changed = apiMock.waitForResponse<ProductPage>('QUERY', '/products', answer);
 
-    await homePage.filters.sortBy('Name (Z - A)');
+      await apply(homePage);
 
-    const { json } = await sorted;
-    await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
-    await expect(homePage.pagination.item(1), 'BUG-33: the pager marks page 1 as current once the list restarts there').toHaveClass(CURRENT_PAGE, { timeout: 5_000 });
-  });
+      const { json } = await changed;
+      expect(json.current_page, 'the list restarts at page 1').toBe(1);
+      await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
+      await expect(homePage.pagination.item(1), 'the pager still offers page 1').toBeVisible();
+      await expect(homePage.pagination.item(1), 'BUG-33: the pager marks page 1 as current once the list restarts there').toHaveClass(CURRENT_PAGE, { timeout: 5_000 });
+    });
+  }
 
   // Two pins, one per button, so each is verified (and will go green) on its own.
   test('Previous is disabled on page 1 for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {
@@ -135,6 +154,7 @@ test.describe('Pagination', () => {
 
     test('no pagination is shown', async ({ homePage }) => {
       await expect(homePage.grid.cards).toHaveCount(1);
+      await expect(homePage.pagination.previous).toBeHidden();
       await expect(homePage.pagination.next).toBeHidden();
     });
   });

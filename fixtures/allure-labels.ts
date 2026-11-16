@@ -15,12 +15,12 @@ const EPICS: Record<string, string> = {
   a11y: 'Quality', visual: 'Quality', performance: 'Quality', security: 'Quality', i18n: 'Quality',
 };
 
-/** First match wins: what breaks the most when it fails. */
+/** First match wins: what breaks the most when it fails. Each pattern matches a whole tag, so "@admin-panel" is not "@admin". */
 const SEVERITY: [RegExp, 'blocker' | 'critical' | 'normal' | 'minor' | 'trivial'][] = [
-  [/@flow/, 'blocker'],
-  [/@smoke/, 'critical'],
-  [/@security|@admin|@account/, 'critical'],
-  [/@a11y|@i18n|@visual|@perf/, 'minor'],
+  [/^@flow$/, 'blocker'],
+  [/^@smoke$/, 'critical'],
+  [/^@(?:security|admin|account)$/, 'critical'],
+  [/^@(?:a11y|i18n|visual|perf)$/, 'minor'],
 ];
 
 /** Testing-pyramid vocabulary, so the pyramid and by-layer widgets render. */

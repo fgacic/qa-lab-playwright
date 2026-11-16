@@ -82,6 +82,11 @@ export class AdminOrderPage {
     this.notFoundNotice = page.getByText("This invoice doesn't exist.");
   }
 
+  /** The cells of an order line, in column order: quantity, product, unit price, line total. */
+  lineCells(index = 0): Locator {
+    return this.lines.nth(index).getByRole('cell');
+  }
+
   @step('Set the order status to {0}')
   async updateStatus(status: OrderStatus): Promise<void> {
     await this.status.selectOption(status);
@@ -148,11 +153,10 @@ export class AdminStatisticsPage {
     this.alerts = page.getByRole('alert');
   }
 
+  /** The table under a report's heading: the smallest block that holds both (the heading has no relation to its table in the accessibility tree). */
   private table(title: ReportTitle): Locator {
-    return this.page
-      .getByRole('table')
-      .filter({ has: this.page.getByRole('columnheader') })
-      .nth(REPORT_TITLES.indexOf(title));
+    const heading = this.page.getByRole('heading', { name: title, level: 4 });
+    return this.page.locator('div').filter({ has: heading }).filter({ has: this.page.getByRole('table') }).last().getByRole('table');
   }
 
   /** The data rows of the table under a report heading. */
@@ -164,7 +168,6 @@ export class AdminStatisticsPage {
   columns(title: ReportTitle): Locator {
     return this.table(title).getByRole('columnheader');
   }
-
 
   /** Returns once all four reports have been answered, so an empty table means an empty answer. */
   @step('Open the statistics')
@@ -201,10 +204,10 @@ export class AdminSalesReportPage {
     await answered;
   }
 
-  /** Picks a year and returns the request the page sent for it (the one carrying `?year=`). */
+  /** Picks a year and returns the next report request that carries a `?year=`; the spec asserts which year it asked for. */
   @step('Show the year {0}')
   async showYear(year: string): Promise<Request> {
-    const reloaded = this.page.waitForRequest((r) => r.method() === 'GET' && apiPath(r.url()) === this.feed && new URL(r.url()).searchParams.get('year') === year);
+    const reloaded = this.page.waitForRequest((r) => r.method() === 'GET' && apiPath(r.url()) === this.feed && new URL(r.url()).searchParams.has('year'));
     await this.year.selectOption(year);
     return reloaded;
   }

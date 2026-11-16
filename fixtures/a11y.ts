@@ -4,19 +4,22 @@ import type { Locator } from '@playwright/test';
 import type { AxeResults, Result } from 'axe-core';
 import type { ScanName } from '@support/a11y-baseline';
 
+/** A search term nothing in the shop matches: the "no results" state of the scans, the pins and the translation visits. */
+export const NO_SUCH_PRODUCT = 'qa-lab-no-such-product';
+
 /** WCAG 2.0, 2.1 and 2.2, levels A and AA. */
 export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
 /**
  * Left out of every scan, each for a stated reason. Everything else on the page is scanned,
- * the chat and live-activity widgets included, because they are part of the shop.
+ * the chat and live-activity widgets included, because they are part of the shop. `shownBy` is the control that
+ * brings up something that is not drawn at first, so a check that the selector still exists can open it.
  */
-export const EXCLUDED = [
-  // The "Practice Black Box Testing & Bug Hunting" bar and its split-screen guide are a
+export const EXCLUDED: { selector: string; reason: string; shownBy?: string }[] = [
+  // The "Practice Black Box Testing & Bug Hunting" bar's "Testing Guide" button and the split-screen guide it opens are a
   // training aid laid over the shop for testers, not part of the shop a customer uses.
   { selector: '.testing-guide-btn', reason: 'training aid, not part of the shop' },
-  { selector: '.bug-hunting-btn', reason: 'training aid, not part of the shop' },
-  { selector: '.guide-container', reason: 'training aid, not part of the shop' },
+  { selector: '.guide-container', reason: 'training aid, not part of the shop; drawn only once the bar\'s "Testing Guide" button opens it', shownBy: '.testing-guide-btn' },
 ];
 
 /**
@@ -52,20 +55,24 @@ export interface A11yScan {
 export interface A11yFixtures {
   /**
    * Scans the page as it is now and attaches the full axe result to the report.
-   * `ready` is the scan-ready step every scan shares: the content the state draws last, each of
-   * which must be visible before axe reads the page (a scan that ran before it rendered would
-   * pass for the wrong reason). `only` limits the scan to some rules, `within` to part of the page.
+   * `ready` is the scan-ready step every scan shares, and every scan must give it: the content the state
+   * draws last, each of which must be visible before axe reads the page (a scan that ran before it
+   * rendered would pass for the wrong reason, so an empty list is a compile error). `only` limits the scan
+   * to some rules, `within` to part of the page.
+   *
+   * The scan expects the page to be at rest: the specs run with `reducedMotion: 'reduce'` set on the
+   * context before any navigation, so no transition or fade is ever caught half way (read as low contrast).
    */
-  a11y: { scan: (name: ScanName, options?: { ready?: Locator[]; only?: string[]; within?: string }) => Promise<A11yScan> };
+  a11y: { scan: (name: ScanName, options: { ready: [Locator, ...Locator[]]; only?: string[]; within?: string }) => Promise<A11yScan> };
 }
 
 export const test = base.extend<A11yFixtures>({
   a11y: async ({ page }, use, testInfo) => {
     await use({
-      scan: async (name, { ready = [], only, within } = {}) => {
+      scan: async (name, { ready, only, within }) => {
         for (const content of ready) await expect(content.first(), `${name}: the state to be rendered before it is scanned`).toBeVisible();
-        // Transitions and fades caught half way read as low contrast; the page is scanned at rest.
-        await page.emulateMedia({ reducedMotion: 'reduce' });
+        // Set on the context by the spec, before the page loaded, so the page's own scripts saw it too; a spec that forgot it would scan mid-fade.
+        expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), `${name}: the spec must run with reducedMotion: 'reduce'`).toBe(true);
         // Either the named rules or the whole WCAG set, never one narrowing the other.
         let builder = only ? new AxeBuilder({ page }).withRules(only) : new AxeBuilder({ page }).withTags(WCAG_TAGS);
         for (const { selector } of EXCLUDED) builder = builder.exclude(selector);
@@ -73,7 +80,9 @@ export const test = base.extend<A11yFixtures>({
         const results = await builder.analyze();
         const file = name.replaceAll(' ', '-') + (only ? `-${only.join('+')}` : '');
         await testInfo.attach(`axe-${file}.json`, { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
-        // "Needs review" results are not violations and do not fail a scan, but a growing count is worth seeing in the report.
+        // "Needs review" results are not violations and are attached, not gated: what axe cannot decide (text over an image or a gradient,
+        // a name that depends on a computed style) follows the shop's data and pictures, so a count or a list per scan would be as unstable as
+        // the seed it reads, and a gate on it would turn red for a product photo. The violations ratchet and the pins are the gate.
         await testInfo.attach(`axe-${file}-incomplete.txt`, { body: `${results.incomplete.length} incomplete: ${results.incomplete.map((r) => r.id).join(', ') || 'none'}`, contentType: 'text/plain' });
         const byTarget = new Map<string, Finding>();
         for (const v of results.violations) {

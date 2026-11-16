@@ -1,9 +1,10 @@
 import { CheckoutWizard } from '@components/checkout/CheckoutWizard';
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
 import { expect, mock, test } from '@fixtures';
-import type { ApiFixtures, Catalog } from '@fixtures/api';
+import { NO_SUCH_PRODUCT } from '@fixtures/a11y';
+import type { Catalog } from '@fixtures/api';
 import { postcodeLookupMock } from '@fixtures/pages';
-import type { Locator, Page } from '@playwright/test';
+import type { BrowserContext, Locator, Page } from '@playwright/test';
 import type { ApiMock, MockRoute } from '@support/api-mock';
 import { skipIfBotChallenge } from '@support/bot-challenge';
 import { KNOWN, languagesOf } from '@support/i18n-baseline';
@@ -16,18 +17,21 @@ import {
   startInLanguage,
   untranslatedKeys,
   watchDataTraffic,
+  type ReadFor,
   type UiText,
 } from '@support/i18n';
 import { knownBug } from '@support/known-bug';
-import { fakeJwt, fakeUser, page as listOf } from '@support/payloads';
+import { fakeFavorite, fakeInvoice, fakeJwt, fakeMessage, fakeUser, listOf, UNKNOWN_EMAIL, UNKNOWN_PASSWORD } from '@support/payloads';
 import { installToken } from '@support/session';
 import { fakeAddress, fakeGuest } from '@support/test-data';
+import type { ToolshopApi } from '@support/toolshop-api';
 
 /**
  * Every public page and key state in all seven languages. A page fails on a leaked translation
  * key ("nav.home") or on English text that should have been translated: text, attributes
  * (placeholder, aria-label, title, alt, button values), the document title and options identical
  * to the English rendering of the same page, minus the shop's data and legitimate shared words (support/i18n.ts).
+ * Each rendering of a page is its own tab, so no state (an init script, a stored language, a cart) carries from one to the next.
  * One test per page, language and check, so the report names each defect on its own row.
  * Untranslated text known today is listed in KNOWN (src/support/i18n-baseline.ts) and pinned once
  * per defect and language below.
@@ -49,8 +53,11 @@ interface Visit {
   compared?: boolean;
   /** A customer is signed in (the mocked session of fixtures/auth.ts): nothing reaches the real auth API. */
   signedIn?: boolean;
-  /** Answers for the endpoints the page or its steps call, so a state that needs a failure or a write needs no real one. */
-  mocks?: MockRoute[];
+  /**
+   * Answers for the endpoints the page or its steps call, so a state that needs a failure or a write needs no real one.
+   * A function when an answer holds a product from the shop's data.
+   */
+  mocks?: MockRoute[] | ((catalog: Catalog) => Promise<MockRoute[]>);
   /** The document title is the name of a product or category from the shop's data, not text to translate. */
   dataTitle?: boolean;
   /** Steps that bring the opened page to the state to read, by test id so they work in any language. */
@@ -73,6 +80,17 @@ const accountData = [
   mock.respond('POST', '/totp/setup', {}),
 ];
 
+/** A populated list on each account page that has one, answered with the shop's own product so the rows are real-looking. */
+const accountLists = async (catalog: Catalog): Promise<MockRoute[]> => {
+  const product = await catalog.inStock();
+  return [
+    mock.respond('GET', '/favorites', [fakeFavorite(product)]),
+    mock.respond('GET', '/invoices', listOf([fakeInvoice(product)])),
+    mock.respond('GET', '/messages', listOf([fakeMessage])),
+    mock.respond('POST', '/totp/setup', {}),
+  ];
+};
+
 /** The guest invoice the order is confirmed with, shaped like the real API's answer. */
 const guestInvoice = { id: '01QALABFAKEINVOICE0000000', invoice_number: 'INV-2026999998' };
 
@@ -87,7 +105,7 @@ const VISITS: Visit[] = [
     path: '/',
     ready: (page) => [page.getByTestId('product-name'), page.getByTestId('search-query')],
     drive: async (page) => {
-      await page.getByTestId('search-query').fill('qa-lab-no-such-product');
+      await page.getByTestId('search-query').fill(NO_SUCH_PRODUCT);
       await page.getByTestId('search-submit').click();
       await expect(page.getByTestId('no-results')).toBeVisible();
     },
@@ -184,8 +202,8 @@ const VISITS: Visit[] = [
     mocks: [mock.fail('POST', '/users/login', 401, { error: 'Unauthorized' })],
     drive: async (page) => {
       // By test id, so the steps work in any language.
-      await page.getByTestId('email').fill('nobody@example.invalid');
-      await page.getByTestId('password').fill('not-a-real-password');
+      await page.getByTestId('email').fill(UNKNOWN_EMAIL);
+      await page.getByTestId('password').fill(UNKNOWN_PASSWORD);
       await page.getByTestId('login-submit').click();
       await expect(page.getByTestId('login-error')).toBeVisible();
     },
@@ -209,6 +227,9 @@ const VISITS: Visit[] = [
   { name: 'account favorites', path: '/account/favorites', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title')] },
   { name: 'account invoices', path: '/account/invoices', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title')] },
   { name: 'account messages', path: '/account/messages', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title')] },
+  { name: 'account favorites with items', path: '/account/favorites', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId('page-title'), page.getByTestId(/^favorite-/)] },
+  { name: 'account invoices with items', path: '/account/invoices', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId('page-title'), page.getByRole('row').nth(1)] },
+  { name: 'account messages with items', path: '/account/messages', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId('page-title'), page.getByRole('row').nth(1)] },
   { name: 'account profile', path: '/account/profile', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title'), page.getByTestId('update-profile-submit')] },
   {
     name: 'chat open',
@@ -237,28 +258,50 @@ const visitNamed = (name: string): Visit => {
 };
 
 interface Arrangement {
-  page: Page;
+  context: BrowserContext;
   apiMock: ApiMock;
   catalog: Catalog;
-  seedCart: ApiFixtures['seedCart'];
+  api: ToolshopApi;
+}
+
+/** What a visit needs, done once: the path to open and a way to open it in a fresh tab. */
+interface Scene {
+  path: string;
+  /** A new tab as a returning visitor who chose `language` would open it, with the visit's session, comparison and cart in place. */
+  open: (language: Language) => Promise<Page>;
 }
 
 /**
- * What the visit needs before its page opens: the session, the answers, the comparison and the
- * cart. Done once per test, whatever the number of renderings. Returns the path to open.
+ * What the visit needs before its page opens: the answers, the session, the comparison and the
+ * cart. Done once per test, whatever the number of renderings; each rendering then opens its own
+ * tab, so nothing a rendering stored or scripted reaches the next.
  */
-async function arrange(visit: Visit, { page, apiMock, catalog, seedCart }: Arrangement): Promise<string> {
-  if (visit.signedIn) {
-    await installToken(page, fakeJwt());
-    await apiMock.use(mock.respond('GET', '/users/me', fakeUser));
-  }
-  if (visit.mocks) await apiMock.use(...visit.mocks);
-  if (visit.compared) {
-    const ids = [(await catalog.inStock()).id, (await catalog.outOfStock()).id];
-    await page.addInitScript((ids) => sessionStorage.setItem('compare_ids', JSON.stringify(ids)), ids);
-  }
-  if (visit.cart) await seedCart([{ product: await catalog.inStock(), quantity: 1 }]);
-  return typeof visit.path === 'string' ? visit.path : visit.path(catalog);
+async function arrange(visit: Visit, { context, apiMock, catalog, api }: Arrangement): Promise<Scene> {
+  const token = fakeJwt();
+  if (visit.signedIn) await apiMock.use(mock.respond('GET', '/users/me', fakeUser));
+  if (visit.mocks) await apiMock.use(...(typeof visit.mocks === 'function' ? await visit.mocks(catalog) : visit.mocks));
+  const ids = visit.compared ? [(await catalog.inStock()).id, (await catalog.outOfStock()).id] : undefined;
+  // A tab holds one cart: made through the API, then put in each tab's session storage once (the order consumes it).
+  const cartId = visit.cart ? await api.createCart([{ product: await catalog.inStock(), quantity: 1 }]) : undefined;
+  const path = typeof visit.path === 'string' ? visit.path : await visit.path(catalog);
+  return {
+    path,
+    open: async (language) => {
+      const page = await context.newPage();
+      await startInLanguage(page, language);
+      if (visit.signedIn) await installToken(page, token);
+      if (ids) await page.addInitScript((ids) => sessionStorage.setItem('compare_ids', JSON.stringify(ids)), ids);
+      if (cartId) {
+        await page.addInitScript((cartId) => {
+          if (sessionStorage.getItem('qa-lab-cart-seeded')) return;
+          sessionStorage.setItem('qa-lab-cart-seeded', '1');
+          sessionStorage.setItem('cart_id', cartId);
+          sessionStorage.setItem('cart_quantity', '1');
+        }, cartId);
+      }
+      return page;
+    },
+  };
 }
 
 /**
@@ -266,15 +309,16 @@ async function arrange(visit: Visit, { page, apiMock, catalog, seedCart }: Arran
  * content is there, the language is applied and the text has stopped changing. A visit whose steps
  * run in English (`driveInEnglish`) also reads the English text just before it switches, as `english`:
  * the same page in both languages, which a visit that cannot be repeated (an order consumes the cart) needs.
+ * The tab is closed when the read is done.
  */
-async function readPage(page: Page, language: Language, visit: Visit, path: string): Promise<{ texts: UiText[]; english?: UiText[] }> {
+async function readPage(language: Language, visit: Visit, scene: Scene, readFor: ReadFor): Promise<{ texts: UiText[]; english?: UiText[] }> {
   // The steps of a visit that runs in English start there, and the language menu switches afterwards.
   const startsIn = visit.driveInEnglish ? 'en' : language;
+  const page = await scene.open(startsIn);
   // Watched from before the navigation, so the settled read knows when the page's own requests are answered.
   const traffic = watchDataTraffic(page);
   try {
-    await startInLanguage(page, startsIn);
-    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    await page.goto(scene.path, { waitUntil: 'domcontentloaded' });
     await skipIfBotChallenge(page);
     await expect(page.locator('html')).toHaveAttribute('lang', startsIn);
     for (const content of visit.ready(page)) await expect(content.first()).toBeVisible();
@@ -286,29 +330,43 @@ async function readPage(page: Page, language: Language, visit: Visit, path: stri
     let english: UiText[] | undefined;
     if (startsIn !== language) {
       await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU.en);
-      english = await settledUiText(page, traffic);
+      english = await settledUiText(page, traffic, readFor);
+      expectPageText(english, visit, 'en');
       await page.getByTestId('language-select').click();
       await page.getByTestId(`lang-${language}`).click();
       await expect(page.locator('html')).toHaveAttribute('lang', language);
     }
     // Language-specific evidence that the translation file is applied, not only that the page has rendered.
     await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU[language]);
-    return { texts: await settledUiText(page, traffic), english };
+    const texts = await settledUiText(page, traffic, readFor);
+    expectPageText(texts, visit, language);
+    return { texts, english };
   } finally {
     traffic.stop();
+    await page.close();
   }
+}
+
+/**
+ * A read that found nothing of the route's own would find no defect in it either: if the shell is all there was,
+ * the page's content was missed (or is all data), and the checks below would pass for the wrong reason.
+ */
+function expectPageText(texts: UiText[], visit: Visit, language: Language): void {
+  expect(
+    texts.some((t) => t.part === 'page'),
+    `${visit.name} in ${language}: some UI text of the route itself (not only the header and footer) was read`,
+  ).toBe(true);
 }
 
 /** The same visit in English and in `language`: one page, English first, unless the visit's steps run in English and give both. */
 async function bothRenderings(language: Language, visit: Visit, arrangement: Arrangement): Promise<{ english: Set<string>; texts: UiText[] }> {
-  const { page } = arrangement;
-  const path = await arrange(visit, arrangement);
+  const scene = await arrange(visit, arrangement);
   if (visit.driveInEnglish) {
-    const { texts, english } = await readPage(page, language, visit, path);
+    const { texts, english } = await readPage(language, visit, scene, 'strays');
     return { english: new Set(english!.map(sameKey)), texts };
   }
-  const english = new Set((await readPage(page, 'en', visit, path)).texts.map(sameKey));
-  return { english, texts: (await readPage(page, language, visit, path)).texts };
+  const english = new Set((await readPage('en', visit, scene, 'strays')).texts.map(sameKey));
+  return { english, texts: (await readPage(language, visit, scene, 'strays')).texts };
 }
 
 const sameKey = (t: UiText) => `${t.kind}\u0000${t.text}`;
@@ -331,9 +389,10 @@ const isShared = (t: UiText, visit: Visit, language: Language) =>
 test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
   for (const visit of VISITS) {
     for (const language of LANGUAGES) {
-      test(`${visit.name} in ${language}: no translation key leaks`, async ({ page, apiMock, catalog, seedCart }) => {
-        const path = await arrange(visit, { page, apiMock, catalog, seedCart });
-        const { texts } = await readPage(page, language, visit, path);
+      test(`${visit.name} in ${language}: no translation key leaks`, async ({ context, apiMock, catalog, api }) => {
+        const scene = await arrange(visit, { context, apiMock, catalog, api });
+        // Read for keys: everything but the shop's real data, so the footer, the sliders and the shared wording are looked at too.
+        const { texts } = await readPage(language, visit, scene, 'keys');
         // A leak a pin reports (the text IS the key) is that pin's to fail on, not this check's.
         const unpinned = texts.filter((t) => !isKnown(t, visit, language, { leaksKey: true }));
 
@@ -341,8 +400,8 @@ test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
       });
 
       if (language === 'en') continue;
-      test(`${visit.name} in ${language}: no stray English`, async ({ page, apiMock, catalog, seedCart }) => {
-        const { english, texts } = await bothRenderings(language, visit, { page, apiMock, catalog, seedCart });
+      test(`${visit.name} in ${language}: no stray English`, async ({ context, apiMock, catalog, api }) => {
+        const { english, texts } = await bothRenderings(language, visit, { context, apiMock, catalog, api });
 
         const stray = texts.filter((t) => english.has(sameKey(t)) && !isShared(t, visit, language) && !isKnown(t, visit, language)).map(describeUiText);
 
@@ -356,10 +415,10 @@ test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
 test.describe('Known untranslated text', { tag: ['@i18n', '@bug'] }, () => {
   for (const known of KNOWN) {
     for (const language of languagesOf(known)) {
-      test(`${known.id}: ${known.title} is translated in ${language}`, async ({ page, apiMock, catalog, seedCart }) => {
+      test(`${known.id}: ${known.title} is translated in ${language}`, async ({ context, apiMock, catalog, api }) => {
         knownBug(known.id, known.summary);
         const visit = visitNamed(known.visit);
-        const { english, texts } = await bothRenderings(language, visit, { page, apiMock, catalog, seedCart });
+        const { english, texts } = await bothRenderings(language, visit, { context, apiMock, catalog, api });
 
         // Identical to the English rendering: a fixed site shows nothing here, and so does a renamed string.
         const stillEnglish = texts

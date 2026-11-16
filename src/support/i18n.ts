@@ -5,7 +5,18 @@ import type { Language } from '@components/LanguageSwitcher';
  * Where on the page a string of UI text was read: the text itself, or an attribute assistive
  * technology or the browser shows (an input's placeholder, a button's aria-label, a tooltip).
  */
-export type UiTextKind = 'text' | 'placeholder' | 'aria-label' | 'title' | 'alt' | 'value' | 'option' | 'page-title';
+export type UiTextKind =
+  | 'text'
+  | 'placeholder'
+  | 'aria-label'
+  | 'aria-description'
+  | 'aria-valuetext'
+  | 'aria-placeholder'
+  | 'title'
+  | 'alt'
+  | 'value'
+  | 'option'
+  | 'page-title';
 
 export interface UiText {
   kind: UiTextKind;
@@ -18,13 +29,15 @@ export interface UiText {
 export const describeUiText = ({ kind, text }: UiText): string => (kind === 'text' ? `"${text}"` : `${kind} "${text}"`);
 
 /**
- * The shop's own data and legitimate shared words: product, brand and category names,
- * descriptions, specs, prices, the country list (an ISO reference list), names of external
- * products, product images (their alt text is the product's name), the build line, and the
- * training-aid bar laid over the shop for testers. Their text and their descendants' attributes
- * are not checked. A product card is not in the list as a whole: only its name, price and image are
- * data, so the Compare button and the stock label on it are scanned. CSS, because these are
- * containers with no role to find them by.
+ * What a read skips, by what it is looking for. Both lists are CSS, because these are containers with
+ * no role to find them by, and both skip an element's text and its descendants' attributes.
+ *
+ * Real data (DATA) is skipped by every read: product, brand and category names, descriptions, specs,
+ * prices, what the visitor typed, the signed-in customer's name, product images (their alt text is the
+ * product's name) and the training-aid bar laid over the shop for testers. It is never translated, and
+ * its text is not the shop's, so not even a leaked key could be the shop's doing. A product card is not
+ * in the list as a whole: only its name, price and image are data, so the Compare button and the stock
+ * label on it are scanned.
  */
 const DATA = [
   // A product's name, description, prices, and its spec table with its title.
@@ -36,8 +49,6 @@ const DATA = [
   '.card-title', 'figure',
   // The filter checkboxes' labels: the names of categories and brands.
   'label:has([data-test^="category-"])', 'label:has([data-test^="brand-"])',
-  // The footer's "Learn & Explore" block: names and blurbs of external training products.
-  '[data-test="footer-explore"]',
   // A card's image (in the grid, among the related products, in the rentals list): its alt text and tooltip are the product's name.
   // Not the wrapper around it, which also holds the Compare button.
   '.card img',
@@ -49,17 +60,26 @@ const DATA = [
   'tr:has([data-test="compare-spec"]) > th', 'img.comparison-img',
   // What the visitor typed into the search box, echoed back above the results, and the signed-in customer's name on the account menu.
   '[data-test="search-term"]', '[data-test="nav-menu"]',
-  // The country <option>s: an ISO reference list.
-  '[data-test="country"]',
-  // The photographer's credit in the footer, a link to an external site.
-  'app-footer a[href*="unsplash"]',
-  // The same block's heading and blurbs, and the build line ("vdev | Built … | Angular …"), all muted text.
-  'footer .text-muted',
+  // The records of the account's lists (invoices, messages): the billing address, the subject, the message text, the dates and the
+  // totals are what the customer typed or the shop stored. The Details button and the status badge in the same row, and any cell holding a control (the cart's quantity field), are the shop's own words and are read.
+  '.table-hover tbody td:not(:has(a, button, input, .badge))',
   // The two training-aid overlays (see EXCLUDED in fixtures/a11y.ts).
   '.testing-notification-bar', '.guide-container',
   // Never visible text, but the tree walker would read their source as text nodes.
   'script', 'style',
 ];
+
+/**
+ * Wording that is legitimately the same in every language, which only the stray-English comparison
+ * must not report. A leaked key there would still be a defect, so the key-leak read does not skip it:
+ * the country list (an ISO reference list), the footer's "Learn & Explore" block (names and blurbs of external
+ * training products), the photographer's credit (a link to an external site), and the footer's muted text
+ * (that block's heading and blurbs, and the build line "vdev | Built … | Angular …").
+ */
+const SHARED_WORDING = ['[data-test="country"]', '[data-test="footer-explore"]', 'app-footer a[href*="unsplash"]', 'footer .text-muted'];
+
+/** What a read is for: the comparison with English reports words left in English, the key-leak read reports raw keys. */
+export type ReadFor = 'strays' | 'keys';
 
 /**
  * Containers whose text is not language (a slider's numbers, the language names, a label that
@@ -75,11 +95,16 @@ const SHELL = ['app-root > .bg-dark', 'app-header', 'app-footer', 'app-chat-widg
 
 /**
  * Every string of UI a visitor can see or hear on the page, trimmed, one entry per distinct
- * string: the document title, text nodes, `placeholder`, `aria-label`, `title`, `alt`, the value of a submit or
- * button input, and the text of `<option>`s. Items of a dropdown menu are read although the menu
- * is closed (it is part of the page; its toggle must be visible). The shop's data (see DATA) is left out.
+ * string: the document title, text nodes, `placeholder`, `aria-label`, `aria-description`, `aria-valuetext`,
+ * `aria-placeholder`, `title`, `alt`, the value of a submit or button input, and the text of `<option>`s. Items
+ * of a dropdown menu are read although the menu is closed (it is part of the page; its toggle must be visible).
+ *
+ * `readFor` says what the read is for. Looking for 'strays' also leaves out the shared wording and the
+ * containers whose text is not language (TEXT_ONLY); looking for 'keys' leaves out only the shop's real data
+ * (DATA), so a raw key standing in a footer blurb or a slider's label is still seen.
  */
-export async function visibleUiText(page: Page): Promise<UiText[]> {
+export async function visibleUiText(page: Page, readFor: ReadFor = 'strays'): Promise<UiText[]> {
+  const strays = readFor === 'strays';
   return page.evaluate(
     ({ data, textOnly, shell }) => {
       const out = new Map<string, { kind: UiTextKind; text: string; part: 'shell' | 'page' }>();
@@ -112,12 +137,15 @@ export async function visibleUiText(page: Page): Promise<UiText[]> {
       for (const el of document.querySelectorAll('option')) add('option', el.textContent, el, true);
       for (const el of document.querySelectorAll('[placeholder]')) add('placeholder', el.getAttribute('placeholder'), el, false);
       for (const el of document.querySelectorAll('[aria-label]')) add('aria-label', el.getAttribute('aria-label'), el, false);
+      for (const el of document.querySelectorAll('[aria-description]')) add('aria-description', el.getAttribute('aria-description'), el, false);
+      for (const el of document.querySelectorAll('[aria-valuetext]')) add('aria-valuetext', el.getAttribute('aria-valuetext'), el, false);
+      for (const el of document.querySelectorAll('[aria-placeholder]')) add('aria-placeholder', el.getAttribute('aria-placeholder'), el, false);
       for (const el of document.querySelectorAll('[title]')) add('title', el.getAttribute('title'), el, false);
       for (const el of document.querySelectorAll('img[alt]')) add('alt', el.getAttribute('alt'), el, false);
       for (const el of document.querySelectorAll('input[type="submit"], input[type="button"], input[type="reset"]')) add('value', el.getAttribute('value'), el, false);
       return [...out.values()];
     },
-    { data: DATA, textOnly: TEXT_ONLY, shell: SHELL },
+    { data: strays ? [...DATA, ...SHARED_WORDING] : DATA, textOnly: strays ? TEXT_ONLY : [], shell: SHELL },
   );
 }
 
@@ -158,13 +186,13 @@ export function watchDataTraffic(page: Page): DataTraffic {
  * toasts all arrive on their own schedule, so a single read can be taken before they are in; the
  * quiet period only covers what no request announces (a render after the last answer, a fade).
  */
-export async function settledUiText(page: Page, traffic?: DataTraffic): Promise<UiText[]> {
+export async function settledUiText(page: Page, traffic?: DataTraffic, readFor: ReadFor = 'strays'): Promise<UiText[]> {
   let previous = '';
   let latest: UiText[] = [];
   await expect
     .poll(
       async () => {
-        latest = await visibleUiText(page);
+        latest = await visibleUiText(page, readFor);
         const now = JSON.stringify(latest);
         const settled = now === previous && (traffic?.inFlight() ?? 0) === 0;
         previous = now;
@@ -216,22 +244,37 @@ export interface SharedWord {
 
 /**
  * Words a translation legitimately shares with English: "Contact" in French and Dutch,
- * "Home" and "Item" in Dutch, "Total" in Spanish and French, "Message(s)" and "Description" in French, the loanword "Webmaster", "Name" in German.
+ * "Home" and "Item" in Dutch, "Total" in Spanish and French, "Message(s)", "Date" and "Description" in French, "Details" and "Status" in German and Dutch, the loanword "Webmaster", "Name" in German.
  * Per language and per kind: a word shared as visible text says nothing about the same word
  * left in a tooltip or an aria-label, which a visitor who changed language also expects translated.
  */
 export const SAME_AS_ENGLISH: Partial<Record<Language, SharedWord[]>> = {
-  de: [{ text: 'Webmaster', kinds: ['text', 'option'] }, { text: 'Name (A - Z)', kinds: ['option'] }, { text: 'Name (Z - A)', kinds: ['option'] }],
+  de: [
+    { text: 'Webmaster', kinds: ['text', 'option'] },
+    { text: 'Name (A - Z)', kinds: ['option'] },
+    { text: 'Name (Z - A)', kinds: ['option'] },
+    { text: 'Details', kinds: ['text'] },
+    { text: 'Status', kinds: ['text'] },
+  ],
   es: [{ text: 'Webmaster', kinds: ['text', 'option'] }, { text: 'Total', kinds: ['text'] }],
   fr: [
     { text: 'Contact', kinds: ['text'] },
     { text: 'Message *', kinds: ['text'] },
     { text: 'Messages', kinds: ['text'] },
+    { text: 'Message', kinds: ['text'] },
+    { text: 'Date', kinds: ['text'] },
     { text: 'Description', kinds: ['text'] },
     { text: 'Webmaster', kinds: ['text', 'option'] },
     { text: 'Total', kinds: ['text'] },
   ],
-  nl: [{ text: 'Home', kinds: ['text'] }, { text: 'Contact', kinds: ['text'] }, { text: 'Webmaster', kinds: ['text', 'option'] }, { text: 'Item', kinds: ['text'] }],
+  nl: [
+    { text: 'Home', kinds: ['text'] },
+    { text: 'Contact', kinds: ['text'] },
+    { text: 'Webmaster', kinds: ['text', 'option'] },
+    { text: 'Item', kinds: ['text'] },
+    { text: 'Details', kinds: ['text'] },
+    { text: 'Status', kinds: ['text'] },
+  ],
 };
 
 /** Whether `language` legitimately shows this text as it is in English. */

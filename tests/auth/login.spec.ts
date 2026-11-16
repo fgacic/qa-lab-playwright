@@ -1,9 +1,10 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { fakeJwt, fakeUser } from '@support/payloads';
+import { MOCKED_PASSWORD, UNKNOWN_EMAIL, UNKNOWN_PASSWORD, fakeJwt, fakeUser } from '@support/payloads';
+import { TOKEN_KEY } from '@support/session';
 
 /**
- * Real requests in this file use only obviously fake credentials (nobody@example.invalid).
+ * Real requests in this file use only obviously fake credentials (UNKNOWN_EMAIL, UNKNOWN_PASSWORD).
  * Successful sign-ins are mocked end to end: no real account is touched.
  */
 test.describe('Login', () => {
@@ -28,7 +29,7 @@ test.describe('Login', () => {
   // The real refusal is a failed sign-in on the shop's own log, so it runs on the self-hosted shop only;
   // the mocked twin below proves the same page behaviour everywhere, the live site included.
   test('unknown credentials are refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ loginPage, page }) => {
-    await loginPage.login('nobody@example.invalid', 'not-a-real-password');
+    await loginPage.login(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
     await expect(loginPage.error).toHaveText('Invalid email or password');
     await expect(page).toHaveURL('/auth/login');
@@ -39,7 +40,7 @@ test.describe('Login', () => {
     test.use(withMocks(mock.fail('POST', '/users/login', 401, { error: 'Unauthorized' })));
 
     test('the shopper is told so and stays on the login page', { tag: ['@smoke'] }, async ({ loginPage, page }) => {
-      await loginPage.login('nobody@example.invalid', 'not-a-real-password');
+      await loginPage.login(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
       await expect(loginPage.error).toHaveText('Invalid email or password');
       await expect(page).toHaveURL('/auth/login');
@@ -47,7 +48,7 @@ test.describe('Login', () => {
   });
 
   test('the eye button shows and hides the password', async ({ loginPage }) => {
-    await loginPage.password.input.fill('not-a-real-password');
+    await loginPage.password.input.fill(UNKNOWN_PASSWORD);
     await expect(loginPage.password.input).toHaveAttribute('type', 'password');
 
     await loginPage.showPasswordButton.click();
@@ -72,19 +73,30 @@ test.describe('Login', () => {
   });
 
   test.describe('when the credentials are accepted', { tag: ['@mocked'] }, () => {
+    const token = fakeJwt();
     test.use(withMocks(
-      mock.respond('POST', '/users/login', { access_token: fakeJwt(), token_type: 'bearer', expires_in: 3600 }),
+      mock.respond('POST', '/users/login', { access_token: token, token_type: 'bearer', expires_in: 3600 }),
       mock.respond('GET', '/users/me', fakeUser),
     ));
 
     test('the customer lands in the account area, signed in', async ({ loginPage, apiMock, page }) => {
       const login = apiMock.waitForRequest('POST', '/users/login');
-      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+      await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
 
-      expect((await login).postDataJSON()).toEqual({ email: fakeUser.email, password: 'Qa-lab-mocked-1!' });
+      expect((await login).postDataJSON()).toEqual({ email: fakeUser.email, password: MOCKED_PASSWORD });
       await expect(page).toHaveURL('/account');
       await expect(loginPage.shell.header.userMenu).toHaveText(`${fakeUser.first_name} ${fakeUser.last_name}`);
       await expect(loginPage.shell.header.signInLink).toHaveCount(0);
+      await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY), { message: 'the SPA keeps the token it was given' }).toBe(token);
+    });
+
+    test('Enter in the password field signs in as the button does', async ({ loginPage, apiMock, page }) => {
+      const login = apiMock.waitForRequest('POST', '/users/login');
+
+      await loginPage.loginWithEnter(fakeUser.email, MOCKED_PASSWORD);
+
+      expect((await login).postDataJSON()).toEqual({ email: fakeUser.email, password: MOCKED_PASSWORD });
+      await expect(page).toHaveURL('/account');
     });
   });
 
@@ -97,7 +109,7 @@ test.describe('Login', () => {
     ));
 
     test('the password step asks for a TOTP code, which completes the login', async ({ loginPage, apiMock, page }) => {
-      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+      await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
       await expect(loginPage.totpCode).toBeVisible();
       await expect(loginPage.password.input).toBeHidden();
 
@@ -108,12 +120,23 @@ test.describe('Login', () => {
       await expect(page).toHaveURL('/account');
     });
 
-    test('a wrong TOTP code is refused and the customer stays on login', { tag: ['@negative'] }, async ({ loginPage, apiMock, page }) => {
-      // The first answer asks for a code; the second refuses it, the way the real API refuses a bad credential.
-      await apiMock.use(mock.sequence('POST', '/users/login',
-        { status: 200, json: { requires_totp: true, access_token: 'qa-lab-pending-totp' } },
-        { status: 401, json: { error: 'Unauthorized' } }));
-      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+    test('an empty TOTP code is refused', { tag: ['@negative'] }, async ({ loginPage }) => {
+      await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
+
+      await loginPage.verifyTotp('');
+
+      await expect(loginPage.error).toHaveText('TOTP code is required');
+    });
+  });
+
+  test.describe('when the TOTP code is wrong', { tag: ['@mocked', '@negative'] }, () => {
+    // The first answer asks for a code; the second refuses it, the way the real API refuses a bad credential.
+    test.use(withMocks(mock.sequence('POST', '/users/login',
+      { status: 200, json: { requires_totp: true, access_token: 'qa-lab-pending-totp' } },
+      { status: 401, json: { error: 'Unauthorized' } })));
+
+    test('the code is refused and the customer stays on login', async ({ loginPage, apiMock, page }) => {
+      await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
       await expect(loginPage.totpCode).toBeVisible();
 
       const verification = apiMock.waitForResponse('POST', '/users/login');
@@ -122,15 +145,8 @@ test.describe('Login', () => {
       expect((await verification).response.status()).toBe(401);
       await expect(loginPage.error).toHaveText('Unauthorized');
       await expect(page).toHaveURL('/auth/login');
+      // The error above is on screen, so a header that is still without a user menu is settled, not early.
       await expect(loginPage.shell.header.userMenu).toHaveCount(0);
-    });
-
-    test('an empty TOTP code is refused', { tag: ['@negative'] }, async ({ loginPage }) => {
-      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
-
-      await loginPage.verifyTotp('');
-
-      await expect(loginPage.error).toHaveText('TOTP code is required');
     });
   });
 
@@ -145,7 +161,7 @@ test.describe('Login', () => {
     test.use(withMocks(mock.fail('POST', '/users/login', 423, { error: 'Account locked, too many failed attempts. Please contact the administrator.' })));
 
     test('the API reason is shown', async ({ loginPage }) => {
-      await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+      await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
 
       await expect(loginPage.error).toHaveText('Account locked, too many failed attempts. Please contact the administrator.');
     });
@@ -160,7 +176,7 @@ test.describe('Login', () => {
       test.use(withMocks(failure));
 
       test('a generic "Login failed" is shown', async ({ loginPage, page }) => {
-        await loginPage.login(fakeUser.email, 'Qa-lab-mocked-1!');
+        await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
 
         await expect(loginPage.error).toHaveText('Login failed');
         await expect(page).toHaveURL('/auth/login');

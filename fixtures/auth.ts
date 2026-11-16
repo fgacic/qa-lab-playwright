@@ -21,6 +21,9 @@ import { test as mocksTest } from './mocks';
  */
 export type Session = 'mocked' | 'storage-state' | 'worker-account';
 
+/** A saved token with less than this left is treated as expired. */
+const TOKEN_EXPIRY_MARGIN_S = 60;
+
 export interface AuthOptions {
   session: Session;
 }
@@ -79,7 +82,8 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
   signedIn: async ({ page, session, apiMock, workerAccount, api }, use) => {
     if (session === 'mocked') {
       await installToken(page, fakeJwt());
-      await apiMock.use(mock.respond('GET', '/users/me', fakeUser));
+      // A default, not a mock of its own: a spec that tests /users/me (a 401, a changed profile) overrides it.
+      await apiMock.useDefaults(mock.respond('GET', '/users/me', fakeUser));
       await use({ firstName: fakeUser.first_name, lastName: fakeUser.last_name, email: fakeUser.email });
       return;
     }
@@ -94,7 +98,8 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
     // storage-state: the account project's storageState already holds the token, which is deliberately
     // not replaced: the point of this session is that a SAVED sign-in opens the account area.
     const token = readSavedToken(CUSTOMER_STORAGE_STATE);
-    if (jwtExpiry(token) <= Date.now() / 1000) throw new Error('The saved session has expired (it lives 300 s): run the session projects in their own pass, right after their setup (npm test does).');
+    // A margin: a token that expires mid-test is a failure with a misleading cause, so refuse one that is about to.
+    if (jwtExpiry(token) <= Date.now() / 1000 + TOKEN_EXPIRY_MARGIN_S) throw new Error('The saved session has expired or is about to (it lives 300 s): run the session projects in their own pass, right after their setup (npm test and the CI `sessions` job do).');
     const me = await api.me(token);
     await use({ firstName: me.first_name, lastName: me.last_name, email: me.email });
   },

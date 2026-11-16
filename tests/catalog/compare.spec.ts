@@ -20,7 +20,7 @@ test.describe('Product comparison', () => {
     // The link only carries the selection the app has stored: check that before leaving the page.
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
     await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(() => page.evaluate((key) => JSON.parse(sessionStorage.getItem(key) ?? '[]').length, COMPARE_STORAGE_KEY), `${COMPARE_STORAGE_KEY} in the session`).toBe(2);
+    await expect.poll(async () => (await homePage.comparison.selectedIds()).length, `${COMPARE_STORAGE_KEY} in the session`).toBe(2);
 
     const comparison = await homePage.openComparison();
 
@@ -44,8 +44,10 @@ test.describe('Product comparison', () => {
     await homePage.grid.waitForLoaded();
     for (let i = 0; i < 5; i++) await homePage.grid.nth(i).compareButton.click();
 
+    // The shop says nothing about the refused fifth click (no toast, no message): the only sign is that it stays out.
     await expect(homePage.compareBar.selection).toHaveText('4 product(s) selected');
     await expect(homePage.grid.nth(4).compareButton).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => homePage.comparison.selectedIds(), 'the refused product is not stored either').toHaveLength(4);
   });
 
   test('the selection survives opening a product and coming back', async ({ homePage }) => {
@@ -165,7 +167,7 @@ test.describe('Product comparison', () => {
     });
 
     test('the shopper is told the comparison could not be loaded', async ({ comparisonPage }) => {
-      knownBug('BUG-09', 'a failed comparison request says "No products selected", although one is.');
+      knownBug('BUG-09', 'a failed comparison request says "No products selected", although one is.', { absence: true });
       await expect(comparisonPage.title).toBeVisible();
 
       await expect(comparisonPage.shell.errorAlert, 'BUG-09: a failed comparison request is reported').toBeVisible({ timeout: 5_000 });

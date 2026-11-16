@@ -5,11 +5,17 @@
 //   teardown that threw, e.g. a refused write or a failed cleanup, is not the bug);
 // - every error names the pin's id, because the bug assertion's message starts with it (a
 //   precondition or locator failure never carries it);
-// - and every error is assertion-shaped (`expect(...)`), not a test timeout or a closed page.
+// - every error is assertion-shaped (`expect(...)`), not a test timeout or a closed page;
+// - and the bug assertion's locator resolved to something: "element(s) not found" is a missing
+//   element, not a wrong value, and its message still carries the id. A pin for a defect that IS an
+//   absence (a missing heading, a button that is never rendered) opts in with
+//   `knownBug(id, summary, { absence: true })`, which adds an annotation this script reads.
 // Outcomes:
 // - reproduces: failed as pinned.
 // - fixed: it passed, the site fixed the defect. Update the pin, docs/COVERAGE.md and the bug list.
-// - fails for another reason: a precondition, a locator, a timeout, a teardown error.
+// - fails for another reason: a precondition, a locator, a timeout, a teardown error. Such a pin is
+//   run once more before it is reported, so one slow moment does not fail the gate; a pin that
+//   reproduces on the rerun is listed as flaky rather than as reproducing.
 // - flaky / skipped / not run: the pin could not be verified.
 // Which pins exist comes from the config (`--list`), not from a hard-coded project list, so a pin in
 // any project must be verified here or the script fails. The exception is the `@live-only` pins:
@@ -96,7 +102,8 @@ const projectsToRun = [...new Set(verifyIn.values())];
 // instead of letting the run fail with "Executable doesn't exist" and a misleading verdict.
 for (const browser of new Set(projectsToRun.map((p) => BROWSER_OF[p]).filter(Boolean))) {
   console.log(`installing ${browser}: a known-bug spec is scheduled only there`);
-  const install = spawnSync('npx', ['playwright', 'install', browser], { stdio: 'inherit' });
+  // --with-deps: a bare CI runner lacks the browser's system libraries as well as the browser.
+  const install = spawnSync('npx', ['playwright', 'install', '--with-deps', browser], { stdio: 'inherit' });
   if (install.status !== 0) fail(`could not install ${browser}, which a known-bug spec needs (try: npx playwright install --with-deps ${browser})`);
 }
 
@@ -108,6 +115,26 @@ const liveOnly = new Set();
 }
 
 // 3. Run them: everything but perf together, perf alone.
+/** The result of each scheduled pin in `report` that is verified in the project it ran in. */
+function collect(report) {
+  const found = [];
+  for (const spec of pins(report)) {
+    for (const t of spec.tests) {
+      const key = keyOf(spec, t.projectName);
+      if (verifyIn.get(key) !== t.projectName || found.some((r) => r.key === key)) continue; // verified in another project, or already seen
+      const last = t.results.at(-1);
+      const errors = (last?.errors?.length ? last.errors : last?.error ? [last.error] : []).map((e) => ({ message: strip(e.message), file: e.location?.file }));
+      const annotation = (type) => t.annotations?.find((a) => a.type === type);
+      const id = annotation('known bug')?.description?.match(/^([A-Za-z0-9_-]+):/)?.[1];
+      found.push({
+        key, label: labelOf(spec, t.projectName), specFile: spec.file, title: spec.title, project: t.projectName,
+        status: t.status, last: last?.status, id, absence: !!annotation('known bug absence'), errors,
+      });
+    }
+  }
+  return found;
+}
+
 const results = [];
 const passes = [
   { projects: projectsToRun.filter((p) => p !== 'perf'), out: 'run.json' },
@@ -115,42 +142,64 @@ const passes = [
 ].filter((pass) => pass.projects.length);
 for (const { projects, out } of passes) {
   const report = playwright([...projects.map((p) => `--project=${p}`), '--grep', '@bug', '--retries=0'], out, { VERIFY_BUGS: '1' });
-  for (const spec of pins(report)) {
-    for (const t of spec.tests) {
-      const key = keyOf(spec, t.projectName);
-      if (verifyIn.get(key) !== t.projectName || results.some((r) => r.key === key)) continue; // verified in another project, or already seen
-      const last = t.results.at(-1);
-      const errors = (last?.errors?.length ? last.errors : last?.error ? [last.error] : []).map((e) => ({ message: strip(e.message), file: e.location?.file }));
-      const id = t.annotations?.find((a) => a.type === 'known bug')?.description?.match(/^([A-Za-z0-9_-]+):/)?.[1];
-      results.push({ key, label: labelOf(spec, t.projectName), specFile: spec.file, status: t.status, last: last?.status, id, errors });
-    }
-  }
+  results.push(...collect(report));
 }
 
 // 4. Judge each pin.
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const reproduces = [];
 const fixed = [];
 const other = [];
 const notVerified = [];
+/** The verdict for one result: 'reproduces', 'fixed', or a problem line. */
+function judge(r) {
+  if (r.status === 'skipped' || r.last === 'skipped') return { notVerified: 'skipped' };
+  if (r.status === 'flaky') return { notVerified: 'flaky (passed on a retry), so it cannot be trusted either way' };
+  if (r.last === 'passed') return { fixed: true };
+  if (!r.id) return { other: 'no known-bug annotation, so no id to look for' };
+  const problem = whyNotThePin(r);
+  return problem ? { other: problem } : { reproduces: true };
+}
+let rerun = 0;
 for (const key of verifyIn.keys()) {
   const r = results.find((x) => x.key === key);
   if (!r) {
     notVerified.push(`${key}: it is scheduled but produced no result`);
     continue;
   }
-  if (r.status === 'skipped' || r.last === 'skipped') notVerified.push(`${r.label}: skipped`);
-  else if (r.status === 'flaky') notVerified.push(`${r.label}: flaky (passed on a retry), so it cannot be trusted either way`);
-  else if (r.last === 'passed') fixed.push(r.label);
-  else if (!r.id) other.push(`${r.label}: no known-bug annotation, so no id to look for`);
-  else {
-    const problem = whyNotThePin(r);
-    if (problem) other.push(`${r.label}: ${problem}`);
-    else reproduces.push(r.label);
+  let verdict = judge(r);
+  if (verdict.other) {
+    // Once more, alone: a pin that failed for another reason is often one slow moment, and the gate should say which.
+    rerun += 1;
+    const again = collect(playwright(
+      [`--project=${r.project}`, '--grep', escapeRegExp(r.title), r.specFile, '--retries=0', '--workers=1'],
+      `rerun-${rerun}.json`,
+      { VERIFY_BUGS: '1' },
+    )).find((x) => x.key === key);
+    const second = again ? judge(again) : undefined;
+    if (second?.reproduces) verdict = { notVerified: `failed for another reason, then reproduced on a rerun (${verdict.other}): flaky` };
+    else if (second?.fixed) verdict = { notVerified: `failed for another reason, then passed on a rerun (${verdict.other}): flaky` };
+    else if (second?.other) verdict = { other: `${verdict.other} (the same on a rerun)` };
   }
+  if (verdict.notVerified) notVerified.push(`${r.label}: ${verdict.notVerified}`);
+  else if (verdict.fixed) fixed.push(r.label);
+  else if (verdict.other) other.push(`${r.label}: ${verdict.other}`);
+  else reproduces.push(r.label);
+}
+
+/**
+ * Whether a failed locator expectation never found its element. Playwright's message says so in two ways: the
+ * received value is `<element(s) not found>`, or the call log shows it waiting for the locator and never
+ * "resolved to" anything. (A count or a hidden element still resolves, so a bug about those is not caught here.)
+ */
+function matchedNoElement(message) {
+  if (!/expect\(locator\)/.test(message)) return false;
+  if (/Received[^\n]*<element\(s\) not found>/.test(message)) return true;
+  return /^\s*- waiting for /m.test(message) && !/resolved to/.test(message);
 }
 
 /** Why a failed pin is not the pinned bug, or undefined when it is. */
-function whyNotThePin({ id, errors, specFile, last }) {
+function whyNotThePin({ id, errors, specFile, last, absence }) {
   if (last === 'timedOut') return 'the test timed out';
   if (!errors.length) return `failed with no error message`;
   for (const [i, { message, file }] of errors.entries()) {
@@ -159,6 +208,7 @@ function whyNotThePin({ id, errors, specFile, last }) {
     if (!/expect\(/.test(message) || /Test timeout of|Target (page, context or browser|closed)|has been closed/.test(message)) {
       return `${where} names "${id}" but is not an assertion failure: ${firstLine(message)}`;
     }
+    if (!absence && matchedNoElement(message)) return `${where} names "${id}" but its locator matched no element, which proves nothing about the bug: add a precondition that the element exists (or pin an absence with { absence: true })`;
     if (file && !file.endsWith(specFile)) return `${where} came from ${file.split('/').slice(-2).join('/')} (a fixture or teardown), not from the spec`;
   }
   return undefined;

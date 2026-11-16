@@ -1,14 +1,15 @@
-import { mergeTests, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { mergeTests, type Page, type Request } from '@playwright/test';
 import { AdminBrandForm, AdminCategoryForm, AdminProductForm, AdminUserForm } from '@pages/admin/AdminForms';
 import { AdminListPage } from '@pages/admin/AdminListPage';
 import { ADMIN_LISTS, type AdminListName } from '@pages/admin/admin-lists';
 import { AdminDashboardPage, AdminMessagePage, AdminOrderPage, AdminSalesReportPage, AdminSettingsPage, AdminStatisticsPage } from '@pages/admin/AdminPages';
 import * as A from '@support/admin-payloads';
 import { mock } from '@support/api-mock';
-import { ADMIN_CREDENTIALS, apiPath } from '@support/env';
+import { ADMIN_CREDENTIALS, API_URL, apiPath } from '@support/env';
 import { fakeJwt } from '@support/payloads';
 import { installToken } from '@support/session';
-import type { Product } from '@support/toolshop-api';
+import type { Product, ToolshopApi } from '@support/toolshop-api';
 import { test as apiTest } from './api';
 import { test as mocksTest } from './mocks';
 
@@ -37,10 +38,16 @@ export interface CreatedProducts {
   pending(): string[];
 }
 
+/** Brands arranged through the admin API for a real-backend test, and removed when it ends (by slug, so a copy the UI made goes too). */
+export interface BrandFactory {
+  create(): Promise<{ id: string; name: string; slug: string }>;
+}
+
 export interface AdminFixtures {
   /** Signs the real admin in through the API (once per test, on first use) and returns a fresh token, for arranging and cleaning up. */
   adminToken: () => Promise<string>;
   createdProducts: CreatedProducts;
+  brandFactory: BrandFactory;
   adminSession: AdminSession;
   /** Which list `adminList` opens, for specs that run the same case over every list. */
   adminListName: AdminListName;
@@ -121,9 +128,12 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
   adminToken: async ({ api }, use) => {
     const { email, password } = ADMIN_CREDENTIALS;
     if (!email || !password) throw new Error('No admin credentials: set ADMIN_EMAIL and ADMIN_PASSWORD (the self-hosted shop is seeded with its own admin).');
-    // Lazy, so mocked specs never sign in; one login per test.
+    // Lazy, so mocked specs never sign in; one login per test. A login that failed is not remembered: the next call tries again.
     let token: Promise<string> | undefined;
-    await use(() => (token ??= api.login(email, password)));
+    await use(() => (token ??= api.login(email, password).catch((error: unknown) => {
+      token = undefined;
+      throw error;
+    })));
   },
   // Auto (like `xss`): an e2e test that created a product through the form and never asked for this fixture would leak it.
   createdProducts: [
@@ -136,20 +146,21 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
       const reads: Promise<void>[] = [];
       // Names of products whose create request went out and whose id is not (yet) known: no response, a response
       // that could not be read, or one still in flight. Their ids cannot be reached, so teardown looks them up by
-      // name. The names are unique per test, which is why this is not a sweep by the "QaLab" prefix: another
-      // worker's product, created at that moment, would match it too.
+      // name, by walking the catalogue (the shop's search drops words under 3 letters, BUG-28, so it cannot find
+      // "Set of ..."). The names are unique per test, which is why this is not a sweep by the "QaLab" prefix:
+      // another worker's product, created at that moment, would match it too.
       const unaccounted = new Set<string>();
       page.on('request', (request) => {
         if (request.method() !== 'POST' || apiPath(request.url()) !== '/products') return;
-        const name = (request.postDataJSON() as { name?: unknown } | null)?.name;
-        if (typeof name === 'string') unaccounted.add(name);
+        const name = postedName(request);
+        if (name) unaccounted.add(name);
       });
       page.on('response', (response) => {
         const request = response.request();
         const method = request.method();
         const pathname = apiPath(response.url());
         if (method === 'POST' && pathname === '/products') {
-          const name = (request.postDataJSON() as { name?: string } | null)?.name;
+          const name = postedName(request);
           if (!response.ok()) {
             if (name) unaccounted.delete(name); // refused: nothing was created
             return;
@@ -173,7 +184,7 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
       const outcomes = await Promise.allSettled([
         ...[...pending].map(async (id) => api.deleteProduct(await adminToken(), id)),
         ...[...unaccounted].map(async (name) => {
-          const leaked = await api.findProductByName(await adminToken(), name);
+          const leaked = await findInCatalogue(api, name);
           if (leaked) await api.deleteProduct(await adminToken(), leaked.id);
         }),
       ]);
@@ -182,6 +193,29 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
     },
     { auto: true },
   ],
+  brandFactory: async ({ request, adminToken }, use) => {
+    const made = new Set<string>(); // slugs, so a brand the UI saved under the same slug is removed as well
+    const headers = async () => ({ authorization: `Bearer ${await adminToken()}` });
+    await use({
+      async create() {
+        const suffix = randomUUID().slice(0, 8);
+        const brand = { name: `QaLab Brand ${suffix}`, slug: `qalab-brand-${suffix}` };
+        made.add(brand.slug);
+        const response = await request.post(`${API_URL}/brands`, { data: brand, headers: await headers() });
+        if (!response.ok()) throw new Error(`Could not arrange the brand ${brand.slug}: POST /brands answered ${response.status()}`);
+        return { ...brand, id: ((await response.json()) as { id: string }).id };
+      },
+    });
+    if (!made.size) return;
+    const failures: unknown[] = [];
+    const brands = (await (await request.get(`${API_URL}/brands`)).json()) as { id: string; slug: string }[];
+    for (const { id, slug } of brands) {
+      if (!made.has(slug)) continue;
+      const response = await request.delete(`${API_URL}/brands/${id}`, { headers: await headers() });
+      if (!response.ok()) failures.push(new Error(`Could not remove the brand ${slug}: DELETE answered ${response.status()}`));
+    }
+    if (failures.length) throw new AggregateError(failures, 'Cleaning up the brands this test created failed');
+  },
   adminListName: ['products', { option: true }],
 
   backOffice: async ({ page, adminSession, apiMock, adminToken, catalog }, use) => {
@@ -193,16 +227,14 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
       await use({ product, order: A.order(product) });
       return;
     }
-    const real = await catalog.inStock();
-    // The served product carries the mocked brand and category, so the edit form can select them.
-    const product = { ...real, brand: { id: A.brand.id, name: A.brand.name }, category: { ...real.category, id: A.category.id, name: A.category.name } } as Product;
-    const order = A.order(product);
+    // A fixed product, carrying the mocked brand and category the edit form can select: nothing here depends on the catalogue.
+    const order = A.order(A.product);
     await installToken(page, fakeJwt('admin'));
     // Defaults: a describe-level `withMocks()` or a test's `apiMock.use()` overrides any of them.
-    await apiMock.useDefaults(...backOfficeMocks(product, order));
+    await apiMock.useDefaults(...backOfficeMocks(A.product, order));
     await apiMock.blockUnmockedWrites();
     // Any write no mock answered is refused, and the `page` fixture fails the test that sent it.
-    await use({ product, order });
+    await use({ product: A.product, order });
   },
 
   adminDashboard: async ({ page, backOffice: _ }, use) => {
@@ -249,4 +281,31 @@ async function openList<Detail>(page: Page, config: ConstructorParameters<typeof
   const list = new AdminListPage(page, config);
   await list.open();
   return list;
+}
+
+/** The name a create request carries. A body that is missing or not JSON yields no name instead of throwing inside a page listener. */
+function postedName(request: Request): string | undefined {
+  try {
+    const name = (request.postDataJSON() as { name?: unknown } | null)?.name;
+    return typeof name === 'string' ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The product with exactly this name, found by walking the catalogue page by page, in the default list and in the
+ * rentals the default list leaves out. Slow, and only for a product whose id never reached the test; it proves the
+ * product is not there when it returns nothing.
+ */
+async function findInCatalogue(api: ToolshopApi, name: string): Promise<Product | undefined> {
+  for (const query of [{}, { is_rental: 'true' }]) {
+    for (let page = 1; ; page++) {
+      const result = await api.listProducts({ ...query, page: String(page) });
+      const found = result.data.find((product) => product.name === name);
+      if (found) return found;
+      if (page >= result.last_page) break;
+    }
+  }
+  return undefined;
 }

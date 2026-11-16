@@ -23,7 +23,13 @@ test.describe('Category pages', () => {
       const parent = (await api.categoryTree()).find((node) => node.slug === slug);
       expect(parent, `the category tree should contain "${slug}"`).toBeDefined();
       const belonging = new Set(parent!.sub_categories.map((sub) => sub.slug));
-      expect(found.data.filter((p) => !belonging.has(p.category.slug)).map((p) => p.name), 'products outside the category').toEqual([]);
+      // The list runs over several pages: every page is checked, not just the one the grid shows.
+      const strangers: string[] = [];
+      for (let pageNo = 1; pageNo <= found.last_page; pageNo++) {
+        const { data } = await api.listProducts({ by_category_slug: slug, page: String(pageNo) });
+        strangers.push(...data.filter((p) => !belonging.has(p.category.slug)).map((p) => p.name));
+      }
+      expect(strangers, 'products outside the category').toEqual([]);
       // "All of them": the parent's total is the sum of its subcategories' totals, each asked of the API on its own.
       const subtotals = await Promise.all(parent!.sub_categories.map(async (sub) => (await api.listProducts({ by_category_slug: sub.slug })).total));
       expect(found.total, `"${slug}" should list every product of ${[...belonging].join(', ')}`).toBe(subtotals.reduce((sum, total) => sum + total, 0));
@@ -54,7 +60,7 @@ test.describe('Category pages', () => {
   });
 
   test('an unknown category says it does not exist', { tag: ['@negative', '@bug'] }, async ({ categoryPage }) => {
-    knownBug('BUG-06', '/category/<anything> invents a page titled after the slug, with an empty grid and no "not found".');
+    knownBug('BUG-06', '/category/<anything> invents a page titled after the slug, with an empty grid and no "not found".', { absence: true });
     await categoryPage.open('qa-lab-unknown');
 
     await expect(categoryPage.notFoundMessage, 'BUG-06: an unknown category says it does not exist').toBeVisible({ timeout: 5_000 });
@@ -64,7 +70,7 @@ test.describe('Category pages', () => {
     test.use(withMocks(mock.fail('QUERY', '/products', 500)));
 
     test('the shopper is told the products could not be loaded', async ({ categoryPage }) => {
-      knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.');
+      knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.', { absence: true });
       await categoryPage.open('hand-tools');
       await expect(categoryPage.title).toHaveText('Category: Hand Tools');
 

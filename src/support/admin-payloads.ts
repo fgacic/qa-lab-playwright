@@ -42,6 +42,28 @@ export const brand = { id: '01QALABBRAND0000000000000', name: 'Qa Lab Tools', sl
 
 export const category = { id: '01QALABCATEGORY0000000000', parent_id: null, name: 'Qa Lab Category', slug: 'qa-lab-category', sub_categories: [] };
 
+/**
+ * The one product the mocked back office serves: fixed, so a spec never depends on what the shop's
+ * catalogue holds today, and it carries the mocked brand and category the edit form can select.
+ */
+export const product: Product = {
+  id: '01QALABPRODUCT0000000000',
+  name: 'Qa Lab Combination Pliers',
+  description: 'A mocked product for the back office.',
+  specs: [],
+  price: 14.15,
+  in_stock: true,
+  is_rental: false,
+  is_eco_friendly: false,
+  co2_rating: 'B',
+  brand: { id: brand.id, name: brand.name },
+  category: { id: category.id, name: category.name, slug: category.slug },
+  product_image: { id: '01QALABIMAGE00000000000000', title: 'Qa Lab Pliers', file_name: 'pliers01.avif', by_name: 'Qa Lab', by_url: 'https://example.com', source_name: 'Qa Lab', source_url: 'https://example.com' },
+};
+
+/** A record the mocked search answers with: not in the full list, so a table that shows it has really been replaced. */
+export const SEARCH_HIT = 'Qa Lab Search Hit';
+
 /** The payment of the mocked order: the API's method code and the label the order page shows for it. */
 export const orderPayment = { method: 'cash-on-delivery', label: 'Cash on Delivery' };
 

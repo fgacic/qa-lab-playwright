@@ -1,4 +1,4 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type BrowserContext, type Page } from '@playwright/test';
 import { ContactPage } from '@pages/ContactPage';
 import { IS_SELF_HOSTED } from '@support/env';
 
@@ -42,6 +42,9 @@ export const ROUTE_XSS_PAYLOADS = {
  */
 const OBSERVATION_WINDOW_MS = 1_000;
 
+/** How many times `settle` starts over on a page that was navigated away from while it waited. */
+const SETTLE_ATTEMPTS = 3;
+
 declare global {
   interface Window {
     __qaLabXssHit: (kind: string) => void;
@@ -64,8 +67,20 @@ export class XssSentinel {
 
   constructor(private readonly page: Page, private readonly watching: boolean) {}
 
+  private readonly watched = new Set<BrowserContext>();
+
+  /** Watches the page's own context. */
   async install(): Promise<void> {
-    const context = this.page.context();
+    await this.watch(this.page.context());
+  }
+
+  /**
+   * Puts the sentinel on a browser context, once. Every context a test opens (somebody else's, say) must be watched
+   * too: a payload that runs for another visitor is a hit all the same, recorded here.
+   */
+  async watch(context: BrowserContext): Promise<void> {
+    if (this.watched.has(context)) return;
+    this.watched.add(context);
     await context.exposeFunction('__qaLabXssHit', (kind: string) => this.record(String(kind)));
     await context.addInitScript(() => {
       for (const name of ['alert', 'confirm', 'prompt'] as const) {
@@ -92,16 +107,33 @@ export class XssSentinel {
     return this.hits;
   }
 
-  /** Waits until nothing a payload could still be waiting on is pending, then returns. */
+  /**
+   * Waits until nothing a payload could still be waiting on is pending, then returns. A hit already recorded ends it
+   * at once, and a navigation that destroys the page mid-wait is not an error: the wait starts over on the new document
+   * (a few times at most), since a payload's handler may be what redirected it.
+   */
   private async settle(): Promise<void> {
-    await this.page.evaluate(async () => {
-      // Lazy images below the fold may never load, so they are not waited for.
-      const pending = [...document.images].filter((image) => !image.complete && image.loading !== 'lazy');
-      await Promise.all(pending.map((image) => new Promise((done) => (image.onload = image.onerror = done))));
-      // Timers, not animation frames: a page in a background tab (parallel Firefox) never gets a frame.
-      await new Promise((tick) => setTimeout(tick, 0));
-      await new Promise((tick) => setTimeout(tick, 0));
-    });
+    for (let attempt = 0; ; attempt++) {
+      if (this.hits.length) return;
+      try {
+        await this.page.evaluate(async () => {
+          // Lazy images below the fold may never load, so they are not waited for. The listeners are added, not assigned:
+          // an `onerror` property is what an `<img onerror=...>` payload runs through, and replacing it would stop the very
+          // handler this check exists to wait for.
+          const pending = [...document.images].filter((image) => !image.complete && image.loading !== 'lazy');
+          await Promise.all(
+            pending.map((image) => new Promise((done) => (['load', 'error'] as const).forEach((type) => image.addEventListener(type, done, { once: true })))),
+          );
+          // Timers, not animation frames: a page in a background tab (parallel Firefox) never gets a frame.
+          await new Promise((tick) => setTimeout(tick, 0));
+          await new Promise((tick) => setTimeout(tick, 0));
+        });
+        return;
+      } catch (error) {
+        if (this.hits.length) return; // the page went away because something ran: the expectation reports what
+        if (!/execution context was destroyed/i.test(String(error)) || attempt >= SETTLE_ATTEMPTS - 1) throw error;
+      }
+    }
   }
 
   /**
@@ -126,14 +158,25 @@ export class XssSentinel {
   }
 
   /**
-   * How many elements a payload would have created had it been parsed as HTML. Read from the DOM
+   * How many elements a payload would have created had it been parsed as HTML, in the document, in every same-origin
+   * iframe and in every open shadow root (a sink inside a component or a frame is a sink too). Read from the DOM
    * rather than by locator: Playwright's text matching ignores the body of a <script>. It recognises an
-   * `<img>` payload by `src="x"`: see the caveat on XSS_PAYLOADS.
+   * `<img>` payload by `src="x"`: see the caveat on XSS_PAYLOADS. A closed shadow root cannot be read from outside, and a
+   * cross-origin frame cannot be entered: the sentinel's hit record is what covers those.
    */
   async injectedCount(): Promise<number> {
-    return this.page.evaluate(
-      () => document.querySelectorAll('img[src="x"], svg[onload*="__qaLabXssHit"]').length + [...document.scripts].filter((s) => s.textContent?.includes('__qaLabXssHit')).length,
-    );
+    return this.page.evaluate(() => {
+      const count = (root: Document | ShadowRoot): number => {
+        let found = root.querySelectorAll('img[src="x"], svg[onload*="__qaLabXssHit"]').length;
+        found += [...root.querySelectorAll('script')].filter((script) => script.textContent?.includes('__qaLabXssHit')).length;
+        for (const element of root.querySelectorAll('*')) {
+          if (element.shadowRoot) found += count(element.shadowRoot);
+          if (element instanceof HTMLIFrameElement && element.contentDocument) found += count(element.contentDocument);
+        }
+        return found;
+      };
+      return count(document);
+    });
   }
 
   /** A snapshot: it passes the instant the DOM holds no parsed payload and says nothing about what is still to run. */
@@ -168,11 +211,13 @@ export const test = base.extend<SecurityFixtures>({
     },
     { auto: true },
   ],
-  visitorContactPage: async ({ browser, baseURL }, use) => {
+  visitorContactPage: async ({ browser, baseURL, xss, xssWatch }, use) => {
     // Its users submit attack strings through a real form: our own shop only.
     if (!IS_SELF_HOSTED) throw new Error('visitorContactPage submits real contact messages: it only runs against the self-hosted Toolshop.');
     const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
     try {
+      // Their context is watched like the test's own, before their page is created.
+      if (xssWatch) await xss.watch(visitor);
       const contactPage = new ContactPage(await visitor.newPage());
       await contactPage.open();
       await use(contactPage);

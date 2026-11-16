@@ -4,6 +4,9 @@ import { alertAppears } from '@pages/admin/alerts';
 import { ORDER_STATUS, paginated } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 
+/** What only the back office reads: the dashboard's orders and sales report, the user list and the inbox. */
+const ADMIN_ONLY_ENDPOINTS = /^\/(?:invoices|users|messages|reports\/[^/]+)$/;
+
 /**
  * Back office with a mocked admin session and a mocked admin API (fixtures/admin.ts). These
  * specs prove how the UI behaves on given responses; they do not prove the real backend.
@@ -48,11 +51,11 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
     });
   });
 
-  test.describe('when the dashboard data fails to load', { tag: ['@bug'] }, () => {
+  test.describe('when the dashboard data fails to load', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/invoices', 500), mock.fail('GET', '/reports/total-sales-of-years', 500)));
 
     test('the admin is told the dashboard could not be loaded', async ({ adminDashboard }) => {
-      knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.');
+      knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.', { absence: true });
       await expect(adminDashboard.salesHeading).toBeVisible();
 
       // Any alert will do: the pin does not prescribe the wording (a healthy dashboard shows none, see above).
@@ -62,9 +65,11 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
 });
 
 test.describe('Admin access control (mocked customer session)', { tag: ['@mocked'] }, () => {
-  test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, page }) => {
+  test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, page, apiMock }) => {
     await page.goto('/admin/dashboard', { waitUntil: 'domcontentloaded' });
 
     await expect(page).toHaveURL('/auth/login');
+    // Turned away before the dashboard asked for anything: no order list, report, user list or inbox was requested.
+    await expect(apiMock.expectNoRequest('GET', ADMIN_ONLY_ENDPOINTS), 'no admin endpoint was called for a customer').resolves.toBeUndefined();
   });
 });

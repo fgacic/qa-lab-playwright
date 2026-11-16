@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page, TestInfo } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page, TestInfo } from '@playwright/test';
 import { expect, test } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { skipIfBotChallenge } from '@support/bot-challenge';
@@ -25,6 +25,17 @@ function directivesOf(policy: string): Map<string, string[]> {
   return directives;
 }
 
+/** Sources that make a script-governing directive limit nothing: inline script, any origin, or script in a data: URL. */
+const UNSAFE_SCRIPT_SOURCES = ["'unsafe-inline'", '*', 'data:'];
+
+/** Strict-Transport-Security max-age (seconds) of at least 180 days, the lower bound Mozilla's web security guidelines call acceptable. */
+const MIN_HSTS_MAX_AGE_SECONDS = 15_552_000;
+
+/** The max-age of a Strict-Transport-Security value, in seconds; 0 when it has none. */
+function hstsMaxAge(value: string): number {
+  return Number(/(?:^|;)\s*max-age\s*=\s*"?(\d+)"?/i.exec(value)?.[1] ?? 0);
+}
+
 /** Referrer policies that never send the full URL to another origin. A comma list is a fallback chain: the last one the browser knows wins. */
 const SAFE_REFERRER_POLICIES = ['no-referrer', 'same-origin', 'strict-origin', 'strict-origin-when-cross-origin'];
 
@@ -33,12 +44,13 @@ const expected: { id: string; header: string; ok: (value: string) => boolean; ac
     id: 'SEC-01',
     header: 'content-security-policy',
     // A policy that names no script source limits nothing, and one that allows inline script does not stop injected script.
+    // A bare "*" allows scripts from anywhere, and "data:" lets a payload carry its own script: neither limits where scripts load from.
     ok: (value) => {
       const directives = directivesOf(value);
       const scripts = directives.get('script-src') ?? directives.get('default-src');
-      return !!scripts && !scripts.some((source) => source.toLowerCase() === "'unsafe-inline'");
+      return !!scripts && !scripts.some((source) => UNSAFE_SCRIPT_SOURCES.includes(source.toLowerCase()));
     },
-    accepts: "a default-src or script-src, and no 'unsafe-inline' in the one that governs scripts",
+    accepts: `a default-src or script-src, and none of ${UNSAFE_SCRIPT_SOURCES.join(', ')} in the one that governs scripts`,
     why: 'no Content-Security-Policy that limits where scripts may load from',
   },
   { id: 'SEC-03', header: 'x-content-type-options', ok: (value) => /^nosniff$/i.test(value.trim()), accepts: 'nosniff', why: 'no X-Content-Type-Options: nosniff' },
@@ -49,19 +61,24 @@ const expected: { id: string; header: string; ok: (value: string) => boolean; ac
     accepts: `one of ${SAFE_REFERRER_POLICIES.join(', ')}`,
     why: 'no Referrer-Policy that keeps the full URL from other origins',
   },
-  { id: 'SEC-05', header: 'strict-transport-security', ok: (value) => /max-age=\d{7,}/i.test(value), accepts: 'max-age of at least a year-ish (7+ digits of seconds)', why: 'no Strict-Transport-Security (HSTS) with a long max-age' },
+  { id: 'SEC-05', header: 'strict-transport-security', ok: (value) => hstsMaxAge(value) >= MIN_HSTS_MAX_AGE_SECONDS, accepts: `a max-age of at least ${MIN_HSTS_MAX_AGE_SECONDS} seconds`, why: 'no Strict-Transport-Security (HSTS) with a long max-age' },
 ];
 
-/** The shop's response headers, once it has answered: a Cloudflare challenge skips, any other error fails. */
-async function shopHeaders({ request, page }: { request: APIRequestContext; page: Page }, testInfo: TestInfo) {
+/** The shop's own answer, once it has given one: a Cloudflare challenge skips, any other error fails. */
+async function shopAnswer({ request, page }: { request: APIRequestContext; page: Page }, testInfo: TestInfo): Promise<APIResponse> {
   const response = await request.get(BASE_URL);
+  await testInfo.attach('headers.json', { body: JSON.stringify(response.headers(), null, 2), contentType: 'application/json' });
   if (response.status() === 403) {
     await page.goto(BASE_URL);
     await skipIfBotChallenge(page);
   }
-  await testInfo.attach('headers.json', { body: JSON.stringify(response.headers(), null, 2), contentType: 'application/json' });
   expect(response.status(), 'the shop answered before its headers are judged').toBeLessThan(400);
-  return response.headers();
+  return response;
+}
+
+/** The shop's response headers, once it has answered. */
+async function shopHeaders(fixtures: { request: APIRequestContext; page: Page }, testInfo: TestInfo) {
+  return (await shopAnswer(fixtures, testInfo)).headers();
 }
 
 test.describe('Security headers of the live shop', { tag: ['@security', '@live-only', '@bug'] }, () => {
@@ -103,8 +120,11 @@ test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['
   // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-10) then.
   // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
 
-  test('every cookie the shop and its API set is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
-    const answers = [await request.get(BASE_URL), await request.get(`${API_URL}/status`)];
+  test('every cookie the shop and its API set is Secure, HttpOnly and has a SameSite', async ({ request, page }, testInfo) => {
+    // Both must have answered (a challenge skips): a block page or an error sets no cookies, and "none" would read as "all fine".
+    const api = await request.get(`${API_URL}/status`);
+    expect(api.status(), 'the API answered before its cookies are judged').toBeLessThan(400);
+    const answers = [await shopAnswer({ request, page }, testInfo), api];
     const cookies = answers.flatMap((answer) => answer.headersArray().filter(({ name }) => name.toLowerCase() === 'set-cookie').map(({ value }) => value));
     // A shop that sets no cookie has nothing to misconfigure, but the count is recorded so "none" is a stated fact and not an unread loop.
     testInfo.annotations.push({ type: 'cookies inspected', description: String(cookies.length) });

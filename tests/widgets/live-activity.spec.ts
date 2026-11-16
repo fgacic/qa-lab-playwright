@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { salesStream } from '@support/payloads';
+import { fakeSale, salesStream } from '@support/payloads';
 
 /**
  * The panel is "Live" only while its EventSource is open. A mocked stream is a finite body: the browser
@@ -38,10 +38,10 @@ test.describe('Live shop activity', () => {
   });
 
   test.describe('when sales come in', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.eventStream('/sales-stream', salesStream([
-      { name: 'Qa Lab Hammer', quantity: 1, unit_price: 10.5, buyer: 'Testy', city: 'Testville' },
-      { name: 'Qa Lab Saw', quantity: 2, unit_price: 20, buyer: 'Botty', city: 'Mockstad' },
-    ]))));
+    const hammer = fakeSale();
+    const saw = fakeSale({ name: 'Qa Lab Saw', quantity: 2, unit_price: 20, buyer: 'Botty', city: 'Mockstad' });
+    const revenue = [hammer, saw].reduce((sum, sale) => sum + sale.quantity * sale.unit_price, 0);
+    test.use(withMocks(mock.eventStream('/sales-stream', salesStream([hammer, saw]))));
 
     test('each sale is listed and the counters add up', async ({ homePage }) => {
       const { liveActivity } = homePage.shell;
@@ -49,9 +49,9 @@ test.describe('Live shop activity', () => {
       await liveActivity.open();
 
       // The newest sale is listed first.
-      await expect(liveActivity.items).toHaveText([/Qa Lab Saw/, /Qa Lab Hammer/]);
+      await expect(liveActivity.items).toHaveText([saw.name, hammer.name].map((name) => new RegExp(name)));
       await expect(liveActivity.salesCount).toHaveText('2');
-      await expect(liveActivity.revenue).toHaveText('$50.50');
+      await expect(liveActivity.revenue).toHaveText(`$${revenue.toFixed(2)}`);
     });
   });
 
@@ -74,16 +74,17 @@ test.describe('Live shop activity', () => {
   test.describe('when the feed drops and comes back', { tag: ['@mocked'] }, () => {
     // An established stream that ends is a dropped connection: every browser reconnects after the stream's own retry delay,
     // which is what the second answer serves. (A request that never connects is not retried by Firefox, so it would not be a drop.)
+    const reconnected = fakeSale();
     test.use(withMocks(mock.sequence('GET', '/sales-stream',
       { status: 200, contentType: 'text/event-stream', body: salesStream([], 300) },
-      { status: 200, contentType: 'text/event-stream', body: salesStream([{ name: 'Qa Lab Hammer', quantity: 1, unit_price: 10.5, buyer: 'Testy', city: 'Testville' }]) })));
+      { status: 200, contentType: 'text/event-stream', body: salesStream([reconnected]) })));
 
     test('the sales that arrive after the reconnect are listed', async ({ homePage }) => {
       const { liveActivity } = homePage.shell;
 
       await liveActivity.open();
 
-      await expect(liveActivity.items).toHaveText([/Qa Lab Hammer/]);
+      await expect(liveActivity.items).toHaveText([new RegExp(reconnected.name)]);
       await expect(liveActivity.salesCount).toHaveText('1');
     });
   });

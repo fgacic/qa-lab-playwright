@@ -12,7 +12,10 @@ runs:
         node-version-file: .nvmrc
         cache: npm
 
-    - run: npm ci
+    # No package in package-lock.json has `hasInstallScript` (checked for all 268, @playwright/test, playwright and
+    # playwright-core included; there is no esbuild), and browsers come from `playwright install` below. So skipping
+    # scripts loses nothing, and a compromised package cannot execute code at install time.
+    - run: npm ci --ignore-scripts
       shell: bash
 
     - name: Playwright version

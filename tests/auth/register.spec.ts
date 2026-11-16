@@ -58,7 +58,7 @@ test.describe('Registration form', () => {
   }
 
   test('a birth date in the future is rejected', { tag: ['@negative', '@bug'] }, async ({ registerPage, apiMock }) => {
-    knownBug('BUG-18', 'the form accepts a date of birth in the future (2099-01-01) without a validation label.');
+    knownBug('BUG-18', 'the form accepts a date of birth in the future (2099-01-01) without a validation label.', { absence: true });
     await apiMock.blockUnmockedWrites();
     await registerPage.dateOfBirth.input.fill('2099-01-01');
     await registerPage.submit();
@@ -141,6 +141,31 @@ test.describe('Registration form', () => {
         },
       });
       await expect(page).toHaveURL('/auth/login');
+    });
+  });
+
+  test.describe('when registration is submitted with Enter', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.respond('POST', '/users/register', { id: '01QALABNEWCUSTOMER0000000' }, 201)));
+
+    test('Enter in the email field registers as the button does', async ({ registerPage, apiMock, page }) => {
+      const customer = fakeCustomer();
+      const sent = apiMock.waitForRequest('POST', '/users/register');
+
+      await registerPage.registerWithEnter(customer, 'email');
+
+      expect((await sent).postDataJSON()).toMatchObject({ email: customer.email });
+      await expect(page).toHaveURL('/auth/login');
+    });
+
+    test('Enter in the password field registers as the button does', { tag: ['@bug'] }, async ({ registerPage, page }) => {
+      knownBug('BUG-36', 'Enter in the password field of a completely filled registration form answers "Password is required" and registers nobody.');
+      const customer = fakeCustomer();
+      await registerPage.fillIn(customer);
+      await expect(registerPage.password.input).toHaveValue(customer.password);
+
+      await registerPage.password.input.press('Enter');
+
+      await expect(page, 'BUG-36: Enter in the password field submits the registration').toHaveURL('/auth/login', { timeout: 5_000 });
     });
   });
 

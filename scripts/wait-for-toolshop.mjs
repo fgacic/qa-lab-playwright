@@ -8,16 +8,19 @@ const API = process.env.API_URL ?? 'http://localhost:4200/api';
 const UI = process.env.BASE_URL ?? 'http://localhost:4200';
 const deadline = Date.now() + Number(process.env.WAIT_TIMEOUT_MS ?? 180_000);
 
+// A hung socket must not stall the loop past its deadline: every call has its own limit.
+const get = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(5000) });
+
 async function healthy() {
-  const products = await fetch(`${API}/products`, { method: 'QUERY', headers: { 'content-type': 'application/json' }, body: '{"page":"1"}' });
+  const products = await get(`${API}/products`, { method: 'QUERY', headers: { 'content-type': 'application/json' }, body: '{"page":"1"}' });
   if (!products.ok || (await products.json()).total < 1) return 'API has no products yet';
-  const login = await fetch(`${API}/users/login`, {
+  const login = await get(`${API}/users/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(admin),
   });
   if (!login.ok) return `seeded admin cannot sign in (${login.status})`;
-  const ui = await fetch(UI);
+  const ui = await get(UI);
   if (!ui.ok || !(await ui.text()).includes('<app-root')) return 'UI not serving the app';
   return 'ok';
 }

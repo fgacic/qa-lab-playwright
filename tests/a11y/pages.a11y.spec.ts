@@ -1,11 +1,3 @@
-import fs from 'node:fs';
-import { expect, mock, test, withMocks } from '@fixtures';
-import type { A11yScan } from '@fixtures/a11y';
-import { customer } from '@support/admin-payloads';
-import { KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
-import { IS_SELF_HOSTED } from '@support/env';
-import { fakeAddress, fakeGuest } from '@support/test-data';
-
 /**
  * An axe scan (WCAG 2.2 A and AA) of every public page and key state, plus the account and
  * admin pages under their mocked sessions. A scan fails on a violation that is not in the known
@@ -18,6 +10,20 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
  *
  * @axe: Chromium only (playwright.config.ts). axe reads the accessibility tree the browser builds
  * and engines differ in edge cases (Firefox does not report AX-01), so the baseline is kept for one.
+ */
+
+import fs from 'node:fs';
+import type { Page } from '@playwright/test';
+import { expect, mock, test, withMocks } from '@fixtures';
+import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
+import { customer } from '@support/admin-payloads';
+import { KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
+import { IS_SELF_HOSTED } from '@support/env';
+import { fakeAddress, fakeGuest } from '@support/test-data';
+
+/**
+ * Fails the test on what a scan found that the baseline does not know, and on a known violation that changed
+ * (spread, shrank, escalated or is gone from a page it was recorded on). `A11Y_RECORD` rebuilds the baseline instead.
  */
 async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<void> {
   // A11Y_RECORD=<file> appends every finding as JSON lines: how the baseline is (re)built.
@@ -33,6 +39,8 @@ async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<vo
   const problems = scan.findings.flatMap((f) => {
     const known = KNOWN_VIOLATIONS.find((k) => k.rule === f.rule && k.target === f.target && k.pages.includes(page));
     if (!known) return [`${f.rule} (${f.impact}) on ${f.target}`];
+    // A known violation that got worse (or better) by axe's own rating is a change of kind, not of count.
+    if (f.impact !== known.impact) return [`${known.id} changed impact: ${f.rule} on ${f.target} is now ${f.impact}, known as ${known.impact}`];
     if (known.seedDependent && !IS_SELF_HOSTED) return [];
     if (f.nodes > known.nodes) return [`${known.id} spreads: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}`];
     if (f.nodes < known.nodes) return [`${known.id} shrank: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}: partly fixed, update the baseline`];
@@ -47,9 +55,26 @@ async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<vo
   expect.soft(fixedHere, `accessibility violations fixed on ${page}`).toEqual([]);
 }
 
+// Before any navigation, on the context, so the page's own scripts and transitions see it from the first paint (the scan fixture checks it).
+test.use({ reducedMotion: 'reduce' });
+
 test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('home', async ({ homePage, a11y }) => {
     await expectNoNewViolations(await a11y.scan('home', { ready: [homePage.grid.cards.first(), homePage.filters.categories, homePage.pagination.next] }), 'home');
+  });
+
+  // The training aids are left out of every scan (EXCLUDED); an exclusion for something the shop no longer renders is a hole left open for nothing.
+  test('every excluded training aid that is drawn at first is still on the page', async ({ homePage }) => {
+    for (const { selector, reason } of EXCLUDED.filter((excluded) => !excluded.shownBy)) {
+      await expect(homePage.page.locator(selector).first(), `${selector} (${reason}) is still rendered`).toBeAttached();
+    }
+  });
+
+  test('every excluded training aid that a control opens is still drawn by it', async ({ homePage }) => {
+    for (const { selector, reason, shownBy } of EXCLUDED.flatMap((excluded) => (excluded.shownBy ? [{ ...excluded, shownBy: excluded.shownBy }] : []))) {
+      await homePage.page.locator(shownBy).click();
+      await expect(homePage.page.locator(selector).first(), `${selector} (${reason}) is drawn once ${shownBy} is clicked`).toBeAttached();
+    }
   });
 
   test('search results', async ({ homePage, product, a11y }) => {
@@ -58,7 +83,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   });
 
   test('search without results', async ({ homePage, a11y }) => {
-    await homePage.search.searchFor('qa-lab-no-such-product');
+    await homePage.search.searchFor(NO_SUCH_PRODUCT);
     await expectNoNewViolations(await a11y.scan('search without results', { ready: [homePage.search.resultCount, homePage.grid.emptyState] }), 'search without results');
   });
 
@@ -153,6 +178,29 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     await expect(page).toHaveURL('/');
     const { header, footer } = homePage.shell;
     await expectNoNewViolations(await a11y.scan('unknown route', { ready: [header.homeLink, header.signInLink, footer.privacyPolicyLink, footer.githubLink] }), 'unknown route');
+  });
+});
+
+/** WCAG 1.4.10 reflow: a 320 CSS px wide page needs no sideways scrolling. */
+const REFLOW_WIDTH = 320;
+
+// The viewport the reflow (1.4.10) and target-size (2.5.8) criteria are about. The header collapses behind its toggler here, so the page is not the desktop one scaled down.
+test.describe('Accessibility scan: phone width', { tag: ['@a11y', '@axe'] }, () => {
+  test.use({ viewport: { width: REFLOW_WIDTH, height: 640 } });
+
+  const expectReflows = async (page: Page) => {
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect.soft(overflow, `the page is ${overflow}px wider than a ${REFLOW_WIDTH}px screen (WCAG 1.4.10 reflow)`).toBeLessThanOrEqual(0);
+  };
+
+  test('home on a phone', async ({ homePage, a11y, page }) => {
+    await expectNoNewViolations(await a11y.scan('home on a phone', { ready: [homePage.grid.cards.first(), homePage.pagination.next] }), 'home on a phone');
+    await expectReflows(page);
+  });
+
+  test('product on a phone', async ({ productPage, a11y, page }) => {
+    await expectNoNewViolations(await a11y.scan('product on a phone', { ready: [productPage.addToCartButton, productPage.relatedProducts.first()] }), 'product on a phone');
+    await expectReflows(page);
   });
 });
 

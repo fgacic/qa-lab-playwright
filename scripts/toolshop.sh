@@ -15,8 +15,10 @@ case "${1:-up}" in
   up)
     # CI builds the images beforehand with a layer cache (docker/bake-action) and sets
     # TOOLSHOP_BUILD=0; locally compose builds whatever changed.
+    # `${build[@]}` of an empty array is an unbound variable under `set -u` in bash 3.2 (macOS), so the
+    # flag is expanded only when set: `${build[@]+"${build[@]}"}`.
     if [[ "${TOOLSHOP_BUILD:-1}" == "0" ]]; then build=(); else build=(--build); fi
-    docker compose --env-file .env.toolshop up -d "${build[@]}" --wait
+    docker compose --env-file .env.toolshop up -d ${build[@]+"${build[@]}"} --wait
     seed
     node scripts/wait-for-toolshop.mjs
     ;;

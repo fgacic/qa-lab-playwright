@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { reportColumns, type ReportTitle } from '@pages/admin/AdminPages';
+import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { reports } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 
@@ -33,13 +34,13 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     });
   });
 
-  test.describe('when the reports fail to load', { tag: ['@bug'] }, () => {
+  test.describe('when the reports fail to load', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(...[
       '/reports/top10-best-selling-categories', '/reports/top10-purchased-products', '/reports/customers-by-country', '/reports/total-sales-per-country',
     ].map((feed) => mock.fail('GET', feed, 500))));
 
     test('the admin is told the statistics could not be loaded', async ({ adminStatistics }) => {
-      knownBug('ADM-15', 'failed statistics requests leave empty tables with no message.');
+      knownBug('ADM-15', 'failed statistics requests leave empty tables with no message.', { absence: true });
       await expect(adminStatistics.heading).toBeVisible();
 
       // Any alert will do: the pin does not prescribe the wording. A healthy page shows none.
@@ -47,23 +48,27 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     });
   });
 
-  // A <canvas> has nothing to read, so what is proved is its presence, and that the picked year is asked for.
+  // A <canvas> has nothing to read, so the chart itself is only proved to be there; what the page does with a
+  // year is proved on the request it sends.
   for (const period of ['month', 'week'] as const) {
     test.describe(`average sales per ${period}`, () => {
       test.use({ adminSalesPeriod: period });
 
-      test(`average sales per ${period} shows its chart area and reloads for another year`, async ({ adminSalesReport }) => {
+      test(`the ${period} report has a chart area`, async ({ adminSalesReport }) => {
+        await expect(adminSalesReport.heading).toBeVisible();
         await expect(adminSalesReport.chart).toBeVisible();
+      });
 
+      test(`picking a year asks the API for that year's ${period} report`, async ({ adminSalesReport }) => {
         const reloaded = await adminSalesReport.showYear('2020');
 
-        expect(new URL(reloaded.url()).searchParams.get('year')).toBe('2020');
+        expect(new URL(reloaded.url()).searchParams.get('year'), 'the year the page asked for').toBe('2020');
         await expect(adminSalesReport.year).toHaveValue('2020');
       });
     });
   }
 
-  test('the year picker offers the current year', { tag: ['@bug'] }, async ({ adminMonthlySales }) => {
+  test('the year picker offers the current year', { tag: ['@negative', '@bug'] }, async ({ adminMonthlySales }) => {
     knownBug('ADM-08', 'the sales reports stop at 2025 and open on it; the current year cannot be chosen.');
     const thisYear = String(new Date().getFullYear());
     await expect(adminMonthlySales.year.getByRole('option').first()).toBeAttached();
@@ -80,7 +85,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
 
     await adminSettings.save();
 
-    await expect(adminSettings.feedback.filter({ hasText: 'Settings saved!' })).toBeVisible();
+    await expect(adminSettings.feedback.filter({ hasText: ADMIN_MESSAGES.settingsSaved })).toBeVisible();
     await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT')).toBe('https://payments.example.com/check');
     await expect.poll(() => adminSettings.storedSetting('ECO_BADGE_ENABLED')).toBe('false');
   });
@@ -91,14 +96,14 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await adminSettings.retrieveGeolocation.check();
     await adminSettings.save();
 
-    await expect(adminSettings.feedback.filter({ hasText: 'Settings saved!' })).toBeVisible();
+    await expect(adminSettings.feedback.filter({ hasText: ADMIN_MESSAGES.settingsSaved })).toBeVisible();
     await expect.poll(() => adminSettings.storedSetting('RETRIEVE_GEOLOCATION')).toBe('true');
     await adminSettings.page.reload();
     await expect(adminSettings.retrieveGeolocation).toBeChecked();
   });
 
   test('a payment endpoint that is not a URL is refused', { tag: ['@negative', '@bug'] }, async ({ adminSettings }) => {
-    knownBug('ADM-16', 'the settings accept any text as the payment endpoint and report "Settings saved!".');
+    knownBug('ADM-16', 'the settings accept any text as the payment endpoint and report "Settings saved!".', { absence: true });
     await adminSettings.paymentEndpoint.fill('not a url');
 
     await adminSettings.save();
@@ -127,7 +132,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
 
     await adminSettings.co2Features.uncheck();
     await adminSettings.save();
-    await expect(adminSettings.feedback.filter({ hasText: 'Settings saved!' })).toBeVisible();
+    await expect(adminSettings.feedback.filter({ hasText: ADMIN_MESSAGES.settingsSaved })).toBeVisible();
     await shop.home.open();
 
     await expect(sort.getByRole('option', { name: 'Name (A - Z)' })).toBeAttached();

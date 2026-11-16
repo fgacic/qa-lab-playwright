@@ -21,13 +21,15 @@ test.describe('Rentals', () => {
     await expect(product.name).toHaveText(rental.name);
     await expect(product.addToCartButton).toBeEnabled();
     await expect(product.quantity).toBeHidden();
+    await expect(product.increaseQuantityButton).toBeHidden();
+    await expect(product.decreaseQuantityButton).toBeHidden();
   });
 
   test.describe('when there are no rentals', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));
 
     test('the page says there is nothing to rent', async ({ rentalsPage }) => {
-      knownBug('BUG-07', 'an empty rentals list shows only the heading, no empty-state message.');
+      knownBug('BUG-07', 'an empty rentals list shows only the heading, no empty-state message.', { absence: true });
       await expect(rentalsPage.title).toBeVisible();
 
       await expect(rentalsPage.grid.emptyState, 'BUG-07: an empty rentals list shows an empty-state message').toBeVisible({ timeout: 5_000 });
@@ -38,7 +40,7 @@ test.describe('Rentals', () => {
     test.use(withMocks(mock.fail('QUERY', '/products', 500)));
 
     test('the page still renders and explains the failure', async ({ rentalsPage }) => {
-      knownBug('BUG-08', 'a failed rentals request blanks the whole page, heading included.');
+      knownBug('BUG-08', 'a failed rentals request blanks the whole page, heading included.', { absence: true });
 
       await expect(rentalsPage.title, 'BUG-08: a failed rentals request keeps the page heading').toBeVisible({ timeout: 5_000 });
       await expect(rentalsPage.shell.errorAlert, 'BUG-08: a failed rentals request is reported').toBeVisible({ timeout: 5_000 });

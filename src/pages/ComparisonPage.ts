@@ -35,6 +35,11 @@ export class ComparisonPage {
     return this.row(header).getByRole('cell');
   }
 
+  /** The ids of the products the app has stored for comparison (this tab's session), in the order they were picked. */
+  async selectedIds(): Promise<string[]> {
+    return this.page.evaluate((key) => JSON.parse(sessionStorage.getItem(key) ?? '[]') as string[], COMPARE_STORAGE_KEY);
+  }
+
   @step('Open the comparison page')
   async open(): Promise<void> {
     await this.shell.goto('/comparison');

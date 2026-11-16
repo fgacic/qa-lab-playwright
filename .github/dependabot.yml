@@ -1,0 +1,24 @@
+# Weekly update PRs for the two ecosystems this repo pins: the GitHub Actions (by commit SHA) and the npm dev
+# dependencies. @playwright/test is bumped together with the image tag in scripts/visual.sh (the `static` CI job checks they match).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      playwright:
+        patterns: ['@playwright/*', 'playwright*', 'allure*', '@axe-core/*']
+      lint:
+        patterns: ['eslint*', '@eslint/*', 'typescript-eslint']
+    ignore:
+      # Held on the version the project is built for.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']

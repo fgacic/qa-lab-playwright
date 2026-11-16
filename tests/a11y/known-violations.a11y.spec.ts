@@ -1,25 +1,31 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { Locator } from '@playwright/test';
-import type { A11yFixtures } from '@fixtures/a11y';
+import { NO_SUCH_PRODUCT, type A11yFixtures } from '@fixtures/a11y';
 import { KNOWN_VIOLATIONS, type KnownViolation, type ScanName } from '@support/a11y-baseline';
 import { contactMessage } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
+import type { AdminListPage } from '@pages/admin/AdminListPage';
+import type { AdminMessagePage } from '@pages/admin/AdminPages';
+import type { ProfilePage } from '@pages/account/ProfilePage';
+import type { CheckoutPage } from '@pages/CheckoutPage';
 import type { HomePage } from '@pages/HomePage';
+import type { LoginPage } from '@pages/LoginPage';
+import type { ProductPage } from '@pages/ProductPage';
 import { RegisterPage } from '@pages/RegisterPage';
 
 /**
  * One pin per known violation (src/support/a11y-baseline.ts). Each test waits for the offending
  * element itself to show, scans for its single rule and asserts the element no longer violates
  * it: expected to fail today, red once fixed. A scan that ran before the element rendered could
- * "pass" for the wrong reason, so every pin names its element in `anchors`. A baseline entry recorded
+ * "pass" for the wrong reason, so every pin names its element in its page's anchor table (`HOME_ANCHORS`, ...). A baseline entry recorded
  * on a state ("with errors") is pinned in that state: the pin brings the page there before it scans.
  * @axe: Chromium only, like the baseline it pins (see pages.a11y.spec.ts).
  */
 const summaryOf = (v: KnownViolation) => `${v.rule} (${v.impact}, WCAG ${v.wcag}): ${v.summary}`;
 
-/** The element a pin is about, plus anything else its state must show before the scan (the validation errors of a "with errors" state). */
-type Anchor = Locator | Locator[];
+/** The element a pin is about, plus anything else its state must show before the scan (the validation errors of a "with errors" state). Never empty: a scan with nothing to wait for is not allowed. */
+type Anchor = Locator | [Locator, ...Locator[]];
 
 /** Moves to another page of the violation's baseline entry and returns what it is about there. */
 type Visit = () => Promise<Anchor>;
@@ -37,7 +43,7 @@ async function expectFixed(a11y: A11yFixtures['a11y'], violation: KnownViolation
   }
   const stillOn: string[] = [];
   const check = async (name: ScanName, anchor: Anchor) => {
-    const result = await a11y.scan(name, { ready: [anchor].flat(), only: [violation.rule] });
+    const result = await a11y.scan(name, { ready: Array.isArray(anchor) ? anchor : [anchor], only: [violation.rule] });
     if (result.findings.some((f) => f.target === violation.target)) stillOn.push(name);
   };
   await check(scan, offending);
@@ -48,13 +54,34 @@ async function expectFixed(a11y: A11yFixtures['a11y'], violation: KnownViolation
 
 /** The ids of the entries a pin below was written for: filled as the file loads, read by the coverage check. */
 const pinned = new Set<string>();
-const on = (page: KnownViolation['page']) => KNOWN_VIOLATIONS.filter((v) => v.page === page).map((v) => (pinned.add(v.id), v));
+function on(page: KnownViolation['page']): KnownViolation[] {
+  const entries = KNOWN_VIOLATIONS.filter((v) => v.page === page);
+  for (const entry of entries) pinned.add(entry.id);
+  return entries;
+}
 
 /**
- * The element each pin is about, by pin id: the page object's own locator for it. A missing
- * anchor throws without the pin's id, so it is never read as the bug reproducing (VERIFY_BUGS).
+ * The element each pin is about, by pin id: the page object's own locator for it, one table per page the pins scan.
+ * A missing anchor throws without the pin's id, so it is never read as the bug reproducing (VERIFY_BUGS).
  */
-function anchorOf<Page>(anchors: Record<string, (page: Page) => Anchor>, violation: KnownViolation, page: Page): Anchor {
+type Anchors<Page> = Record<string, (page: Page) => Anchor>;
+
+const HOME_ANCHORS: Anchors<HomePage> = { 'AX-08': (p) => p.header.language.button, 'AX-11': (p) => p.filters.categories };
+const PRODUCT_ANCHORS: Anchors<ProductPage> = { 'AX-13': (p) => p.relatedProducts.first() };
+const CART_ANCHORS: Anchors<CheckoutPage> = { 'AX-09': (p) => p.header.cartLink };
+const SIGN_IN_ANCHORS: Anchors<CheckoutPage> = {
+  'AX-01': (p) => p.signIn.signInTab,
+  'AX-02': (p) => p.signIn.signInTab,
+  'AX-03': (p) => p.signIn.guestTab,
+  'AX-12': (p) => p.signIn.signInTab,
+};
+const LOGIN_ANCHORS: Anchors<LoginPage> = { 'AX-04': (p) => [p.email.error, p.password.error, p.showPasswordButton] };
+const REGISTER_ANCHORS: Anchors<RegisterPage> = { 'AX-10': (p) => [p.firstName.error, p.password.error, p.passwordRules.first()] };
+const PROFILE_ANCHORS: Anchors<ProfilePage> = { 'AX-05': (p) => p.newPassword, 'AX-06': (p) => p.confirmNewPassword };
+// The pill of the one mocked message; the message page shows it too and is watched by the baseline ratchet.
+const INBOX_ANCHORS: Anchors<AdminListPage<AdminMessagePage>> = { 'AX-07': (p) => p.table.statusBadge(contactMessage.status) };
+
+function anchorOf<Page>(anchors: Anchors<Page>, violation: KnownViolation, page: Page): Anchor {
   const anchor = anchors[violation.id];
   if (!anchor) throw new Error(`A pin for ${violation.rule} on ${violation.target} has no anchor: name the element it is about`);
   return anchor(page);
@@ -74,27 +101,28 @@ function homeVisits(violation: KnownViolation, homePage: HomePage, productName: 
       return categories;
     },
     'search without results': async () => {
-      await homePage.search.searchFor('qa-lab-no-such-product');
+      await homePage.search.searchFor(NO_SUCH_PRODUCT);
       await expect(homePage.grid.emptyState).toBeVisible();
       return categories;
     },
   };
 }
 
+// Before any navigation, on the context: the scan fixture refuses to read a page that may still be mid-fade.
+test.use({ reducedMotion: 'reduce' });
+
 test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug'] }, () => {
   for (const violation of on('home')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (home)`, async ({ homePage, product, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
-      const anchors = { 'AX-08': (p: typeof homePage) => p.header.language.button, 'AX-11': (p: typeof homePage) => p.filters.categories };
-      await expectFixed(a11y, violation, 'home', anchorOf(anchors, violation, homePage), homeVisits(violation, homePage, product.name));
+      await expectFixed(a11y, violation, 'home', anchorOf(HOME_ANCHORS, violation, homePage), homeVisits(violation, homePage, product.name));
     });
   }
 
   for (const violation of on('product')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (product)`, async ({ productPage, catalog, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
-      const anchors = { 'AX-13': (p: typeof productPage) => p.relatedProducts.first() };
-      await expectFixed(a11y, violation, 'product', anchorOf(anchors, violation, productPage), {
+      await expectFixed(a11y, violation, 'product', anchorOf(PRODUCT_ANCHORS, violation, productPage), {
         'product out of stock': async () => {
           await productPage.open((await catalog.outOfStock()).id);
           await expect(productPage.outOfStock).toBeVisible();
@@ -107,9 +135,8 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
   for (const violation of on('cart')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (cart)`, async ({ checkout, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
-      const anchors = { 'AX-09': (p: typeof checkout) => p.header.cartLink };
       // The same walk as the scan in pages.a11y.spec.ts: each visit builds on the one before.
-      await expectFixed(a11y, violation, 'cart', anchorOf(anchors, violation, checkout), {
+      await expectFixed(a11y, violation, 'cart', anchorOf(CART_ANCHORS, violation, checkout), {
         'checkout sign-in': async () => {
           await checkout.cart.proceed();
           await expect(checkout.signIn.loginButton).toBeVisible();
@@ -141,23 +168,16 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
     test(`${violation.id} ${violation.rule} on ${violation.target} (checkout sign-in)`, async ({ checkout, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
       await checkout.cart.proceed();
-      const anchors = {
-        'AX-01': (p: typeof checkout) => p.signIn.signInTab,
-        'AX-02': (p: typeof checkout) => p.signIn.signInTab,
-        'AX-03': (p: typeof checkout) => p.signIn.guestTab,
-        'AX-12': (p: typeof checkout) => p.signIn.signInTab,
-      };
-      await expectFixed(a11y, violation, 'checkout sign-in', anchorOf(anchors, violation, checkout));
+      await expectFixed(a11y, violation, 'checkout sign-in', anchorOf(SIGN_IN_ANCHORS, violation, checkout));
     });
   }
 
-  for (const violation of on('login')) {
+  for (const violation of on('login with errors')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (login)`, async ({ loginPage, page, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
       // The entry was recorded on the pages "with errors": the pin brings each to that state, as the scan does.
       await loginPage.loginButton.click();
-      const anchors = { 'AX-04': (p: typeof loginPage) => [p.email.error, p.password.error, p.showPasswordButton] };
-      await expectFixed(a11y, violation, 'login with errors', anchorOf(anchors, violation, loginPage), {
+      await expectFixed(a11y, violation, 'login with errors', anchorOf(LOGIN_ANCHORS, violation, loginPage), {
         'register with errors': async () => {
           // Built here, not a fixture: `registerPage` would open /auth/register before this test opens the login page's own state.
           const registerPage = new RegisterPage(page);
@@ -169,14 +189,13 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
     });
   }
 
-  for (const violation of on('register')) {
+  for (const violation of on('register with errors')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (register)`, async ({ registerPage, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
       // The entry was recorded on the page "with errors": the pin brings it to that state, as the scan does.
       await registerPage.submit();
-      const anchors = { 'AX-10': (p: typeof registerPage) => [p.firstName.error, p.password.error, p.passwordRules.first()] };
       // Its other page, the profile, needs a mocked session and is watched by the baseline ratchet.
-      await expectFixed(a11y, violation, 'register with errors', anchorOf(anchors, violation, registerPage));
+      await expectFixed(a11y, violation, 'register with errors', anchorOf(REGISTER_ANCHORS, violation, registerPage));
     });
   }
 
@@ -186,11 +205,7 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
     for (const violation of on('account profile')) {
       test(`${violation.id} ${violation.rule} on ${violation.target} (profile)`, async ({ profilePage, a11y }) => {
         knownBug(violation.id, summaryOf(violation));
-        const anchors = {
-          'AX-05': (p: typeof profilePage) => p.newPassword,
-          'AX-06': (p: typeof profilePage) => p.confirmNewPassword,
-        };
-        await expectFixed(a11y, violation, 'account profile', anchorOf(anchors, violation, profilePage));
+        await expectFixed(a11y, violation, 'account profile', anchorOf(PROFILE_ANCHORS, violation, profilePage));
       });
     }
   });
@@ -199,9 +214,7 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
     for (const violation of on('admin messages')) {
       test(`${violation.id} ${violation.rule} on ${violation.target} (admin inbox)`, async ({ adminMessages, a11y }) => {
         knownBug(violation.id, summaryOf(violation));
-        // The pill of the one mocked message; the message page shows it too and is watched by the baseline ratchet.
-        const anchors = { 'AX-07': (p: typeof adminMessages) => p.table.statusBadge(contactMessage.status) };
-        await expectFixed(a11y, violation, 'admin messages', anchorOf(anchors, violation, adminMessages));
+        await expectFixed(a11y, violation, 'admin messages', anchorOf(INBOX_ANCHORS, violation, adminMessages));
       });
     }
   });

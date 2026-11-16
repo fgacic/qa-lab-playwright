@@ -36,6 +36,8 @@ export const fakeFavorite = (product: Product) => ({
 });
 
 export const INVOICE_NUMBER = 'INV-2026999999';
+/** How many units the mocked invoice's single line holds. */
+export const INVOICE_QUANTITY = 2;
 
 export const fakeInvoice = (product: Product) => ({
   id: '01QALABFAKEINVOICE0000000',
@@ -46,11 +48,11 @@ export const fakeInvoice = (product: Product) => ({
   billing_state: 'Teststate',
   billing_country: 'NL',
   billing_postal_code: '1234 AB',
-  subtotal: product.price * 2,
-  total: product.price * 2,
+  subtotal: product.price * INVOICE_QUANTITY,
+  total: product.price * INVOICE_QUANTITY,
   status: 'AWAITING_FULFILLMENT',
   payment: { payment_method: 'cash-on-delivery', payment_details: {} },
-  invoicelines: [{ id: '01QALABFAKELINE', quantity: 2, unit_price: product.price, product }],
+  invoicelines: [{ id: '01QALABFAKELINE', quantity: INVOICE_QUANTITY, unit_price: product.price, product }],
 });
 
 export const fakeMessage = {
@@ -64,7 +66,11 @@ export const fakeMessage = {
   replies: [],
 };
 
-export const page = <T>(data: T[]) => ({
+/** What POST /messages answers once it has stored a message. */
+export const acceptedMessage = { id: fakeMessage.id, status: fakeMessage.status };
+
+/** A page of a paginated list, as the API wraps it. */
+export const listOf = <T>(data: T[]) => ({
   current_page: 1,
   data,
   from: data.length ? 1 : null,
@@ -73,6 +79,13 @@ export const page = <T>(data: T[]) => ({
   to: data.length || null,
   total: data.length,
 });
+
+/** A password for mocked sign-ins: it matches no real account and is sent nowhere real. */
+export const MOCKED_PASSWORD = 'Qa-lab-mocked-1!';
+
+/** Credentials no account holds, for the real refusal and its mocked twin. */
+export const UNKNOWN_EMAIL = 'nobody@example.invalid';
+export const UNKNOWN_PASSWORD = 'not-a-real-password';
 
 /** An unsigned JWT the SPA accepts: it only decodes the payload for `role` and `exp`. */
 export function fakeJwt(role: 'user' | 'admin' = 'user'): string {
@@ -122,6 +135,16 @@ export function salesStream(sales: SaleEvent[], retryMs = 600_000): string {
   });
   return `retry: ${retryMs}\n\nid: 0\nevent: open\ndata: {"limit":${sales.length}}\n\n${events.join('')}`;
 }
+
+/** A sale as the live feed carries it; override what a test cares about. */
+export const fakeSale = (overrides: Partial<SaleEvent> = {}): SaleEvent => ({
+  name: 'Qa Lab Hammer',
+  quantity: 1,
+  unit_price: 10.5,
+  buyer: 'Testy',
+  city: 'Testville',
+  ...overrides,
+});
 
 /** A reply to a contact message, as GET /messages/:id lists it. */
 export const fakeReply = (message: string) => ({

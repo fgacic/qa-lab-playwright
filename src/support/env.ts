@@ -21,7 +21,8 @@ const ADDRESSES: Record<Target, { base: string; api: string }> = {
   live: { base: 'https://practicesoftwaretesting.com', api: 'https://api.practicesoftwaretesting.com' },
 };
 export const BASE_URL = process.env.BASE_URL || ADDRESSES[TARGET].base;
-export const API_URL = process.env.API_URL || ADDRESSES[TARGET].api;
+// No trailing slash: ApiMock's `isApiUrl` and `apiPath` match on `API_URL + '/'`, so "http://host/api/" would match nothing.
+export const API_URL = (process.env.API_URL || ADDRESSES[TARGET].api).replace(/\/+$/, '');
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', 'host.docker.internal']);
 const isLocalHost = (url: string) => LOCAL_HOSTS.has(new URL(url).hostname);
@@ -35,6 +36,11 @@ if (TARGET === 'local' && !(isLocalHost(BASE_URL) && isLocalHost(API_URL))) {
       'Point both at the self-hosted Toolshop, or set TARGET=live to run the live-safe subset.',
   );
 }
+// The self-hosted Toolshop serves the SPA and the API from one origin (nginx proxies /api). Anything else is a
+// misconfiguration that would send the shop's own calls to a different server than the one under test.
+if (TARGET === 'local' && new URL(BASE_URL).origin !== new URL(API_URL).origin) {
+  throw new Error(`TARGET=local expects BASE_URL (${BASE_URL}) and API_URL (${API_URL}) on the same origin: the self-hosted shop serves both. Fix the override, or use TARGET=live.`);
+}
 export const IS_SELF_HOSTED = TARGET === 'local' && isLocalHost(BASE_URL) && isLocalHost(API_URL);
 
 /**
@@ -43,6 +49,13 @@ export const IS_SELF_HOSTED = TARGET === 'local' && isLocalHost(BASE_URL) && isL
  */
 // In a JSON file so scripts/wait-for-toolshop.mjs reads the very same values.
 const SEEDED = seeded;
+
+/**
+ * Names of the projects that sign in and write for real, shared by playwright.config.ts (which declares
+ * them) and fixtures/mocks.ts (whose live-site write guard must not apply to them).
+ */
+export const PROJECTS = { accountSetup: 'account-setup', account: 'account', adminSetup: 'admin-setup', admin: 'admin' } as const;
+export const REAL_WRITE_PROJECTS: ReadonlySet<string> = new Set(Object.values(PROJECTS));
 
 /** Real-account specs: always on the self-hosted target, opt-in (RUN_ACCOUNT_TESTS=1) on live. */
 export const RUN_ACCOUNT_TESTS = IS_SELF_HOSTED || process.env.RUN_ACCOUNT_TESTS === '1';

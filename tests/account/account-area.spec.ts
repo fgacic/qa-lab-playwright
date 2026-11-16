@@ -1,8 +1,13 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { apiPath } from '@support/env';
-import { FAVORITE_ID, INVOICE_NUMBER, fakeFavorite, fakeInvoice, fakeMessage, fakeReply, fakeUser, page as paged } from '@support/payloads';
+import { FAVORITE_ID, INVOICE_NUMBER, INVOICE_QUANTITY, fakeFavorite, fakeInvoice, fakeMessage, fakeReply, fakeUser, listOf } from '@support/payloads';
 import { TOKEN_KEY } from '@support/session';
+
+const PROFILE_PATH = /^\/users\/[^/]+$/;
+const [OLD_PASSWORD, NEW_PASSWORD, WRONG_PASSWORD] = ['Qa-lab-old-pass-1!', 'Qa-lab-new-pass-2!', 'Qa-lab-wrong-pass-1!'];
+/** Both the profile and the password confirmations contain it; neither may appear after a refusal. */
+const SAVED_NOTICE = 'successfully updated';
 
 /**
  * The signed-in area with a mocked session: a fake token and mocked account endpoints, so it
@@ -13,8 +18,8 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   // 401 makes the SPA drop the session and redirect to login. Nested blocks replace this set.
   test.use(withMocks(
     mock.respond('GET', '/favorites', []),
-    mock.respond('GET', '/invoices', paged([])),
-    mock.respond('GET', '/messages', paged([])),
+    mock.respond('GET', '/invoices', listOf([])),
+    mock.respond('GET', '/messages', listOf([])),
     mock.respond('POST', '/totp/setup', {}),
   ));
 
@@ -49,9 +54,10 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test('"Sign out" is a real link or button', { tag: ['@a11y', '@bug'] }, async ({ accountPage }) => {
       knownBug('A11Y-04', '"Sign out" is an <a> without href: no link role, not reachable with Tab.');
       await accountPage.header.userMenu.click();
+      // The item is there as text whatever its role: what is asserted below is that it is also a link or a button.
       await expect(accountPage.header.userMenuItem('Sign out')).toBeVisible();
 
-      await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toBeVisible({ timeout: 2_000 });
+      await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toHaveCount(1, { timeout: 2_000 });
     });
   });
 
@@ -92,7 +98,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('GET', '/favorites', 500)));
 
     test('the customer is told they could not be loaded', async ({ favoritesPage }) => {
-      knownBug('BUG-23', 'a failed favorites request says "There are no favorites yet", which is not true.');
+      knownBug('BUG-23', 'a failed favorites request says "There are no favorites yet", which is not true.', { absence: true });
       await expect(favoritesPage.title).toBeVisible();
 
       await expect(favoritesPage.shell.errorAlert, 'BUG-23: the customer is told the favorites could not be loaded').toBeVisible({ timeout: 5_000 });
@@ -103,18 +109,18 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use({
       apiMocks: async ({ catalog }, use) => {
         const invoice = fakeInvoice(await catalog.inStock());
-        await use({ routes: [mock.respond('GET', '/invoices', paged([invoice])), mock.respond('GET', `/invoices/${invoice.id}`, invoice)] });
+        await use({ routes: [mock.respond('GET', '/invoices', listOf([invoice])), mock.respond('GET', `/invoices/${invoice.id}`, invoice)] });
       },
     });
 
     test('lists the orders and opens one with its lines', async ({ invoicesPage, catalog }) => {
       const product = await catalog.inStock();
-      await expect(invoicesPage.invoice(INVOICE_NUMBER)).toContainText('$' + (product.price * 2).toFixed(2));
+      await expect(invoicesPage.invoice(INVOICE_NUMBER)).toContainText('$' + (product.price * INVOICE_QUANTITY).toFixed(2));
 
       const details = await invoicesPage.openDetails(INVOICE_NUMBER);
 
       await expect(details.downloadPdfButton).toBeVisible();
-      await expect(details.productLines.filter({ hasText: product.name }).getByRole('cell').first()).toHaveText('2');
+      await expect(details.productLines.filter({ hasText: product.name }).getByRole('cell').first()).toHaveText(String(INVOICE_QUANTITY));
     });
   });
 
@@ -122,7 +128,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('GET', '/invoices', 500)));
 
     test('the customer is told they could not be loaded', async ({ invoicesPage }) => {
-      knownBug('BUG-24', 'a failed invoices request shows the bare page title, no table and no message.');
+      knownBug('BUG-24', 'a failed invoices request shows the bare page title, no table and no message.', { absence: true });
       await expect(invoicesPage.title).toBeVisible();
 
       await expect(invoicesPage.shell.errorAlert, 'BUG-24: the customer is told the invoices could not be loaded').toBeVisible({ timeout: 5_000 });
@@ -133,7 +139,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     const REPLY = 'A mocked reply from the qa-lab suite.';
     // The page reloads the message after a reply, so the second answer lists it.
     test.use(withMocks(
-      mock.respond('GET', '/messages', paged([fakeMessage])),
+      mock.respond('GET', '/messages', listOf([fakeMessage])),
       mock.sequence('GET', `/messages/${fakeMessage.id}`, { status: 200, json: fakeMessage }, { status: 200, json: { ...fakeMessage, replies: [fakeReply(REPLY)] } }),
     ));
 
@@ -141,7 +147,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await apiMock.use(mock.respond('POST', `/messages/${fakeMessage.id}/reply`, { id: '01QALABFAKEREPLY', message: 'ok' }, 201));
       await expect(messagesPage.messageRows).toHaveCount(1);
 
-      const details = await messagesPage.openDetails('webmaster');
+      const details = await messagesPage.openDetails(fakeMessage.subject);
       await expect(details.text(fakeMessage.message)).toBeVisible();
       await expect(details.repliesHeading).toBeVisible();
 
@@ -158,7 +164,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   });
 
   test.describe('with no messages', () => {
-    test.use(withMocks(mock.respond('GET', '/messages', paged([]))));
+    test.use(withMocks(mock.respond('GET', '/messages', listOf([]))));
 
     test('the empty state points to the contact form', async ({ messagesPage }) => {
       await expect(messagesPage.emptyState).toContainText('Navigate to the contact form');
@@ -169,7 +175,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     // Replaces the set above (a nested `test.use` does not merge), so the profile page's own POST /totp/setup needs its mock here too.
     test.use(withMocks(
       mock.respond('POST', '/totp/setup', {}),
-      mock.respond('PUT', /^\/users\/[^/]+$/, { success: true }),
+      mock.respond('PUT', PROFILE_PATH, { success: true }),
       mock.respond('POST', '/users/change-password', { success: true }),
     ));
 
@@ -181,7 +187,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     });
 
     test('saving sends the edited profile', async ({ profilePage, apiMock }) => {
-      const saved = apiMock.waitForRequest('PUT', /^\/users\/[^/]+$/);
+      const saved = apiMock.waitForRequest('PUT', PROFILE_PATH);
       await profilePage.firstName.input.fill('Renamed');
 
       await profilePage.update();
@@ -193,18 +199,18 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test('changing the password sends the current and the new one', async ({ profilePage, apiMock }) => {
       const sent = apiMock.waitForRequest('POST', '/users/change-password');
 
-      await profilePage.changePassword('Qa-lab-old-pass-1!', 'Qa-lab-new-pass-2!');
+      await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD);
 
       expect((await sent).postDataJSON()).toEqual({
-        current_password: 'Qa-lab-old-pass-1!',
-        new_password: 'Qa-lab-new-pass-2!',
-        new_password_confirmation: 'Qa-lab-new-pass-2!',
+        current_password: OLD_PASSWORD,
+        new_password: NEW_PASSWORD,
+        new_password_confirmation: NEW_PASSWORD,
       });
       await expect(profilePage.alerts.filter({ hasText: 'Your password is successfully updated!' })).toBeVisible();
     });
 
     test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
-      knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.');
+      knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.', { absence: true });
       await expect(profilePage.changePasswordButton).toBeVisible();
 
       await profilePage.changePasswordButton.click();
@@ -219,7 +225,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await profilePage.update();
 
       await expect(profilePage.alerts.filter({ hasText: 'Please correct the highlighted fields before saving.' })).toBeVisible();
-      await apiMock.expectNoRequest('PUT', /^\/users\/[^/]+$/);
+      await apiMock.expectNoRequest('PUT', PROFILE_PATH);
     });
 
     // The email field is read-only on this page, so the profile's format check is exercised through the phone number.
@@ -229,26 +235,26 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await profilePage.update();
 
       await expect(profilePage.alerts.filter({ hasText: 'Please enter a valid phone number (digits, spaces and ( ) + - only).' })).toBeVisible();
-      await apiMock.expectNoRequest('PUT', /^\/users\/[^/]+$/);
+      await apiMock.expectNoRequest('PUT', PROFILE_PATH);
     });
 
     test('a profile the API rejects shows its reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
-      await apiMock.use(mock.fail('PUT', /^\/users\/[^/]+$/, 422, { first_name: ['The first name field must not be greater than 40 characters.'] }));
+      await apiMock.use(mock.fail('PUT', PROFILE_PATH, 422, { first_name: ['The first name field must not be greater than 40 characters.'] }));
 
       await profilePage.update();
 
       await expect(profilePage.alerts.filter({ hasText: 'The first name field must not be greater than 40 characters.' })).toBeVisible();
-      await expect(profilePage.alerts.filter({ hasText: 'successfully updated' })).toHaveCount(0);
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
     });
 
     test('a wrong current password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
       // The real API answers 400 with this body.
       await apiMock.use(mock.fail('POST', '/users/change-password', 400, { success: false, message: 'Your current password does not matches with the password.' }));
 
-      await profilePage.changePassword('Qa-lab-wrong-pass-1!', 'Qa-lab-new-pass-2!');
+      await profilePage.changePassword(WRONG_PASSWORD, NEW_PASSWORD);
 
       await expect(profilePage.alerts.filter({ hasText: 'Your current password does not matches with the password.' })).toBeVisible();
-      await expect(profilePage.alerts.filter({ hasText: 'successfully updated' })).toHaveCount(0);
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
     });
   });
 });

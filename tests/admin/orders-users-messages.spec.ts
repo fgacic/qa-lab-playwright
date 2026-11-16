@@ -1,7 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { ADMIN_MESSAGES, alertAppears } from '@pages/admin/alerts';
 import { ORDER_STATUSES } from '@pages/admin/AdminPages';
-import { ORDER_STATUS, contactMessage, customer, messageReply, orderPayment, paginated } from '@support/admin-payloads';
+import { ORDER_STATUS, contactMessage, customer, messageReply, orderLine, orderPayment, paginated } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
+
+/** The user the add form is filled in with: only the required fields, the others stay empty and the form accepts that. */
+const newUser = { firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: 'newly.added@example.com' };
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each order with status and total', async ({ adminOrders, backOffice }) => {
@@ -32,7 +36,8 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(order.paymentMethod).toHaveValue(orderPayment.label);
     await expect(order.billingCity).toHaveValue(backOffice.order.billing_city);
     await expect(order.lines).toHaveCount(1);
-    await expect(order.lines.first()).toContainText(backOffice.product.name);
+    // Quantity, product, unit price and line total, as the fixed order line has them.
+    await expect(order.lineCells()).toHaveText([String(orderLine.quantity), backOffice.product.name, `$${orderLine.unitPrice}`, `$${orderLine.total}`]);
   });
 
   // The order's current status is not offered as an option, so every other status is set in turn.
@@ -45,7 +50,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
       await order.updateStatus(status);
 
       expect((await sent).postDataJSON()).toMatchObject({ status });
-      await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeVisible();
+      await expect(order.feedback.filter({ hasText: ADMIN_MESSAGES.statusUpdated })).toBeVisible();
     });
   }
 
@@ -58,9 +63,11 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
 
       const order = await adminOrders.edit(backOffice.order.invoice_number);
       await failed;
+      // The error state has been drawn: the page says something about the failed load, in the site's words or any alert.
+      await expect(order.notFoundNotice.or(order.feedback.first())).toBeVisible();
 
       // A server error is not "not found": any other wording, or an alert, would do. The pin only refuses the wrong claim.
-      await expect(order.notFoundNotice, 'ADM-13: a failed order load does not say the invoice does not exist').toBeHidden({ timeout: 2_000 });
+      expect(await alertAppears(order.notFoundNotice), 'ADM-13: a failed order load does not say the invoice does not exist').toBe(false);
     });
   });
 
@@ -75,7 +82,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
 
       // The page shows the raw HTTP error; the mocked 500 is what must be in it.
       await expect(order.feedback.filter({ hasText: '500 Internal Server Error' })).toBeVisible();
-      await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeHidden();
+      await expect(order.feedback.filter({ hasText: ADMIN_MESSAGES.statusUpdated })).toBeHidden();
     });
   });
 });
@@ -102,12 +109,11 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     const form = await adminUsers.add();
     const created = apiMock.waitForRequest('POST', '/users/register');
 
-    // Only the required fields: Postal code, State, Phone and Password stay empty and the form accepts that.
-    await form.fillIn({ firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: 'newly.added@example.com' });
+    await form.fillIn(newUser);
     await form.chrome.save();
 
-    expect((await created).postDataJSON()).toMatchObject({ first_name: 'Newly', last_name: 'Added', dob: '1991-02-03', email: 'newly.added@example.com', address: { street: 'Test Street 2', city: 'Testville', country: 'NL' } });
-    await expect(form.chrome.alert('User saved!')).toBeVisible();
+    expect((await created).postDataJSON()).toMatchObject({ first_name: newUser.firstName, last_name: newUser.lastName, dob: newUser.dateOfBirth, email: newUser.email, address: { street: newUser.street, city: newUser.city, country: newUser.country } });
+    await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
   });
 
   test('a new user needs the required fields', { tag: ['@negative'] }, async ({ adminUsers }) => {
@@ -134,7 +140,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await form.chrome.save();
 
     expect((await saved).postDataJSON()).toMatchObject({ first_name: 'Renamed', enabled: false, email: customer.email });
-    await expect(form.chrome.alert('User saved!')).toBeVisible();
+    await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
   });
 
   test('Delete removes the user', async ({ adminUsers, apiMock }) => {
@@ -146,14 +152,31 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await adminUsers.table.delete(customer.email);
 
     await deleted;
-    await expect(adminUsers.feedback.filter({ hasText: 'User deleted.' })).toBeVisible();
+    await expect(adminUsers.feedback.filter({ hasText: ADMIN_MESSAGES.userDeleted })).toBeVisible();
     await expect(adminUsers.table.row(customer.email)).toHaveCount(0);
+  });
+
+  test.describe('when a user is still in use', { tag: ['@negative'] }, () => {
+    test.use(withMocks(mock.fail('DELETE', /^\/users\/[^/]+$/, 409, { message: 'Seems like this user is used elsewhere.' })));
+
+    test('the reason is shown and the user stays', async ({ adminUsers, apiMock }) => {
+      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
+      await apiMock.use(mock.respond('GET', '/users', paginated([])));
+      await expect(adminUsers.table.row(customer.email)).toBeVisible();
+
+      await adminUsers.table.delete(customer.email);
+
+      await expect(adminUsers.alert('used elsewhere')).toBeVisible();
+      await expect(adminUsers.alert(ADMIN_MESSAGES.userDeleted)).toBeHidden();
+      await expect(adminUsers.table.row(customer.email)).toBeVisible();
+    });
   });
 
   test('the password of a new user is typed into a masked field', { tag: ['@bug'] }, async ({ adminUsers }) => {
     knownBug('ADM-17', 'the admin user form shows the password in clear text (an <input type="text">).');
     const form = await adminUsers.add();
     await expect(form.chrome.heading).toHaveText('Add User');
+    await expect(form.password).toBeVisible();
 
     await expect(form.password, 'ADM-17: the password field is masked').toHaveAttribute('type', 'password', { timeout: 2_000 });
   });
@@ -164,11 +187,11 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     test('the API error is shown and nothing is reported as saved', async ({ adminUsers }) => {
       const form = await adminUsers.add();
 
-      await form.fillIn({ firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: customer.email });
+      await form.fillIn({ ...newUser, email: customer.email });
       await form.chrome.save();
 
       await expect(form.chrome.alert('A customer with this email address already exists.')).toBeVisible();
-      await expect(form.chrome.alert('User saved!')).toBeHidden();
+      await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeHidden();
     });
   });
 
@@ -176,11 +199,12 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('GET', /^\/users\/[^/]+$/, 500)));
 
     test('the admin is told the user could not be loaded', async ({ adminUsers, apiMock }) => {
-      knownBug('ADM-14', 'an edit form whose record fails to load (500) opens empty, with no message: saving it would write blanks.');
+      knownBug('ADM-14', 'an edit form whose record fails to load (500) opens empty, with no message: saving it would write blanks.', { absence: true });
       const failed = apiMock.waitForResponse('GET', /^\/users\/[^/]+$/);
 
       const form = await adminUsers.edit(customer.email);
       await failed;
+      await expect(form.chrome.heading).toBeVisible();
 
       // Any alert will do: the pin does not prescribe the wording.
       await expect(form.chrome.alerts.first(), 'ADM-14: a failed user load tells the admin').toBeVisible({ timeout: 2_000 });
@@ -243,8 +267,9 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     test.use(withMocks(mock.fail('POST', /^\/messages\/[^/]+\/reply$/, 500)));
 
     test('the admin is told the reply was not sent', async ({ adminMessages, apiMock }) => {
-      knownBug('ADM-10', 'a reply the API refuses (500) leaves the page as it was: no message, and the typed text stays in the box as if nothing happened.');
+      knownBug('ADM-10', 'a reply the API refuses (500) leaves the page as it was: no message, and the typed text stays in the box as if nothing happened.', { absence: true });
       const message = await adminMessages.details(contactMessage.name);
+      await expect(message.text(contactMessage.message)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', `/messages/${contactMessage.id}/reply`);
 
       await message.reply('A reply that fails.');
@@ -258,8 +283,9 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     test.use(withMocks(mock.fail('PUT', /^\/messages\/[^/]+\/status$/, 500)));
 
     test('the admin is told the status was not saved', async ({ adminMessages, apiMock }) => {
-      knownBug('ADM-11', 'a message status the API refuses to save (500) is not reported: the picker keeps showing the new status as if it had been saved.');
+      knownBug('ADM-11', 'a message status the API refuses to save (500) is not reported: the picker keeps showing the new status as if it had been saved.', { absence: true });
       const message = await adminMessages.details(contactMessage.name);
+      await expect(message.text(contactMessage.message)).toBeVisible();
       const sent = apiMock.waitForRequest('PUT', `/messages/${contactMessage.id}/status`);
 
       await message.setStatus('RESOLVED');
@@ -270,8 +296,9 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   test('an empty reply is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ adminMessages, apiMock }) => {
-    knownBug('ADM-06', 'an empty admin reply is sent to the API ({"message":""}) instead of being validated.');
+    knownBug('ADM-06', 'an empty admin reply is sent to the API ({"message":""}) instead of being validated.', { absence: true });
     const message = await adminMessages.details(contactMessage.name);
+    await expect(message.text(contactMessage.message)).toBeVisible();
 
     await message.replyButton.click();
 

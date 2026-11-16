@@ -32,3 +32,9 @@ runs:
       env:
         TOOLSHOP_BUILD: '0'
       run: npm run toolshop:up
+
+    # The reason a stack that never became healthy is in the containers' logs, which vanish with the runner.
+    - name: Container logs of a failed start
+      if: ${{ failure() }}
+      shell: bash
+      run: docker compose --env-file .env.toolshop logs --no-color --tail=200

@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { knownBug } from '@support/known-bug';
+import { FAVORITE_ID } from '@support/payloads';
 import { escapeRegExp } from '@support/regexp';
 
 /** What the shop tells the shopper, word for word. */
@@ -21,6 +22,11 @@ const MAX_QUANTITY = 99;
 const OVER_MAX_QUANTITY = 150;
 /** The quantity the add-to-cart test sends. */
 const ADDED_QUANTITY = 3;
+/** What the shop answers when a product request fails, by status. */
+const PRODUCT_FAILURES = {
+  404: { message: 'Requested item not found' },
+  500: { message: 'Server Error' },
+} as const;
 /** The related-products endpoint of any product. */
 const RELATED = /^\/products\/[^/]+\/related$/;
 /** A server message nobody would write by accident: seeing it in the toast proves the app shows what the server said. */
@@ -41,9 +47,14 @@ test.describe('Product detail', () => {
     await expect(image).toHaveAttribute('src', new RegExp(`/${escapeRegExp(product.product_image.file_name)}$`));
   });
 
-  test('lists the product specifications', async ({ productPage }) => {
-    await expect(productPage.specifications.first()).toBeVisible();
-    await expect(productPage.specification('Warranty')).toBeVisible();
+  test('lists the product specifications the API holds, with their units', async ({ productPage, product, api }) => {
+    const { specs } = await api.product(product.id);
+    expect(specs, 'the product should have specifications').not.toHaveLength(0);
+
+    await expect(productPage.specifications).toHaveCount(specs.length);
+    for (const { spec_name: name, spec_value: value, spec_unit: unit } of specs) {
+      await expect(productPage.specification(name).getByRole('cell'), `the specification "${name}"`).toHaveText([name, `${value}${unit ?? ''}`]);
+    }
   });
 
   test('the quantity buttons count up and down but never below 1', async ({ productPage }) => {
@@ -97,24 +108,34 @@ test.describe('Product detail', () => {
     await expect(productPage.header.cartLink).toHaveText(String(ADDED_QUANTITY));
   });
 
-  test('adding to favourites while signed out is refused', { tag: ['@negative'] }, async ({ productPage, product, page }) => {
-    await productPage.addToFavourites();
+  // The shop refuses the write itself (401); a mock answers it so the live guard never has to block a real POST.
+  test.describe('while signed out', { tag: ['@mocked'] }, () => {
+    test.use(withMocks(mock.fail('POST', '/favorites', 401, { message: 'Unauthorized' })));
 
-    await expect(productPage.toast.message(MESSAGES.favouriteSignedOut)).toBeVisible();
-    // No redirect to the login page: the shopper stays on the product.
-    await expect(page).toHaveURL(`/product/${product.id}`);
+    test('adding to favourites is refused', { tag: ['@negative'] }, async ({ productPage, product, page, apiMock }) => {
+      const asked = apiMock.waitForRequest('POST', '/favorites');
+
+      await productPage.addToFavourites();
+
+      expect((await asked).postDataJSON()).toEqual({ product_id: product.id });
+      await expect(productPage.toast.message(MESSAGES.favouriteSignedOut)).toBeVisible();
+      // No redirect to the login page: the shopper stays on the product.
+      await expect(page).toHaveURL(`/product/${product.id}`);
+    });
   });
 
   test('a related product opens its own page', async ({ productPage, product, page, api }) => {
     await expect(productPage.relatedHeading).toBeVisible();
-    const [relatedName] = await productPage.relatedNames();
-    const related = (await api.related(product.id)).find((p) => p.name === relatedName);
-    expect(related, `"${relatedName}" should be one of the product's related products`).toBeDefined();
+    const shown = await productPage.relatedIds();
+    const related = await api.related(product.id);
+    expect(shown, 'the page shows the related products the API names').toEqual(related.map((p) => p.id));
+    const [first] = related;
+    await expect(productPage.relatedName(0)).toHaveText(first.name);
 
-    await productPage.openRelated(relatedName);
+    await productPage.openRelated(0);
 
-    await expect(page).toHaveURL(`/product/${related!.id}`);
-    await expect(productPage.name).toHaveText(relatedName);
+    await expect(page).toHaveURL(`/product/${first.id}`);
+    await expect(productPage.name).toHaveText(first.name);
   });
 
   test.describe('an out-of-stock product', () => {
@@ -141,14 +162,14 @@ test.describe('Product detail', () => {
 
   test.describe('when signed in (mocked session)', { tag: ['@mocked'] }, () => {
     test('adding to favourites confirms it', async ({ signedInProductPage: productPage, apiMock }) => {
-      await apiMock.use(mock.respond('POST', '/favorites', { id: '01QALABFAKEFAVORITE000000' }, 201));
+      await apiMock.use(mock.respond('POST', '/favorites', { id: FAVORITE_ID }, 201));
 
       await productPage.addToFavourites();
 
       await expect(productPage.toast.message(MESSAGES.favouriteAdded)).toBeVisible();
     });
 
-    test('adding a product twice says it is already a favourite', { tag: ['@negative'] }, async ({ signedInProductPage: productPage, apiMock }) => {
+    test('a product the shop already holds as a favourite is reported as one', { tag: ['@negative'] }, async ({ signedInProductPage: productPage, apiMock }) => {
       await apiMock.use(mock.fail('POST', '/favorites', 422, { message: 'Duplicate Entry' }));
 
       await productPage.addToFavourites();
@@ -172,7 +193,7 @@ test.describe('Product detail', () => {
     test.use(withMocks(mock.abort('POST', /^\/carts(\/[^/]+)?$/)));
 
     test('the shopper is told the product was not added', async ({ productPage }) => {
-      knownBug('BUG-10', 'when the cart request fails at network level, Add to cart does nothing at all: no toast, no error.');
+      knownBug('BUG-10', 'when the cart request fails at network level, Add to cart does nothing at all: no toast, no error.', { absence: true });
       await productPage.addToCart();
 
       await expect(productPage.shell.errorAlert, 'BUG-10: a failed add to cart is reported').toBeVisible({ timeout: 5_000 });
@@ -197,7 +218,7 @@ test.describe('Product detail', () => {
     test.use(withMocks(mock.fail('GET', RELATED, 500)));
 
     test('the shopper is told, and the product itself is unaffected', async ({ productPage, product, apiMock }) => {
-      knownBug('BUG-43', 'a failed related-products request leaves the "Related products" heading over nothing, with no message.');
+      knownBug('BUG-43', 'a failed related-products request leaves the "Related products" heading over nothing, with no message.', { absence: true });
       await expect(productPage.name).toHaveText(product.name);
       await expect(productPage.addToCartButton).toBeEnabled();
       await expect.poll(() => apiMock.requestsTo('GET', RELATED), 'the related products were asked for').toBeGreaterThan(0);
@@ -206,12 +227,12 @@ test.describe('Product detail', () => {
     });
   });
 
-  for (const status of [404, 500]) {
+  for (const status of [404, 500] as const) {
     test.describe(`when the product request answers ${status}`, { tag: ['@mocked', '@bug'] }, () => {
-      test.use(withMocks(mock.fail('GET', /^\/products\/[^/]+$/, status, { message: status === 404 ? 'Requested item not found' : 'Server Error' })));
+      test.use(withMocks(mock.fail('GET', /^\/products\/[^/]+$/, status, PRODUCT_FAILURES[status])));
 
       test('the page says the product is unavailable', async ({ productPage }) => {
-        knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".');
+        knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".', { absence: true });
 
         await expect(productPage.shell.errorAlert.or(productPage.unavailableMessage), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: 5_000 });
       });

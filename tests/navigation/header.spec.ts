@@ -67,6 +67,8 @@ test.describe('Header navigation', () => {
 
   test('a signed-out shopper sees "Sign in" and no account menu', { tag: ['@negative'] }, async ({ homePage }) => {
     await homePage.header.expand();
+    // The visible "Sign in" link is the anchor: the header has rendered its signed-out state, so a menu that is
+    // still missing is absent for good and not merely late.
     await expect(homePage.header.signInLink).toBeVisible();
     await expect(homePage.header.userMenu).toHaveCount(0);
   });

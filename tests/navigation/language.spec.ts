@@ -8,7 +8,8 @@ import { skipIfBotChallenge } from '@support/bot-challenge';
  * Dutch and French "Contact" equal the English word: those languages use it as is, so they are not
  * untranslated strings.
  */
-const NAV_LABELS: Record<Language, Partial<Record<NavKey, string>>> = {
+type NavLabels = { home: string } & Partial<Record<NavKey, string>>;
+const NAV_LABELS: Record<Language, NavLabels> = {
   de: { home: 'Start', categories: 'Kategorien', contact: 'Kontakt', 'sign-in': 'Einloggen' },
   el: { home: 'Αρχική', categories: 'Κατηγορίες', contact: 'Επικοινωνία', 'sign-in': 'Σύνδεση' },
   en: { home: 'Home', categories: 'Categories', contact: 'Contact', 'sign-in': 'Sign in' },
@@ -32,7 +33,7 @@ test.describe('Language switcher', () => {
     test(`switching from ${from.toUpperCase()} to ${lang.toUpperCase()} translates the header`, async ({ homePage, page }) => {
       const { header } = homePage;
       await header.language.switchTo(from);
-      await expect(header.navItem('home')).toHaveText(NAV_LABELS[from].home!);
+      await expect(header.navItem('home')).toHaveText(NAV_LABELS[from].home);
 
       await header.language.switchTo(lang);
 

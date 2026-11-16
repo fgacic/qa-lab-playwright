@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@fixtures';
+import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { API_URL } from '@support/env';
 import { knownBug } from '@support/known-bug';
 import { fakeGuest, uniqueEmail } from '@support/test-data';
@@ -34,7 +35,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       const form = await adminProducts.add();
       await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '3', price: '12.34', rental: true });
       await form.chrome.save();
-      await expect(form.chrome.alert('Product saved!')).toBeVisible();
+      await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
       await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
     });
 
@@ -57,7 +58,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       await edit.chooseRelations();
       await edit.price.fill('23.45');
       await edit.chrome.save();
-      await expect(edit.chrome.alert('Product saved!')).toBeVisible();
+      await expect(edit.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
     });
 
     await test.step('The shop shows the new price', async () => {
@@ -70,7 +71,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       await adminProducts.open();
       await adminProducts.search.searchFor(name);
       await adminProducts.table.delete(name);
-      await expect(adminProducts.feedback.filter({ hasText: 'Product deleted.' })).toBeVisible();
+      await expect(adminProducts.feedback.filter({ hasText: ADMIN_MESSAGES.productDeleted })).toBeVisible();
       await expect.poll(() => createdProducts.pending(), 'the UI delete really removed the product').toHaveLength(0);
       await shop.home.open();
       await shop.home.search.searchFor(name);
@@ -78,19 +79,40 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     });
   });
 
-  test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, createdProducts }) => {
+  test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, createdProducts, apiMock }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
     const name = `Set of QaLab Pliers ${unique()}`;
     const form = await adminProducts.add();
     await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '1', price: '5.00', rental: true });
     await form.chrome.save();
-    await expect(form.chrome.alert('Product saved!')).toBeVisible();
+    await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
     await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
     await shop.home.open();
+    const answered = apiMock.waitForResponse<{ data: { name: string }[] }>('QUERY', '/products/search');
     await shop.home.search.searchFor(name);
+    const { response, json: found } = await answered;
 
-    await expect(shop.home.grid.card(name).root, 'BUG-28: a full-name search finds the product').toBeVisible({ timeout: 5_000 });
+    // The search was answered and the product exists (it was just saved): what is left to ask is whether the answer has it.
+    expect(response.ok(), 'the search request succeeded').toBe(true);
+    expect(found.data.map((product) => product.name), 'BUG-28: the search answer lists the product').toContain(name);
+    await expect(shop.home.grid.card(name).root, 'BUG-28: a full-name search finds the product').toBeVisible();
+  });
+
+  test('a brand whose slug is taken is refused by the real API', { tag: ['@negative', '@bug'] }, async ({ adminBrands, brandFactory, apiMock }) => {
+    knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
+    const taken = await brandFactory.create();
+    const form = await adminBrands.add();
+    const answered = apiMock.waitForResponse<{ slug?: string[] }>('POST', '/brands');
+
+    await form.fillIn({ name: `${taken.name} again`, slug: taken.slug });
+    await form.chrome.save();
+    const { response, json } = await answered;
+
+    // What the real backend says holds whether or not the form shows it: the refusal, with its reason, keyed by field.
+    expect(response.status(), 'the real API refuses a second brand with the same slug').toBe(409);
+    expect(json.slug?.[0], 'the reason the real API gives').toMatch(/already exists/);
+    await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: 2_000 });
   });
 
   test('an order placed by a guest can be marked as shipped', { tag: ['@self-hosted'] }, async ({ api, catalog, adminOrders }) => {
@@ -99,7 +121,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await adminOrders.search.searchFor(invoice_number);
     const order = await adminOrders.edit(invoice_number);
     await order.updateStatus('SHIPPED');
-    await expect(order.feedback.filter({ hasText: 'Status updated!' })).toBeVisible();
+    await expect(order.feedback.filter({ hasText: ADMIN_MESSAGES.statusUpdated })).toBeVisible();
 
     await order.page.reload();
     await expect(order.status).toHaveValue('SHIPPED');
@@ -138,7 +160,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(adminStatistics.report('Top 10 Most Purchased Products').first()).toContainText(purchased[0].name);
   });
 
-  test('the monthly sales report loads its twelve months and shows its chart', async ({ adminMonthlySales, apiMock }) => {
+  test('the monthly sales report is fed twelve months and has a chart area', async ({ adminMonthlySales, apiMock }) => {
     // A <canvas> has nothing to read, so the data is checked on the answer that feeds it.
     const answered = apiMock.waitForResponse<unknown[]>('GET', '/reports/average-sales-per-month');
     await adminMonthlySales.open();

@@ -31,6 +31,22 @@ export interface MockRoute {
   responses: MockResponse[];
 }
 
+/** Delays the requests of one endpoint whose JSON body satisfies `when`: `ApiMock.delay`. */
+interface DelayRule {
+  method: HttpMethod;
+  path: MockRoute['path'];
+  when: (body: Record<string, unknown>) => boolean;
+  ms: number;
+}
+
+/** An endpoint whose real answers are delivered in the order they were asked for: `ApiMock.serialize`. */
+interface SerialRule {
+  method: HttpMethod;
+  path: MockRoute['path'];
+  /** Settles when the answer of the latest request has been delivered (or has failed). */
+  tail: Promise<void>;
+}
+
 export type MockResponse =
   | { status: number; json?: unknown; body?: string; contentType?: string }
   | { abort: 'failed' | 'timedout' | 'connectionrefused' };
@@ -84,6 +100,8 @@ export class ApiMock {
   private installed = false;
   /** How many answers each route has served in this page. The routes themselves stay untouched, so a describe-level sequence replays from the start in every test. */
   private readonly served = new WeakMap<MockRoute, number>();
+  private readonly delays: DelayRule[] = [];
+  private readonly serials: SerialRule[] = [];
   private guardWrites: boolean;
   /** Writes the guard refused (see `blockUnmockedWrites`). */
   readonly blockedWrites: string[] = [];
@@ -136,6 +154,28 @@ export class ApiMock {
     await this.install();
   }
 
+  /**
+   * Holds back every request of an endpoint whose JSON body satisfies `when` by `ms`, then lets it
+   * through (to a mock if one answers it, else to the real API). It is how a spec makes a slow answer
+   * for an earlier request, the other half of a race, without a route of its own beside the mock layer.
+   */
+  async delay(method: HttpMethod, path: MockRoute['path'], when: (body: Record<string, unknown>) => boolean, ms: number): Promise<void> {
+    assertPath(path);
+    this.delays.push({ method, path, when, ms });
+    await this.install();
+  }
+
+  /**
+   * Delivers the REAL answers of an endpoint in the order the requests were sent, whatever order the
+   * server finishes them in: each answer waits until the previous one has been delivered. For specs
+   * that are not about a race the app loses (the answers of one slider drag, say) and need the last
+   * request's answer to be the last one the page sees. A mocked answer is not held: it is already deterministic.
+   */
+  async serialize(method: HttpMethod, path: MockRoute['path']): Promise<void> {
+    assertPath(path);
+    this.serials.push({ method, path, tail: Promise.resolve() });
+    await this.install();
+  }
 
   /**
    * How many requests to an endpoint the page has sent since this mock was created, mocked or
@@ -158,6 +198,8 @@ export class ApiMock {
    * this once, at the end of the scenario, not between steps.
    */
   async expectNoRequest(method: HttpMethod, path: MockRoute['path'], { within = 750 }: { within?: number } = {}): Promise<void> {
+    // Up front: a /g regex would otherwise throw from inside the listener, as an unhandled error, instead of from this call.
+    assertPath(path);
     const label = (pathname: string) => `${method} ${pathname}`;
     const early = this.sent.find((r) => r.method === method && matches(path, r.pathname));
     if (early) throw new Error(`Expected no ${label(early.pathname)}, but one was already sent`);
@@ -185,7 +227,8 @@ export class ApiMock {
 
   /** Waits for the next request to an endpoint, mocked or real, and returns it. */
   waitForRequest(method: HttpMethod, path: MockRoute['path'], options: WaitOptions = {}): Promise<Request> {
-    return this.page.waitForRequest((r) => r.method() === method && matches(path, apiPath(r.url())), options);
+    assertPath(path);
+    return this.page.waitForRequest((r) => r.method() === method && isApiUrl(r.url()) && matches(path, apiPath(r.url())), options);
   }
 
   /**
@@ -198,10 +241,11 @@ export class ApiMock {
     bodyMatches: (body: Record<string, unknown>) => boolean = () => true,
     options: WaitOptions = {},
   ): Promise<{ response: Response; body: Record<string, unknown>; json: T }> {
+    assertPath(path);
     let body: Record<string, unknown> = {};
     const response = await this.page.waitForResponse((r) => {
       const request = r.request();
-      if (request.method() !== method || !matches(path, apiPath(r.url()))) return false;
+      if (request.method() !== method || !isApiUrl(r.url()) || !matches(path, apiPath(r.url()))) return false;
       body = jsonBody(request);
       return bodyMatches(body);
     }, options);
@@ -212,31 +256,64 @@ export class ApiMock {
 
   private async handle(route: Route): Promise<void> {
     const request = route.request();
+    const method = request.method();
     const pathname = apiPath(request.url());
     const all = [...this.routes, ...this.defaults];
     // A CORS preflight is answered only for a path some mock serves; otherwise the real API answers it,
     // so a missing CORS header on an unmocked endpoint still shows up.
-    if (request.method() === 'OPTIONS') {
+    if (method === 'OPTIONS') {
       return all.some((r) => matches(r.path, pathname)) ? route.fulfill({ status: 204, headers: CORS }) : route.fallback();
     }
-    if (this.latencyMs) await new Promise((resolve) => setTimeout(resolve, this.latencyMs));
-    const match = all.find((r) => r.method === request.method() && matches(r.path, pathname));
-    if (!match) {
-      if (this.guardWrites && WRITES.has(request.method()) && !ANONYMOUS_CART_WRITES.some((w) => w.method === request.method() && w.path.test(pathname))) {
-        this.blockedWrites.push(`${request.method()} ${pathname}`);
-        return route.fulfill({ status: 418, headers: { ...CORS, 'content-type': 'application/json' }, body: '{"message":"Blocked by qa-lab: unmocked write"}' });
+    const match = all.find((r) => r.method === method && matches(r.path, pathname));
+    // Only the real answers of an endpoint are put in order, and the place is taken now, when the request
+    // arrives, not after a delay: the order is the order of asking.
+    const serial = match ? undefined : this.serials.find((r) => r.method === method && matches(r.path, pathname));
+    const turn = serial && takeTurn(serial);
+    try {
+      if (this.latencyMs) await sleep(this.latencyMs);
+      for (const { ms } of this.delays.filter((d) => d.method === method && matches(d.path, pathname) && d.when(jsonBody(request)))) await sleep(ms);
+      if (!match) {
+        if (this.guardWrites && WRITES.has(method) && !ANONYMOUS_CART_WRITES.some((w) => w.method === method && w.path.test(pathname))) {
+          this.blockedWrites.push(`${method} ${pathname}`);
+          return await route.fulfill({ status: 418, headers: { ...CORS, 'content-type': 'application/json' }, body: '{"message":"Blocked by qa-lab: unmocked write"}' });
+        }
+        if (!turn) return await route.fallback();
+        // Fetched at once, delivered when every earlier answer of the endpoint has been. A fetch that fails (the
+        // page closed, the network dropped) fails this request, as it would have unrouted.
+        const fetched = route.fetch();
+        fetched.catch(() => undefined); // awaited only after the earlier turns: a rejection before that must not be unhandled
+        await turn.earlier;
+        return await route.fulfill({ response: await fetched }).catch(() => route.abort('failed').catch(() => undefined));
       }
-      return route.fallback();
+      const index = this.served.get(match) ?? 0;
+      this.served.set(match, index + 1);
+      const response = match.responses[Math.min(index, match.responses.length - 1)];
+      if ('abort' in response) return await route.abort(response.abort);
+      return await route.fulfill({
+        status: response.status,
+        headers: { ...CORS, 'content-type': response.contentType ?? 'application/json' },
+        body: response.body ?? (response.json === undefined ? '' : JSON.stringify(response.json)),
+      });
+    } finally {
+      turn?.done();
     }
-    const index = this.served.get(match) ?? 0;
-    this.served.set(match, index + 1);
-    const response = match.responses[Math.min(index, match.responses.length - 1)];
-    if ('abort' in response) return route.abort(response.abort);
-    return route.fulfill({
-      status: response.status,
-      headers: { ...CORS, 'content-type': response.contentType ?? 'application/json' },
-      body: response.body ?? (response.json === undefined ? '' : JSON.stringify(response.json)),
-    });
+  }
+}
+
+/** Takes the next place in an endpoint's order: `earlier` settles when everyone ahead is done, `done` frees the place. */
+function takeTurn(serial: SerialRule): { earlier: Promise<void>; done: () => void } {
+  const earlier = serial.tail;
+  let done!: () => void;
+  serial.tail = new Promise<void>((resolve) => { done = resolve; });
+  return { earlier, done };
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** A path pattern a mock can use: throws for a stateful (/g, /y) regex, which would match every other call only. */
+function assertPath(path: MockRoute['path']): void {
+  if (typeof path !== 'string' && (path.global || path.sticky)) {
+    throw new Error(`Mock path ${path} must not use the /g or /y flag: it is stateful across test() calls`);
   }
 }
 
@@ -257,6 +334,6 @@ function jsonBody(request: Request): Record<string, unknown> {
 function matches(path: MockRoute['path'], pathname: string): boolean {
   if (typeof path === 'string') return pathname === path;
   // A /g or /y regex keeps `lastIndex` between calls, so the same path would match every other time.
-  if (path.global || path.sticky) throw new Error(`Mock path ${path} must not use the /g or /y flag: it is stateful across test() calls`);
+  assertPath(path);
   return path.test(pathname);
 }
