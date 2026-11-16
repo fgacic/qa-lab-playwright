@@ -21,7 +21,7 @@ RUN npm ci --legacy-peer-deps --no-audit --no-fund
 RUN npx ng build --configuration production \
  && if [ -d dist/toolshop/browser ]; then mv dist/toolshop/browser /site; else mv dist/toolshop /site; fi
 
-FROM nginx:1.27.3-alpine
+FROM nginx:1.31.7-alpine
 COPY docker/ui-nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /site /usr/share/nginx/html
 EXPOSE 4200
