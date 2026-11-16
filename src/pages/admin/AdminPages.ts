@@ -4,7 +4,7 @@ import type { AdminSection } from '@components/Header';
 import { apiPath } from '@support/env';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
-import { reportedFailure } from './alerts';
+import { ADMIN_MESSAGES, reportedFailure } from './alerts';
 
 /** The heading each back-office section opens on (the dashboard has none of its own; the orders list says "Order"). */
 const SECTION_HEADINGS: Record<AdminSection, string> = {
@@ -88,8 +88,8 @@ export class AdminOrderPage {
     this.paymentMethod = page.getByRole('textbox', { name: 'Payment Method' });
     this.billingCity = page.getByRole('textbox', { name: 'City' });
     this.lines = page.getByRole('table').getByRole('row').filter({ has: page.getByRole('cell') });
-    this.feedback = page.getByRole('alert').or(page.getByText('Status updated!'));
-    this.notFoundNotice = page.getByText("This invoice doesn't exist.");
+    this.feedback = page.getByRole('alert').or(page.getByText(ADMIN_MESSAGES.statusUpdated));
+    this.notFoundNotice = page.getByText(ADMIN_MESSAGES.invoiceMissing);
     this.backLink = page.getByRole('link', { name: 'Back' });
     this.failure = reportedFailure(page);
   }
@@ -169,10 +169,14 @@ export class AdminStatisticsPage {
     this.failure = reportedFailure(page);
   }
 
-  /** The table under a report's heading: the smallest block that holds both (the heading has no relation to its table in the accessibility tree). */
+  /**
+   * The table of a report. Its heading is a sibling `<h4>` with no relation to the table in the accessibility tree (no
+   * region, no `aria-labelledby`), so the table is found by what it is: the column titles of its report (`REPORTS`), which no
+   * two reports share as a set. That survives a reordered page and any wrapper around heading and table.
+   */
   private table(title: ReportTitle): Locator {
-    const heading = this.page.getByRole('heading', { name: title, level: 4 });
-    return this.page.locator('div').filter({ has: heading }).filter({ has: this.page.getByRole('table') }).last().getByRole('table');
+    const { columns } = REPORTS[REPORT_TITLES.indexOf(title)];
+    return columns.reduce((tables, column) => tables.filter({ has: this.page.getByRole('columnheader', { name: column, exact: true }) }), this.page.getByRole('table'));
   }
 
   /** The data rows of the table under a report heading. */
@@ -268,7 +272,7 @@ export class AdminSettingsPage {
     this.ecoBadge = page.getByRole('checkbox', { name: 'Display eco-friendly badge' });
     this.saveButton = page.getByRole('button', { name: 'Save' });
     this.clearStorageButton = page.getByRole('button', { name: 'Clear storage' });
-    this.feedback = page.getByRole('alert').or(page.getByText('Settings saved!'));
+    this.feedback = page.getByRole('alert').or(page.getByText(ADMIN_MESSAGES.settingsSaved));
   }
 
   @step('Open the settings')

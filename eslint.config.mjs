@@ -40,6 +40,8 @@ const base = defineConfig(
       'playwright/no-focused-test': 'error',
       'playwright/no-skipped-test': 'error',
       'playwright/no-force-option': 'error',
+      // Tags are declared in `{ tag }` (playwright.config.ts greps them), never typed into a title, where they would also be reported twice.
+      'playwright/valid-title': ['error', { mustNotMatch: '@\\w' }],
       // Blank-line style is not a correctness rule; the formatter of the day decides it.
       'playwright/no-conditional-in-test': 'off', // on for specs only, below
       'playwright/no-conditional-expect': 'off',

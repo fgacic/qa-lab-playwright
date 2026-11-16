@@ -15,8 +15,9 @@ const SAVED_NOTICE = 'successfully updated';
  * runs anywhere without an account. The real thing is covered in real-account.spec.ts.
  */
 test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
-  // An account with nothing in it. Any section the SPA opens needs its endpoint mocked: a real
-  // 401 makes the SPA drop the session and redirect to login. Nested blocks replace this set.
+  // An account with nothing in it. Any section the SPA opens needs its endpoint mocked: the fake token
+  // is refused by the real API (401), and the SPA does not handle that refusal (BUG-56, BUG-57: it sends the
+  // user to a route that does not exist and keeps the session). Nested blocks replace this set.
   test.use(withMocks(
     mock.respond('GET', '/favorites', []),
     mock.respond('GET', '/invoices', listOf([])),
@@ -24,24 +25,27 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     mock.respond('POST', '/totp/setup', {}),
   ));
 
-  test('the account page links to the four sections', async ({ accountPage, page }) => {
-    await expect(accountPage.title).toHaveText('My account');
+  const tiles = [['Favorites', '/account/favorites'], ['Profile', '/account/profile'], ['Invoices', '/account/invoices'], ['Messages', '/account/messages']] as const;
+  for (const [section, path] of tiles) {
+    test(`the account page links to ${section}`, async ({ accountPage, page }) => {
+      await expect(accountPage.title).toHaveText('My account');
 
-    for (const [section, path] of [['Favorites', '/account/favorites'], ['Profile', '/account/profile'], ['Invoices', '/account/invoices'], ['Messages', '/account/messages']] as const) {
       await accountPage.openSection(section);
+
       await expect(page).toHaveURL(path);
-      await page.goBack();
-    }
-  });
+    });
+  }
 
-  test('the header account menu reaches every section', async ({ accountPage, page }) => {
-    await expect(accountPage.header.userMenu).toHaveText(`${fakeUser.first_name} ${fakeUser.last_name}`);
+  const menuItems = [['My favorites', '/account/favorites'], ['My profile', '/account/profile'], ['My invoices', '/account/invoices'], ['My messages', '/account/messages'], ['My account', '/account']] as const;
+  for (const [item, path] of menuItems) {
+    test(`the header account menu reaches "${item}"`, async ({ accountPage, page }) => {
+      await expect(accountPage.header.userMenu).toHaveText(`${fakeUser.first_name} ${fakeUser.last_name}`);
 
-    for (const [item, path] of [['My favorites', '/account/favorites'], ['My profile', '/account/profile'], ['My invoices', '/account/invoices'], ['My messages', '/account/messages'], ['My account', '/account']] as const) {
       await accountPage.header.openUserMenuItem(item);
+
       await expect(page).toHaveURL(path);
-    }
-  });
+    });
+  }
 
   test.describe('sign out', () => {
     test('signing out forgets the session and sends the customer to login', async ({ accountPage, page }) => {
@@ -87,6 +91,34 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     });
   });
 
+  // The shop answers 401 to a token it no longer accepts (expired, revoked): the same body for the real API and for this mock.
+  test.describe('when the session is refused', { tag: ['@negative', '@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', '/invoices', 401, { error: 'Unauthorized' })));
+
+    test('the customer lands on the login page', async ({ invoicesPage: _, shop, page, apiMock }) => {
+      knownBug('BUG-56', 'a 401 on an account call sends the SPA to "/#/auth/login", which is not a route: the home page is shown at that address instead of the login form.');
+      // Precondition, true whether or not the bug is fixed: the page asked for its list and was refused. (Not "the invoices page is
+      // showing": the SPA leaves it as soon as the refusal arrives, so its heading is there only for a moment, or never.)
+      await expect.poll(() => apiMock.answers, { message: 'the list was asked for and refused with 401' }).toContainEqual({ pathname: '/invoices', outcome: 401 });
+
+      await expect(page, 'BUG-56: the refused customer is on /auth/login').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
+      await expect(shop.login.heading, 'BUG-56: the login form is shown').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+
+    test('the stored token is dropped and the account menu goes', async ({ invoicesPage, page, apiMock }) => {
+      knownBug('BUG-57', 'a 401 on an account call leaves the refused token in localStorage and the account menu in the header: the customer still looks signed in.');
+      // Precondition, true whether or not the bug is fixed: the page asked for its list and was refused. (Not "the invoices page is
+      // showing": the SPA leaves it as soon as the refusal arrives, so its heading is there only for a moment, or never.)
+      await expect.poll(() => apiMock.answers, { message: 'the list was asked for and refused with 401' }).toContainEqual({ pathname: '/invoices', outcome: 401 });
+
+      // The SPA leaves the page after the refusal (to the login route or to the address BUG-56 describes): read the token once it has.
+      await page.waitForURL(/auth\/login/);
+
+      await expect.poll(() => storedToken(page), { message: 'BUG-57: the refused token is gone', timeout: BUG_TIMEOUT }).toBeNull();
+      await expect(invoicesPage.shell.header.userMenu, 'BUG-57: the account menu is gone').toHaveCount(0, { timeout: BUG_TIMEOUT });
+    });
+  });
+
   test.describe('with no favorites', () => {
     test.use(withMocks(mock.respond('GET', '/favorites', [])));
 
@@ -98,9 +130,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   test.describe('when favorites fail to load', { tag: ['@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/favorites', 500)));
 
-    test('the customer is told they could not be loaded', async ({ favoritesPage, page }) => {
+    test('the customer is told they could not be loaded', async ({ favoritesPage, page, apiMock }) => {
       knownBug('BUG-23', 'a failed favorites request says "There are no favorites yet", which is not true.', { absence: true });
       await expect(favoritesPage.title).toBeVisible();
+      // Precondition, true whether or not the bug is fixed: the failure path ran (the page opened with the request already answered, so the mock's record is read).
+      await expect.poll(() => apiMock.answers, { message: 'the list was asked for and refused with 500' }).toContainEqual({ pathname: '/favorites', outcome: 500 });
 
       await expect(failureFeedback(page).first(), 'BUG-23: the customer is told the favorites could not be loaded').toBeVisible({ timeout: BUG_TIMEOUT });
     });
@@ -153,9 +187,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   test.describe('when invoices fail to load', { tag: ['@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/invoices', 500)));
 
-    test('the customer is told they could not be loaded', async ({ invoicesPage, page }) => {
+    test('the customer is told they could not be loaded', async ({ invoicesPage, page, apiMock }) => {
       knownBug('BUG-24', 'a failed invoices request shows the bare page title, no table and no message.', { absence: true });
       await expect(invoicesPage.title).toBeVisible();
+      // Precondition, true whether or not the bug is fixed: the failure path ran (the page opened with the request already answered, so the mock's record is read).
+      await expect.poll(() => apiMock.answers, { message: 'the list was asked for and refused with 500' }).toContainEqual({ pathname: '/invoices', outcome: 500 });
 
       await expect(failureFeedback(page).first(), 'BUG-24: the customer is told the invoices could not be loaded').toBeVisible({ timeout: BUG_TIMEOUT });
     });
@@ -196,7 +232,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       knownBug('BUG-49', 'a failed messages request says "There are no messages yet", which is not true.', { absence: true });
       await expect(messagesPage.title).toBeVisible();
       // Precondition, true whether or not the bug is fixed: the list was asked for and refused.
-      expect(apiMock.requestsTo('GET', '/messages'), 'the page asked for the list').toBeGreaterThan(0);
+      await expect.poll(() => apiMock.answers, { message: 'the list was asked for and refused with 500' }).toContainEqual({ pathname: '/messages', outcome: 500 });
 
       await expect(failureFeedback(messagesPage.page).first(), 'BUG-49: the customer is told the messages could not be loaded').toBeVisible({ timeout: BUG_TIMEOUT });
     });
@@ -244,10 +280,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect(profilePage.city.input).toHaveValue(fakeUser.address.city);
     });
 
-    test('the profile page raises no application error', { tag: ['@bug'] }, async ({ profilePage, consoleGuard }) => {
+    test('the profile page raises no application error', { tag: ['@bug'] }, async ({ profilePage, apiMock, consoleGuard }) => {
       knownBug('BUG-37', 'the profile page draws its two-factor QR code from an empty secret and logs "[angularx-qrcode] Field `qrdata` is empty" as an error on every visit.');
-      // Precondition, true whether or not the bug is fixed: the page has drawn and is filled in, so its widgets have run.
+      // Precondition, true whether or not the bug is fixed: the page is filled in and its two-factor setup has been answered, so the QR widget has run.
       await expect(profilePage.email.input).toHaveValue(fakeUser.email);
+      await expect.poll(() => apiMock.answers, { message: 'POST /totp/setup was answered' }).toContainEqual({ pathname: '/totp/setup', outcome: 200 });
 
       expect(await consoleGuard.logged(/angularx-qrcode/), 'BUG-37: the QR code widget logged an error').toEqual([]);
     });
@@ -380,10 +417,9 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD);
       await attempted;
-      // Precondition, true whether or not the bug is fixed: no success is claimed.
-      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
 
-      await expect(profilePage.alerts.first(), 'BUG-51: the customer is told the password was not changed').toBeVisible({ timeout: BUG_TIMEOUT });
+      // Any alert but a success notice: a fixed page says the change failed, and a page that claimed success would not satisfy this.
+      await expect(profilePage.alerts.filter({ hasNotText: SAVED_NOTICE }).first(), 'BUG-51: the customer is told the password was not changed').toBeVisible({ timeout: BUG_TIMEOUT });
     });
 
     test('a wrong current password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {

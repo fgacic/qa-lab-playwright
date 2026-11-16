@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { BillingStep } from './BillingStep';
 import { CartStep } from './CartStep';
 import { PaymentStep } from './PaymentStep';
@@ -34,9 +34,11 @@ export class CheckoutWizard {
     return this.root.getByText(`Thanks for your order! Your invoice number is ${invoiceNumber}.`, { exact: true });
   }
 
-  /** The invoice number in the confirmation, once it is shown. */
+  /**
+   * The invoice number in the confirmation. Reading waits for the confirmation to be on the page (a locator read, no assertion
+   * here: assertions live in specs), and `confirmation` matches only text that names an `INV-` number, so the match below holds.
+   */
   async invoiceNumber(): Promise<string> {
-    await expect(this.confirmation, 'the confirmation should name an invoice number').toBeVisible();
     const invoice = /INV-\d+/.exec(await this.confirmation.innerText());
     if (!invoice) throw new Error('The order confirmation does not name an invoice number');
     return invoice[0];

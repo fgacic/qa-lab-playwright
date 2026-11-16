@@ -74,6 +74,12 @@ export class ContactPage {
     await this.email.input.press('Enter');
   }
 
+  /** Both clicks of a double-click on Send, as an impatient visitor gives them: the second lands while the first request is still open. */
+  @step('Double-click Send on the contact form')
+  async submitTwice(): Promise<void> {
+    await this.sendButton.dblclick();
+  }
+
   @step('Submit the contact form')
   async submit(): Promise<void> {
     await this.sendButton.click();

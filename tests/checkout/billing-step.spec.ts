@@ -71,7 +71,7 @@ test.describe('Checkout: billing address step', () => {
     test('street, city and state are filled in', async ({ checkout }) => {
       const { status } = await checkout.billing.lookUp(fakeAddress());
 
-      expect(status).toBe(200);
+      expect(status, 'the lookup finds the address').toBe(200);
       await expect(checkout.billing.street.input).toHaveValue(POSTCODE_LOOKUP_RESULT.street);
       await expect(checkout.billing.city.input).toHaveValue(POSTCODE_LOOKUP_RESULT.city);
       await expect(checkout.billing.state.input).toHaveValue(POSTCODE_LOOKUP_RESULT.state);
@@ -95,14 +95,14 @@ test.describe('Checkout: billing address step', () => {
       await apiMock.use(mock.fail('GET', '/postcode-lookup', 422, { message: TEXT.postcodeInvalid }));
       const refused = apiMock.waitForResponse('GET', '/postcode-lookup');
       await billing.country.input.selectOption('DE');
-      expect((await refused).response.status()).toBe(422);
+      expect((await refused).response.status(), 'the lookup refuses the postcode for the new country').toBe(422);
       await expect(billing.lookupError).toHaveText(TEXT.postcodeInvalid);
 
       // And back: a good answer clears the error and fills the address again.
       await apiMock.use(mock.respond('GET', '/postcode-lookup', { ...POSTCODE_LOOKUP_RESULT, city: 'Backstad' }));
       const found = apiMock.waitForResponse('GET', '/postcode-lookup');
       await billing.country.input.selectOption('NL');
-      expect((await found).response.status()).toBe(200);
+      expect((await found).response.status(), 'the lookup finds the address for the original country').toBe(200);
       await expect(billing.lookupError).toBeHidden();
       await expect(billing.city.input).toHaveValue('Backstad');
     });
@@ -118,7 +118,7 @@ test.describe('Checkout: billing address step', () => {
       const { status } = await billing.lookUp({ ...fakeAddress(), postalCode: '12' });
       await billing.completeAddress(fakeAddress());
 
-      expect(status).toBe(422);
+      expect(status, 'the lookup refuses the postcode').toBe(422);
       await expect(billing.lookupError).toHaveText(TEXT.postcodeInvalid);
       await expect(billing.proceedButton, 'BUG-40: Proceed stays disabled while the postcode is malformed').toBeDisabled({ timeout: BUG_TIMEOUT });
     });
@@ -169,7 +169,7 @@ test.describe('Checkout: billing address step', () => {
     test('the shopper is told and can type the address', async ({ checkout }) => {
       const { status } = await checkout.billing.lookUp(fakeAddress());
 
-      expect(status).toBe(404);
+      expect(status, 'the lookup finds nothing').toBe(404);
       await expect(checkout.billing.lookupError).toHaveText(TEXT.notFound);
       await checkout.billing.completeAddress(fakeAddress());
       await expect(checkout.billing.proceedButton).toBeEnabled();
@@ -182,7 +182,7 @@ test.describe('Checkout: billing address step', () => {
     test('the error is shown and the address can still be typed', async ({ checkout }) => {
       const { status } = await checkout.billing.lookUp(fakeAddress());
 
-      expect(status).toBe(500);
+      expect(status, 'the lookup fails').toBe(500);
       await expect(checkout.billing.lookupError).toHaveText(TEXT.serverError);
       await checkout.billing.completeAddress(fakeAddress());
       await expect(checkout.billing.proceedButton).toBeEnabled();

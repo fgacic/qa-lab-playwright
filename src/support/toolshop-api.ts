@@ -1,4 +1,5 @@
 import { type APIRequestContext, type APIResponse } from '@playwright/test';
+import { SUITE_OWNED_NAME } from './catalog-terms';
 import { API_URL, IS_SELF_HOSTED } from './env';
 import { step } from './step';
 import { fakeAddress, type Customer } from './test-data';
@@ -110,7 +111,7 @@ export class ToolshopApi {
   }
 
   rentalProduct() {
-    return this.findProduct('rental', (p) => p.is_rental, { is_rental: 'true' });
+    return this.findProduct('seeded rental', (p) => p.is_rental && !SUITE_OWNED_NAME.test(p.name), { is_rental: 'true' });
   }
 
   @step('API: get product {0}')
@@ -288,6 +289,12 @@ export class ToolshopApi {
       }),
     );
     return response.json();
+  }
+
+  /** The back-office inbox (newest first, one page of it), as the admin whose token it is sees it. */
+  async listMessages(token: string): Promise<{ name: string }[]> {
+    const response = await this.read(() => this.request.get(`${API_URL}/messages`, { headers: { authorization: `Bearer ${token}` } }));
+    return (await response.json()).data;
   }
 
   @step('API: send a contact message')

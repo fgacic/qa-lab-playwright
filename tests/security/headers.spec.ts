@@ -3,6 +3,7 @@ import { apiOnlyTest as test, expect } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { skipIfChallengedResponse } from '@support/bot-challenge';
 import { API_URL, BASE_URL } from '@support/env';
+import { hstsMaxAge, isNosniff, keepsReferrerPrivate, limitsScripts, MIN_HSTS_MAX_AGE_SECONDS, restrictsFraming, SAFE_REFERRER_POLICIES, switchesOff, UNSAFE_SCRIPT_SOURCES } from '@support/security-headers';
 import { httpsUrl } from '@support/urls';
 
 /**
@@ -16,55 +17,30 @@ import { httpsUrl } from '@support/urls';
  * site would send, not just that the header exists. Plain HTTP, no browser: the file runs on the browserless `apiOnlyTest`,
  * and a challenge is recognised by Cloudflare's `cf-mitigated: challenge` response header.
  *
- * Defect ids: SEC-01..06 are the pins below; the next free one is SEC-14 (the registry in docs/COVERAGE.md is the source).
+ * Defect ids: SEC-01..06 are the pins below; the next free one is SEC-15 (the registry in docs/COVERAGE.md is the source).
+ * What counts as a good header value is judged by the matchers in src/support/security-headers.ts, which
+ * tests/security/header-matchers.spec.ts runs offline on sample values, on the gate.
  *
  * The whole file is `@live-only`: it never runs on the CI gate, which is the self-hosted target (the nginx there is ours, not the
  * product's). It runs in the nightly live run only, so a change here is not exercised by a pull request.
  */
-
-/** The directives of a Content-Security-Policy, by name (lower-cased), each with its source list. */
-function directivesOf(policy: string): Map<string, string[]> {
-  const directives = new Map<string, string[]>();
-  for (const part of policy.split(';')) {
-    const [name, ...sources] = part.trim().split(/\s+/);
-    if (name && !directives.has(name.toLowerCase())) directives.set(name.toLowerCase(), sources);
-  }
-  return directives;
-}
-
-/** Sources that make a script-governing directive limit nothing: inline script, any origin, or script in a data: URL. */
-const UNSAFE_SCRIPT_SOURCES = ["'unsafe-inline'", '*', 'data:'];
-
-/** Strict-Transport-Security max-age (seconds) of at least 180 days, the lower bound Mozilla's web security guidelines call acceptable. */
-const MIN_HSTS_MAX_AGE_SECONDS = 15_552_000;
-
-/** The max-age of a Strict-Transport-Security value, in seconds; 0 when it has none. */
-function hstsMaxAge(value: string): number {
-  return Number(/(?:^|;)\s*max-age\s*=\s*"?(\d+)"?/i.exec(value)?.[1] ?? 0);
-}
-
-/** Referrer policies that never send the full URL to another origin. A comma list is a fallback chain: the last one the browser knows wins. */
-const SAFE_REFERRER_POLICIES = ['no-referrer', 'same-origin', 'strict-origin', 'strict-origin-when-cross-origin'];
 
 const expected: { id: string; header: string; ok: (value: string) => boolean; accepts: string; why: string }[] = [
   {
     id: 'SEC-01',
     header: 'content-security-policy',
     // A policy that names no script source limits nothing, and one that allows inline script does not stop injected script.
-    // A bare "*" allows scripts from anywhere, and "data:" lets a payload carry its own script: neither limits where scripts load from.
-    ok: (value) => {
-      const directives = directivesOf(value);
-      const scripts = directives.get('script-src') ?? directives.get('default-src');
-      return !!scripts && !scripts.some((source) => UNSAFE_SCRIPT_SOURCES.includes(source.toLowerCase()));
-    },
+    // A bare "*" (or "https:", "http:") allows scripts from anywhere, "data:" lets a payload carry its own script, and 'unsafe-eval'
+    // turns text into code: none of them limits where scripts come from (UNSAFE_SCRIPT_SOURCES).
+    ok: limitsScripts,
     accepts: `a default-src or script-src, and none of ${UNSAFE_SCRIPT_SOURCES.join(', ')} in the one that governs scripts`,
     why: 'no Content-Security-Policy that limits where scripts may load from',
   },
-  { id: 'SEC-03', header: 'x-content-type-options', ok: (value) => /^nosniff$/i.test(value.trim()), accepts: 'nosniff', why: 'no X-Content-Type-Options: nosniff' },
+  { id: 'SEC-03', header: 'x-content-type-options', ok: isNosniff, accepts: 'nosniff', why: 'no X-Content-Type-Options: nosniff' },
   {
     id: 'SEC-04',
     header: 'referrer-policy',
-    ok: (value) => SAFE_REFERRER_POLICIES.includes(value.split(',').pop()!.trim().toLowerCase()),
+    ok: keepsReferrerPrivate,
     accepts: `one of ${SAFE_REFERRER_POLICIES.join(', ')}`,
     why: 'no Referrer-Policy that keeps the full URL from other origins',
   },
@@ -102,11 +78,8 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
 
     const frameOptions = (headers['x-frame-options'] ?? '').trim();
     const policy = headers['content-security-policy'] ?? '';
-    // Either header is enough, and each is judged on its own value: a "deny" inside a CSP is not an X-Frame-Options.
-    const byFrameOptions = /^(deny|sameorigin)$/i.test(frameOptions);
-    const byPolicy = /(?:^|;)\s*frame-ancestors\s+(?!\*)\S/i.test(policy);
 
-    expect(byFrameOptions || byPolicy, `SEC-02: neither X-Frame-Options ("${frameOptions}") nor CSP frame-ancestors ("${policy}") restricts framing`).toBe(true);
+    expect(restrictsFraming({ frameOptions, policy }), `SEC-02: neither X-Frame-Options ("${frameOptions}") nor CSP frame-ancestors ("${policy}") restricts framing`).toBe(true);
   });
 
   test('the API does not disclose its server version', async ({ request }) => {
@@ -122,7 +95,7 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
 // Not pins, so a describe of their own without @bug (verify-bugs.mjs treats every @bug test as a pin that must fail).
 test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['@security', '@live-only'] }, () => {
   // The checks below are not pins: nothing is known about the live site's answer yet, so each states the behaviour a
-  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-14) then.
+  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-15) then.
   // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
 
   test('every cookie the shop and its API set, if any, is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
@@ -160,7 +133,7 @@ test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['
 
     const policy = headers['permissions-policy'] ?? '';
     for (const feature of ['camera', 'microphone', 'geolocation']) {
-      expect.soft(policy, `Permissions-Policy turns ${feature} off (sent "${policy}")`).toMatch(new RegExp(`(^|,)\\s*${feature}=\\(\\)`));
+      expect.soft(switchesOff(policy, feature), `Permissions-Policy turns ${feature} off (sent "${policy}")`).toBe(true);
     }
   });
 });

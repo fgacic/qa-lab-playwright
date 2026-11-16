@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
-import { brand, category, product } from '@support/admin-payloads';
+import { brand, category, product, spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
@@ -95,7 +95,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     await expect(form.chrome.id).toHaveValue(backOffice.product.id);
     await expect(form.name).toHaveValue(backOffice.product.name);
     await expect(form.price).toHaveValue(String(backOffice.product.price));
-    await expect(form.specRows.filter({ hasText: 'Weight' })).toContainText('340');
+    await expect(form.specRows.filter({ hasText: spec.spec_name })).toContainText(spec.spec_value);
   });
 
   test('an edited product is saved with the change', async ({ adminProducts, backOffice, apiMock }) => {
@@ -162,7 +162,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   test.describe('when saving is rejected', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('POST', '/products', 422, { message: 'The given data was invalid.', errors: { name: ['The name has already been taken.'] } })));
 
-    test('the API error is shown', async ({ adminProducts }) => {
+    test('a refused new product shows the API\'s reason and is not reported as saved', async ({ adminProducts }) => {
       const form = await adminProducts.add();
 
       await form.fillIn(newProduct);
@@ -172,4 +172,27 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
       await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeHidden();
     });
   });
+
+  for (const status of [409, 500]) {
+    test.describe(`when saving an edited product is refused (${status})`, { tag: ['@negative'] }, () => {
+      test.use(withMocks(mock.fail('PUT', PRODUCT, status, { message: 'The product could not be saved.' })));
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+      test('the failure is shown and nothing is reported as saved', async ({ adminProducts, backOffice, apiMock }) => {
+        const form = await adminProducts.edit(backOffice.product.id);
+        await expect(form.name).toHaveValue(backOffice.product.name);
+        // Stock, brand, category and image are not loaded by the edit form (ADM-05, ADM-09): filled in, so that only the refusal can stop the save.
+        await form.stock.fill('7');
+        await form.chooseRelations();
+        const refused = apiMock.waitForResponse('PUT', PRODUCT);
+
+        await form.price.fill('19.99');
+        await form.chrome.save();
+        expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
+
+        await expect(form.chrome.failure).toBeVisible();
+        await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeHidden();
+      });
+    });
+  }
 });

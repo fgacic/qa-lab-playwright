@@ -50,6 +50,7 @@ const config = defineConfig({
   fullyParallel: true,
   forbidOnly: isCI,
   // A target that went down fails every test the same way: stop a CI shard after this many failures instead of burning its 30 minutes.
+  // scripts/verify-bugs.mjs overrides it with `--max-failures=0`: there every reproducing pin is a failure, and more than 30 must still run.
   maxFailures: isCI ? 30 : 0,
   // Refuses to start against a target that is not answering (src/support/preflight.ts).
   globalSetup: './src/support/preflight.ts',
@@ -125,6 +126,8 @@ const config = defineConfig({
       use: { ...devices['Desktop Chrome'], trace: 'off', video: 'off' },
       grep: perfOnly, grepInvert: notOnThisTarget, fullyParallel: false,
       workers: 1,
+      // No retry: each budget is the median of 5 runs, which already absorbs one slow sample, and a retry would hide a real regression.
+      retries: 0,
     },
     // Screenshots: only inside the Playwright image (scripts/visual.sh), against our own Toolshop.
     ...(IN_PLAYWRIGHT_IMAGE && IS_SELF_HOSTED

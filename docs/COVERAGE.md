@@ -23,7 +23,7 @@ real account on a public shop.
 Locators: the suite uses roles and labels first. The **Locator** column shows what the spec uses, and
 the data-test id in brackets where the role is not unique enough.
 
-**Console guard.** Every test of the browser projects also fails if the page logged a `console.error` or threw an uncaught error that is not allowed. What is allowed suite-wide is in `src/support/console-guard.ts`, each entry with its reason: (1) the pinned defects' own logs, each only on the route of the page that raises it (BUG-02, BUG-37, BUG-38, BUG-47, BUG-54, SEC-13, ADM-21: the same TypeError on another page still fails); (2) the "Unauthorized" the shop logs when an anonymous page load asks `GET /users/me`, allowed only in a test whose browser received a 401 for that request (read from the response, so it holds in Chromium, Firefox and WebKit, which word the log differently; the SPA shares one request between subscribers that each log it, so it is not one log per 401); (3) the 404 and the 500 "Product with ID … not found" for an unknown product id, on the product page only; (4) a request WebKit cancels when the page moves on. The browser's own "Failed to load resource" for an API call is allowed only for the statuses the suite expects (401, 404, 409, 422) or an answer one of the test's own mocks gave (that status, or an abort of that path); a real 5xx, a refused connection, a broken image or script fails the test. A test that provokes an error on purpose declares it with `consoleGuard.allow(pattern, reason)`. Arguments are read through `consoleArgsText` (an Error by name and message, anything else as JSON), because the engines print an object differently. The guard found BUG-37, BUG-38, BUG-47, BUG-54 and SEC-13.
+**Console guard.** Every test of the browser projects also fails if the page logged a `console.error` or threw an uncaught error that is not allowed. What is allowed suite-wide is in `src/support/console-guard.ts`, each entry with its reason: (1) the pinned defects' own logs, each only on the route of the page that raises it (BUG-02, BUG-37, BUG-38, BUG-47, BUG-54, SEC-13, ADM-21: the same TypeError on another page still fails); (2) the "Unauthorized" the shop logs when an anonymous page load asks `GET /users/me`, allowed only in a test whose browser received a 401 for that request (read from the response, so it holds in Chromium, Firefox and WebKit, which word the log differently; the SPA shares one request between subscribers that each log it, so it is not one log per 401); (3) the 404 and the 500 "Product with ID … not found" for an unknown product id, on the product page only; (4) a request WebKit cancels when the page moves on. The browser's own "Failed to load resource" for an API call is allowed only when the browser received a response of a status the suite expects (401, 404, 409, 422) for that very path (read from the responses, so a console line alone, with no such answer behind it, is not enough), or an answer one of the test's own mocks gave (that status, or an abort of that path); a real 5xx, a refused connection, a broken image or script fails the test. A test that provokes an error on purpose declares it with `consoleGuard.allow(pattern, reason)`. Arguments are read through `consoleArgsText` (an Error by name and message, anything else as JSON), because the engines print an object differently. The guard found BUG-37, BUG-38, BUG-47, BUG-54 and SEC-13.
 
 ## Header and global navigation
 
@@ -40,6 +40,7 @@ the data-test id in brackets where the role is not unique enough.
 | Language switcher: list of 7 (the count is asserted as the literal 7, and the languages are iterated by key) | button / menu "Select language" | – | yes | n/a | n/a | n/a | navigation/language | covered |
 | Switch to de, el, en, es, fr, nl, tr | menuitem "DE"... | – | yes (×7) | n/a | n/a | n/a | navigation/language | covered |
 | Language persists across reload and routes (the header text and `html[lang]` both) | `localStorage.language` | – | yes | n/a | n/a | n/a | navigation/language | covered |
+| A translation file that fails to load (the German file answers 500): the shop should say so; it stays in English with no message, while the switcher and `html[lang]` already say German | button "Select language", the page | GET /assets/i18n/de.json (mocked 500) | n/a | yes | yes (500) | n/a | navigation/language-load | bug found (BUG-63) |
 
 ## Routing
 
@@ -92,6 +93,7 @@ the data-test id in brackets where the role is not unique enough.
 | Pagination: Next, Previous, Previous from page 2 back to page 1, page number, last page; Previous and Next from a middle page; a reload on a later page starts again at page 1; a search result that spans pages asks the search for the next page of the same term (mocked) | buttons "Next", "Previous", "Page-N" | QUERY /products `{page}` | yes | yes | n/a | yes (single page: no pagination) | catalog/pagination | covered |
 | Pagination: the current-page marker (the `active` class on the list item) follows the page; a sort or filter change restarts at page 1 | list item around "Page-N" | QUERY /products `{page}` | yes | yes (the marker after a reset from a later page) | n/a | n/a | catalog/pagination | bug found (BUG-33) |
 | Pagination end buttons disabled for assistive tech | button "Previous" | – | n/a | yes | n/a | n/a | catalog/pagination | bug found (A11Y-03) |
+| A search that spans several pages ("er", 26 matches over 3 pages), in plain HTTP: every match is listed once, on one page, and the pages hold what the first page counted; and the later pages, asked of `/products` as the shop asks them, should hold the same products (they come from the list that leaves the rentals out, so the pager counts them and the last page comes up short) | – | QUERY /products/search `{q, page}`, QUERY /products `{q, page}` | yes | yes | n/a | n/a | catalog/search-paging (`@api`) | bug found (BUG-61) |
 
 ## Category pages and rentals
 
@@ -100,8 +102,9 @@ the data-test id in brackets where the role is not unique enough.
 | /category/hand-tools, power-tools, other (one test per claim: the category's products; its subcategories' products and nothing from elsewhere; every product of its subcategories; a card's picture is checked on every category) | `[page-title]`, grid | QUERY /products `{by_category_slug}` | yes (×9) | n/a | yes | yes (special-tools) | catalog/category-pages | bug found (BUG-04) |
 | On a category page: sorting keeps it to that category, the pager shows the next page of that category, the filter panel narrows that category | combobox "sort", buttons "Next", checkboxes | QUERY /products `{by_category_slug}` | yes (×3) | n/a | n/a | n/a | catalog/category-pages | covered |
 | A parent category's total equals the sum of its subcategories' | grid, API totals | QUERY /products `{by_category_slug}` | yes | n/a | n/a | n/a | catalog/category-pages | covered |
+| Each parent category lists the products of its subcategories, and nothing from elsewhere, on every page of the list (plain HTTP, no page opened) | – | QUERY /products `{by_category_slug, page}` | yes (×3) | n/a | n/a | n/a | catalog/category-contents (`@api`) | covered |
 | Unknown category slug | `[page-title]` | QUERY /products | n/a | yes | n/a | n/a | catalog/category-pages | bug found (BUG-06) |
-| Rentals list | heading "Rentals", `[product-<id>]` | QUERY /products `{is_rental}` | yes | n/a | yes | yes | catalog/rentals | bug found (BUG-07, BUG-08) |
+| Rentals list (only the seeded rentals are compared: a rental another worker made for its own test, named "QaLab …" or "Qa Lab …", is left out, because the back-office and stored-XSS specs make such rentals and the rentals page is the one list that shows them) | heading "Rentals", `[product-<id>]` | QUERY /products `{is_rental}` | yes | n/a | yes | yes | catalog/rentals | bug found (BUG-07, BUG-08) |
 | Rental detail (no quantity picker) | heading, button "Add to cart" | GET /products/{id} | yes | n/a | n/a | n/a | catalog/rentals | covered |
 | A rental goes into the cart as one unit of that product (the request body is asserted) | button "Add to cart" | POST /carts/{id} | yes | n/a | n/a | n/a | catalog/rentals | covered |
 
@@ -116,6 +119,7 @@ the data-test id in brackets where the role is not unique enough.
 | Comparison table rows (price, brand, category, availability, CO₂) | table "Product Comparison", rowheaders | POST /graphql | yes | n/a | yes | yes | catalog/compare | bug found (BUG-09) |
 | Show differences only | checkbox "Show differences only" | – | yes | n/a | n/a | n/a | catalog/compare | bug found (BUG-12) |
 | Remove one product; Clear All; Browse Products | buttons by name, link "Browse Products" | – | yes | yes (empty state) | n/a | n/a | catalog/compare | covered |
+| A rental in the comparison has a column of its own with its price, brand and category, and is not called "Out of Stock" (the API marks the seeded rentals `in_stock: false`; the rentals page and the rental's own page offer them for hire) | table "Product Comparison", cells | POST /graphql | yes | yes | n/a | n/a | catalog/compare | bug found (BUG-60) |
 
 ## Product detail
 
@@ -127,6 +131,7 @@ the data-test id in brackets where the role is not unique enough.
 | Add to cart, toast, header count | button "Add to cart" | POST /carts, POST /carts/{id} | yes | n/a | yes (500, abort) | n/a | product/product-detail | bug found (BUG-10) |
 | Add to favourites (signed out: a mocked 401 / in: the request body is asserted and the confirmation shown / duplicate) | button "Add to favourites" | POST /favorites | yes (mocked session) | yes (401 mocked, 422) | n/a | n/a | product/product-detail | covered |
 | Related products (a related product is matched by id and opens its own page) | links with an h5 | GET /products/{id}/related | yes | n/a | yes (500: BUG-43) | yes | product/product-detail | bug found (BUG-43) |
+| An id no product has: the product answers 404 and its related products should too (they answer 500 with an HTML error page), in plain HTTP | – | GET /products/{id}, GET /products/{id}/related | n/a | yes | n/a | n/a | product/product-related (`@api`) | bug found (BUG-62) |
 | Out-of-stock state | text "Out of stock", disabled controls | – | n/a | yes | n/a | n/a | product/product-detail | covered |
 | ECO badge | `[eco-badge]` | – | yes | n/a | n/a | n/a | product/product-detail | covered |
 
@@ -204,6 +209,7 @@ Add to cart and cart edits create **anonymous carts**, on the live site too: an 
 | Registration: password rules, reveal (the page says at least 8 characters, the validation message "minimal 6") | list items, unnamed button | – | yes | yes (the two disagree) | n/a | n/a | auth/register | bug found (BUG-31) |
 | Registration: password length pairs: 5, 6 and 7 characters are rejected by the form (nothing is sent), 8 is accepted | textbox "Password" | POST /users/register (mocked 201 for the 8) | yes (8) | yes (×3) | n/a | n/a | auth/register | covered |
 | Registration: postcode lookup | labels | GET /postcode-lookup (mocked) | yes | n/a | n/a | n/a | auth/register | covered |
+| Registration: a postcode lookup that fails (500): the address stays as typed and the form is still usable | labels | GET /postcode-lookup (mocked 500) | n/a | n/a | yes (500) | n/a | auth/register | covered |
 | Registration submit: body, redirect to login; Enter in the email field submits | – | POST /users/register (mocked 201) | yes | yes (422 duplicate) | yes (500) | n/a | auth/register | covered |
 | Registration submitted with Enter in the password field of a completely filled form | textbox "Password" | POST /users/register (mocked) | n/a | yes | n/a | n/a | auth/register | bug found (BUG-36) |
 | Registration → login → account area | – | mocked register, login, me | yes | n/a | n/a | n/a | auth/registration-flow | covered |
@@ -222,6 +228,7 @@ Mocked session (fake JWT + mocked `GET /users/me`) unless marked gated.
 | Invoices list and invoice details; an account with no invoices (no rows, no failure notice, and the page should say so) | table rows, link "Details" | GET /invoices, GET /invoices/{id} | yes | n/a | yes | yes | account/account-area | bug found (BUG-24, BUG-48) |
 | Invoice "Download PDF" | button "Download PDF" | GET /invoices/{n}/download-pdf | yes (present) | – | – | – | account/account-area | blocked: the PDF is generated asynchronously by the real backend; mocking it would only test the mock |
 | Messages list, details, reply; a list that fails to load (500) and a reply the API refuses (500) | rows, link "Details", textbox "Message" | GET /messages, GET /messages/{id}, POST /messages/{id}/reply | yes | n/a | yes (500 on the list, 500 on the reply) | yes | account/account-area | bug found (BUG-49, BUG-50) |
+| A refused session: a 401 on an authenticated account call (the token the shop no longer accepts) should send the customer to the login page and drop the session. The SPA sends them to `/#/auth/login`, which is not a route (home renders, the customer stays "signed in"), and leaves the refused JWT in storage with the account menu in the header | URL, `localStorage`, `[nav-menu]` | GET /invoices (mocked 401) | n/a | yes (×2) | yes (401) | n/a | account/account-area | bug found (BUG-56, BUG-57) |
 | Profile shows the account's own details, update (the email is read-only) | labels, button "Update Profile" | GET /users/me, PUT /users/{id} | yes | yes (empty first name, malformed phone) | yes (422, 500 and a network abort on PUT /users/{id}: the failure is shown, not a success) | n/a | account/account-area | covered |
 | Change password: success feedback, empty form, a confirmation that differs (the API's reason is shown, no success notice), a wrong current password; answering the request raises no application error | textboxes by name, button "Change Password" | POST /users/change-password | yes (success feedback) | yes (empty form, mismatch; 400 and 422 from the API) | yes (500: the failure is shown; a network abort: not reported, BUG-51) | n/a | account/account-area | bug found (BUG-26, BUG-47, BUG-51) |
 | Profile page raises no application error (the QR code widget) | – | POST /totp/setup (mocked) | n/a | yes | n/a | n/a | account/account-area | bug found (BUG-37) |
@@ -236,7 +243,9 @@ Mocked session (fake JWT + mocked `GET /users/me`) unless marked gated.
 | Required fields (5) | labels, `[<field>-error]` | – | n/a | yes | n/a | n/a | contact/contact | covered |
 | Email format, message < 50 characters (49 refused, exactly 50 accepted) | labels | POST /messages (mocked, for the 50) | yes (50) | yes (×2) | n/a | n/a | contact/contact | covered |
 | Attachment: not empty, not .txt, empty .txt accepted | "Attachment", `[attachment-error]` | – | yes | yes (×2) | n/a | n/a | contact/contact | covered |
-| Send: request body and confirmation | button "Send", alert | POST /messages | yes (real on self-hosted, fake example.com sender; mocked 201 on every target) | n/a | yes (500, 422, abort) | n/a | contact/contact | bug found (BUG-21, BUG-22) |
+| Send: request body, confirmation, and the form replaced by the thanks (nothing typed stays for a second message) | button "Send", alert | POST /messages | yes (real on self-hosted, fake example.com sender; mocked 201 on every target) | n/a | yes (500, 422, abort) | n/a | contact/contact | bug found (BUG-21, BUG-22) |
+| A message of only spaces (60 of them pass the 50-character minimum): the form should refuse it and send nothing | textbox "Message" | POST /messages (mocked 201) | n/a | yes | n/a | n/a | contact/contact | bug found (BUG-58) |
+| A double-click on Send while the request is open (the answer is held back 500 ms): one message should be sent | button "Send" | POST /messages (mocked 201, delayed) | n/a | yes | n/a | n/a | contact/contact | bug found (BUG-59) |
 
 ## Widgets
 
@@ -244,17 +253,21 @@ Mocked session (fake JWT + mocked `GET /users/me`) unless marked gated.
 |---|---|---|---|---|---|---|---|---|
 | Chat: open, greeting, menu, close; Enter in the message box sends it; Escape closes the window | buttons "Open chat", "Close chat" | – | yes | yes (Escape) | n/a | n/a | widgets/chat | bug found (BUG-45: Escape does not close the chat) |
 | Chat: Find a product (a real `@self-hosted` test, and a mocked one with product cards that runs everywhere) | textbox "Message", button "Send message", `[chat-product]` | QUERY /products/search | yes (×2) | n/a | yes | yes | widgets/chat | bug found (BUG-25) |
-| Chat: Order a product, Checkout (empty cart), Back to menu (appends a second greeting and menu) | buttons by name | – | yes | yes | n/a | n/a | widgets/chat | covered |
+| Chat: Checkout (empty cart), Back to menu (appends a second greeting and menu) | buttons by name | – | yes | yes | n/a | n/a | widgets/chat | covered |
+| Chat: Order a product past the prompt: a search term lists the matches, then the chosen product and quantity are summarised | buttons and textbox by name | QUERY /products/search (mocked) | yes | n/a | n/a | n/a | widgets/chat | covered |
 | Chat: support ticket (name, email, subject, message, skip attachment); email and message-length validation; a re-asked prompt is counted | buttons and textbox | POST /messages (mocked) | yes | yes (×2) | n/a | n/a | widgets/chat | covered |
 | Chat: a ticket the API refuses (500) says it was not submitted, with the reason, and not that it was | transcript | POST /messages (mocked 500) | n/a | yes | yes (500) | n/a | widgets/chat | covered |
 | Chat: a ticket whose request is aborted shows the literal text "true" after "There was an error submitting your ticket:" | transcript | POST /messages (mocked abort) | n/a | yes | yes (abort) | n/a | widgets/chat | bug found (BUG-55) |
 | Chat: file attachment | `[chat-file-input]` | – | – | – | – | – | – | blocked: only reachable at the end of the ticket flow; the upload goes to the real messages API |
 | Live activity: open (the real feed's window is visible), counters, the "Live" state while the feed is connected, close | button "Show live shop activity", `[live-activity-*]` | GET /sales-stream (SSE, mocked) | yes | n/a | n/a | yes | widgets/live-activity | covered |
 | Live activity: feed unreachable; the feed drops, then reconnects | `[live-activity-*]` | GET /sales-stream (SSE, mocked) | n/a | n/a | yes (unreachable, drop then reconnect) | n/a | widgets/live-activity | covered |
+| Live activity: one event that is not valid JSON: the sale after it is still listed and the counters count only the valid one | `[live-activity-item]` | GET /sales-stream (SSE, mocked) | n/a | yes | n/a | n/a | widgets/live-activity | covered |
 | Live activity: incoming sales listed (built by a `fakeSale` factory), totals add up | `[live-activity-item]` | GET /sales-stream (mocked) | yes | n/a | n/a | n/a | widgets/live-activity | covered |
 | Live activity: a sale that takes the last of a product (`sold_out`, `remaining_stock`) is marked as sold out, and only that one | `[live-activity-item]` | GET /sales-stream (mocked) | yes | yes (the other sales are not marked) | n/a | n/a | widgets/live-activity | covered |
 
 ## Back office (admin)
+
+The admin helpers the mocked specs share live in `src/support` (the payloads in `admin-payloads.ts`, and `admin-deletable.ts`, which says which entities the back office can delete), next to the page objects they feed.
 
 **Two layers, and what each one proves.** The *mocked* specs (`tests/admin`, run everywhere) sign in
 with a fake admin JWT and answer every admin endpoint from `fixtures/admin.ts`. The responses are
@@ -282,20 +295,23 @@ admin of the self-hosted Toolshop in every CI run; on the live site they are gat
 | Delete (products, brands, categories, users; `AdminTable.delete` answers a confirm dialog if one opens) | button "Delete" | DELETE /{entity}/{id} | yes (×4) | yes (product, brand, category and user in use: 409, the reason is shown and the row stays) | yes (×4: a 500 is shown and the row stays) | n/a | admin/delete (table-driven over the four entities: the delete, the 409 in use and the 500), delete-confirmation | bug found (ADM-02, pinned once per list: products, brands, categories, users; each also proves that dismissing the dialog sends no DELETE) |
 | Product form: add (the body carries the image field), required fields, CO₂, brand, category, image | labels | POST /products | yes | yes (required, text price, negative price) | yes (422) | n/a | admin/product-form | bug found (ADM-03, ADM-04) |
 | Product form: edit prefilled, save (a green edit asserts the PUT body and the confirmation; the stock and relations are pre-filled so ADM-05 and ADM-09 do not block it) | labels | GET /products/{id}, PUT /products/{id} | yes | n/a | n/a | n/a | admin/product-form | bug found (ADM-05) |
+| Product form: a save of an edit the API refuses (409, 500): the failure is shown and nothing is reported as saved | labels, alerts | PUT /products/{id} (mocked 409, 500) | n/a | n/a | yes (×2) | n/a | admin/product-form | covered |
 | Edit forms and detail pages whose record fails to load (product, brand, category, user, message: 500) | labels, alerts | GET /products/{id}, /brands/{id}, /categories/{id}, /users/{id}, /messages/{id} | n/a | n/a | yes (×5) | n/a | admin/product-form, admin/brands, admin/categories, admin/users, admin/messages | bug found (ADM-14: the form opens empty, with no message) |
-| Product specifications: list, add (the row shows the API's answer), remove; an add or remove the API refuses (500) | `[specs-table]`, `[spec-name]`… `[add-spec]`, button "×" | GET/POST/DELETE /products/{id}/specs | yes | n/a | yes (add: reported; remove: not, ADM-19) | n/a | admin/product-specs | bug found (ADM-19) |
+| Baseline of the "a failure is reported" pins: on a healthy product, brand, category and user form, message and order, the locator that finds the failure message (`reportedFailure`) matches nothing, so a pin cannot go green for the wrong reason | alerts | GET /products/{id}, /brands/{id}, /categories/{id}, /users/{id}, /messages/{id}, /invoices/{id} (mocked) | yes (×6) | n/a | n/a | n/a | admin/healthy-pages | covered |
+| Product specifications: list; add (the row shows the API's answer) and remove, each in a test of its own; an add or remove the API refuses (500) | `[specs-table]`, `[spec-name]`… `[add-spec]`, button "×" | GET/POST/DELETE /products/{id}/specs | yes (add, remove) | n/a | yes (add: reported; remove: not, ADM-19) | n/a | admin/product-specs | bug found (ADM-19) |
 | Product form: the rental and location-offer ticks and each CO₂ rating are sent in the body | checkboxes, combobox "CO₂ rating" | POST /products | yes | n/a | n/a | n/a | admin/product-form | covered |
 | Products list: each product with its stock status and price; search and Reset | table rows, textbox "Search …" | QUERY /products, /products/search | yes | n/a | n/a | n/a | admin/products | covered |
-| Brand form: add, edit, required name and slug; a save the API refuses (409) | labels, `[name-error]`, `[slug-error]` | POST /brands, PUT /brands/{id} | yes | yes (409 refused; a duplicate slug against the real API too) | n/a | n/a | admin/brands, admin-e2e/back-office.e2e | bug found (ADM-12) |
-| Category form: add under a parent (the body's `parent_id` is asserted), edit (the parent is preselected and `parent_id` sent), required fields; a save the API refuses (409) | combobox "Parent Id", labels | POST /categories, PUT /categories/{id} | yes | yes (409 refused) | n/a | n/a | admin/categories | bug found (ADM-12) |
+| Brand form: add, edit, required name and slug; a new brand the API refuses (409) and an edit it refuses (409, 500: ADM-23, nothing is reported) | labels, `[name-error]`, `[slug-error]` | POST /brands, PUT /brands/{id} | yes | yes (409 refused; a duplicate slug against the real API too) | n/a | n/a | admin/brands, admin-e2e/back-office.e2e | bug found (ADM-12, ADM-23) |
+| Category form: add under a parent (the body's `parent_id` is asserted), edit (the parent is preselected and `parent_id` sent), required fields; a new category the API refuses (409) and an edit it refuses (409, 500: ADM-23, nothing is reported) | combobox "Parent Id", labels | POST /categories, PUT /categories/{id} | yes | yes (409 refused) | n/a | n/a | admin/categories | bug found (ADM-12, ADM-23) |
 | Order: invoice, payment, billing, lines | textboxes by label, table | GET /invoices/{id} | yes | n/a | yes (500) | n/a | admin/orders | bug found (ADM-13: a failed load says "This invoice doesn't exist.") |
 | Order: update status (every status other than the current one, which cannot be reselected) | combobox "Status", button "Update status" | PUT /invoices/{id}/status | yes | n/a | yes (500, "not saved" shown) | n/a | admin/orders | covered |
 | User form: add (required fields; a new user is saved with what was entered), edit incl. Enabled and failed attempts; the password field is masked | labels | POST /users/register, PUT /users/{id} | yes (add, edit) | yes (required, email taken 422, a 422 on create) | n/a | n/a | admin/users | bug found (ADM-17, ADM-21: the password field is `type="text"`) |
+| User form: a taken email on an edit shows the API's reason; an edit the API refuses (409, 500) shows the failure and nothing is reported as saved | labels, alerts | PUT /users/{id} (mocked 409, 500) | n/a | yes | yes (×2) | n/a | admin/users | covered |
 | Message: read, status on change, reply (the reply shown is the refetched message's, not the typed text; the box is emptied) | combobox "Status", textbox "Reply message" | GET /messages/{id}, PUT …/status, POST …/reply | yes (reply confirmation) | yes (empty reply) | yes (a failed reply, a failed status save: neither is reported) | n/a | admin/messages | bug found (ADM-06, ADM-10, ADM-11) |
 | Statistics: 4 report tables | headings, tables | GET /reports/top10-…, customers-by-country, total-sales-per-country | yes | n/a | yes | yes | admin/reports-and-settings | bug found (ADM-15: failed requests leave empty tables with no message) |
 | Average sales per month / week: year picker, chart | combobox "Select year", `canvas` | GET /reports/average-sales-per-{month,week}?year= | yes (×2) | yes (current year) | n/a | n/a | admin/reports-and-settings | bug found (ADM-08) |
 | Settings: payment endpoint, geolocation (persists after a reload), CO₂ features, eco badge, save, clear storage; a non-URL endpoint | labels, buttons | – (localStorage) | yes | yes (non-URL endpoint) | n/a | n/a | admin/reports-and-settings | bug found (ADM-16: a non-URL endpoint is accepted and "Settings saved!" is shown) |
-| Settings take effect in the shop (CO₂ sort hidden) | combobox "sort" | – | yes | n/a | n/a | n/a | admin/reports-and-settings | covered |
+| Settings take effect in the shop (CO₂ sort hidden; the eco badge switched off removes it from an eco product) | combobox "sort", `[eco-badge]` | – | yes | n/a | n/a | n/a | admin/reports-and-settings | covered |
 | Order "add" route (/admin/orders/add) | – | – | – | – | – | – | – | blocked: no page links to it, and the API has no endpoint for an admin to create an order |
 | Real: product create → sold in the shop → repriced → deleted (the product is a rental, so the shop's default list never shows it to parallel specs, and the `createdProducts` fixture deletes it by its id in teardown, pass or fail; a user the form creates is removed by `createdUsers`; guest orders and contact messages cannot be deleted through the API and stay on the throwaway database, named "QaLab leftover" so they are told from anyone's data, which is why the self-hosted shop must be reseeded between local runs) | as above | real | yes | – | – | – | admin-e2e/back-office.e2e | covered (self-hosted) |
 | Real: a product with a short word in its name is found by full-name search | as above | QUERY /products/search | n/a | yes | – | – | admin-e2e/back-office.e2e | bug found (BUG-28) |
@@ -309,16 +325,16 @@ admin of the self-hosted Toolshop in every CI run; on the live site they are gat
 ## Accessibility
 
 An axe-core scan (`@axe-core/playwright` 4.14.0, tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`,
-`wcag22aa`) of 48 pages and states, in `tests/a11y` (`npm run test:a11y`):
+`wcag22aa`) of 55 pages and states, in `tests/a11y` (`npm run test:a11y`):
 
 - **Shop:** home, search results, empty search, product (in stock, out of stock), category, rentals,
-  comparison, and the cart with items (9).
+  comparison, the empty comparison, and the cart with items and the empty cart (11).
 - **Checkout:** sign-in, guest step with errors, billing, payment, and the order confirmation (a mocked order) (5).
-- **Forms and other pages:** login with errors, register with errors, forgot password, contact with
-  errors, chat open, privacy, unknown route (7).
-- **Account (mocked session):** 5 pages.
+- **Forms and other pages:** login with errors, register with errors, forgot password and its confirmation (mocked), contact with
+  errors, chat open, privacy, unknown route (8).
+- **Account (mocked session):** 5 pages, and the profile with its errors shown (6).
 - **Back office (mocked admin):** 16 pages and forms, the brand delete confirmation among them.
-- **Phone width (320 px, WCAG 1.4.10 reflow):** home and a product, and the mobile menu open (3). AX-13 shows again here; the language button is not scanned while the header is folded behind its toggler, and is once the menu is open.
+- **Phone width (320 px, WCAG 1.4.10 reflow):** home, a product, the cart, login and the checkout billing step, and the mobile menu open (6). AX-13 shows again here; the language button is not scanned while the header is folded behind its toggler, and is once the menu is open.
 - **Opened states:** the language menu, the add-to-cart toast on a product page, and the compare bar (3).
 
 Every scan waits for the page's fonts (`document.fonts.ready`) before it reads colours and sizes, so a late web font cannot change a contrast or target-size result. Every scan must give a `ready` step (the elements the page is about; the spec holds a per-page anchor table), and waits for it, so axe never runs on a half-rendered page; the spec runs with `reducedMotion: 'reduce'` set on the context, and the scan checks that it is, and the scan names come from one shared `ScanName` type. AX-04 and AX-10 are scanned in the states where they appear (login and registration with their errors shown). The element counts of AX-11 and AX-13 follow the shop's seed data, so they are compared exactly only on the self-hosted shop; elsewhere the violation must still be found where it was recorded and nowhere else. Every baseline id has a pin, and a test fails if one has none.
@@ -336,7 +352,7 @@ results (what axe could not decide), so a rule that goes quiet for lack of evide
   is updated. The decision (new, grown, shrunk, impact changed, fixed) is one pure function, `diffFindings` in `src/support/a11y-baseline.ts`, which the scan calls and `tests/framework` table-tests case by case. A fix therefore cannot go unrecorded. Each one (`nth-child` indices removed) has its own `knownBug` pin, anchored on
   the offending element, that turns red when it is fixed.
 - **Recording.** `A11Y_RECORD=<file>` makes every scan record its findings and assert nothing; the run says so loudly (an annotation on each test and a warning at the start), so a green recording is never read as a pass.
-- **The keyboard, which axe cannot see** (`tests/a11y/keyboard.a11y.spec.ts`, Chromium only, no baseline): the Tab order of the header, sort and search, of the login form and of the product page follows the reading order (WCAG 2.4.3); every header control, the first controls of the listing and the login form's fields, button and link draw a focus indicator (2.4.7), and a control check proves the indicator test tells a ring from a removed outline; the language and categories menus open with Enter, close with Escape and keep the focus on their button. Opening the chat with the keyboard leaves the focus on the page body: AX-14.
+- **The keyboard, which axe cannot see** (`tests/a11y/keyboard.a11y.spec.ts`, Chromium only, no baseline): the Tab order of the header, then the sort and the price range, then the search, of the login form and of the product page follows the reading order (WCAG 2.4.3), each stop held to the region it belongs to; every header control, the first controls of the listing and the login form's fields, button and link draw a focus indicator (2.4.7), and control checks prove the indicator test tells a ring from a removed outline, does not take another change of pixels (a hover, an animation) for a ring, and refuses to judge a region that changes on its own; the language and categories menus open with Enter, close with Escape and keep the focus on their button. Opening the chat with the keyboard leaves the focus on the page body: AX-14.
 - **Chromium only.** axe reads the accessibility tree the browser builds, and Firefox does not report
   AX-01. The baseline is kept for one engine.
 - **Scan settled states only.** A first baseline held six colour-contrast violations in the chat. They
@@ -349,9 +365,9 @@ results (what axe could not decide), so a rule that goes quiet for lack of evide
 
 | Status | Pages scanned | Distinct violations | Critical | Serious | Moderate | Minor |
 |---|---|---|---|---|---|---|
-| bug found (AX-01..AX-13) | 48 | 13 | 6 | 7 | 0 | 0 |
+| bug found (AX-01..AX-13) | 55 | 13 | 6 | 7 | 0 | 0 |
 
-AX-14 is not an axe finding: the keyboard checks found it (see above), and it has no baseline entry.
+AX-14 and AX-15 are not axe findings: the keyboard checks found AX-14 (see above), and the cart's width on a 320 px screen is AX-15, measured by comparing the page's scroll width with the viewport, because axe has no rule for reflow. Neither has a baseline entry.
 
 ## Visual regression
 
@@ -360,7 +376,7 @@ Chromium at 1280×800 with animations off. The baselines are recorded and compar
 freshly seeded self-hosted shop (two workers), so fonts, data and pixels match on every machine. The image is pinned by the digest of its linux/amd64 manifest and run as amd64 on every host, so an Apple Silicon Docker renders what CI renders. A colour counts as different from `threshold: 0.1` (Playwright's default is 0.2; 0.1 flags a real colour change and ignores anti-aliasing), and a screenshot may
 differ by at most 150 such pixels, an absolute budget, but only for the full-page shots: that budget would miss a changed price digit (a mutation proves it), so the price (a product's and the first card's), the out-of-stock label and the cart total are cropped shots with a budget of 0 pixels and a colour threshold of 0.
 
-**What the baselines cover.** One engine (Chromium), one theme (the shop has a single, light one), one language (English), one desktop width (1280×800) and one phone width (390×844, the home page only). A break that shows only in another engine, width or language is not seen here; the functional specs and the axe reflow check carry what they can of that. The baseline files are PNGs in the repository (23 files, about 6 MB); `npm run test:visual:update` runs `--update-snapshots=changed`, so a re-record rewrites only the shots whose pixels moved and the diff shows exactly which. Should the folder grow past a few tens of megabytes (it is about 6 MB today), move it to Git LFS; history is not migrated.
+**What the baselines cover.** One engine (Chromium), one theme (the shop has a single, light one), one language (English), one desktop width (1280×800) and one phone width (390×844, the home page only). A break that shows only in another engine, width or language is not seen here; the functional specs and the axe reflow check carry what they can of that. The baseline files are PNGs in the repository (25 files, about 6 MB); `npm run test:visual:update` runs `--update-snapshots=changed`, so a re-record rewrites only the shots whose pixels moved and the diff shows exactly which. Should the folder grow past a few tens of megabytes (it is about 6 MB today), move it to Git LFS; history is not migrated.
 Locale, time zone, colour scheme and reduced motion are pinned. Before the page shots every picture is loaded: the shop's grids use `loading="lazy"`, so the page's lazy images are made eager and the shot waits until each picture with a `src` is complete (`settleImages`, `src/support/visual.ts`), because a check that only looks at the pictures already requested passes before the lower ones are asked for. Masked: the product id on the admin form, the price
 slider, related products (the API picks them), the generated guest email, and the dashboard's canvas
 chart, which animates outside CSS. *Self-hosted only.*
@@ -371,12 +387,13 @@ chart, which animates outside CSS. *Self-hosted only.*
 | A price, the first card's price, the out-of-stock label and the cart total, each on its own with a 0 px budget and `threshold: 0` | `product-price.png`, `card-price.png`, `out-of-stock-label.png`, `cart-total.png` | visual/pages.visual | covered (self-hosted) |
 | Home on a phone, and home with an empty catalogue (mocked) | `home-phone.png`, `home-empty-catalogue.png` | visual/pages.visual | covered (self-hosted) |
 | Contact, login and registration with errors | `contact-errors.png`, `login-errors.png`, `register-errors.png` | visual/pages.visual | covered (self-hosted) |
+| The empty cart (mocked), and the guest checkout form with its errors | `cart-empty.png`, `checkout-guest-errors.png` | visual/pages.visual | covered (self-hosted) |
 | Cart with a product, checkout billing and payment steps | `cart.png`, `checkout-billing.png`, `checkout-payment.png` | visual/pages.visual | covered (self-hosted) |
 | Chat open | `chat.png` (the chat window only) | visual/pages.visual | covered (self-hosted) |
 | Account page (mocked session), admin dashboard, product form, orders list and an order (mocked admin) | `account.png`, `admin-dashboard.png`, `admin-product-form.png`, `admin-orders.png`, `admin-order.png` | visual/pages.visual | covered (self-hosted) |
 | Every baseline on disk belongs to a screenshot in the spec, whichever quoting style names it (an orphaned file fails) | – | visual/pages.visual | covered (self-hosted) |
 
-23 baselines, 24 tests.
+25 baselines, 26 tests.
 
 ## Translations (i18n)
 
@@ -412,8 +429,8 @@ Chromium only: translation files do not depend on the engine.
 | Check | Spec | Status |
 |---|---|---|
 | No leaked keys (32 visits × 7 languages) and no stray English (32 visits × 6 languages), one test per visit and language | i18n/completeness | covered (with the known items below excluded) |
-| Positive control: a key missing from the German file is reported as a leak, and a value left in English as stray English, so a green scan cannot mean a blind one | i18n/completeness | covered |
-| The seven translation files (`assets/i18n/<language>.json`) hold the same keys as English, compared with each other without opening a page | i18n/translation-files | bug found (I18N-27) |
+| Positive control: a key missing from the German file is reported as a leak (in text and in an `aria-label`), and a value left in English as stray English, so a green scan cannot mean a blind one | i18n/completeness | covered |
+| The seven translation files (`assets/i18n/<language>.json`) hold the same keys as English, no value is empty, and every language keeps the `{{ placeholders }}` of the English value, compared with each other without opening a page | i18n/translation-files | bug found (I18N-27, I18N-28) |
 | The key detector itself, on real page text (no false positives on emails, URLs, prices, abbreviations) | i18n/translation-keys | covered |
 | Untranslated areas, one pin per id and language | i18n/completeness | bug found (I18N-01..26) |
 | The forgot-password confirmation shows its raw key (I18N-23 is BUG-20 seen here: two pins, one defect, counted once) | auth/forgot-password, i18n/completeness | bug found (BUG-20, I18N-23) |
@@ -429,27 +446,31 @@ element exists, and that the payload comes back as text. A positive control inje
 into a page the way a vulnerable sink would and proves the sentinel catches it. It has a control for
 every payload (the three attacks, and their tagged-template forms for the address bar), for the
 element each one leaves behind (in iframes and shadow roots too, which `injectedCount` reaches), and for a dialog opened in the page, in a popup the page opened
-and in a tab of its own, so a payload that runs anywhere in the browser context is seen. Settling the page does not disarm an image still loading, and a control proves that. The visitor's own context, where a stored payload is shown to somebody else, has a sentinel and a control of its own. The payloads stay under 40
-characters, because the search drops longer terms (BUG-27).
+and in a tab of its own, so a payload that runs anywhere in the browser context is seen. Settling the page does not disarm an image still loading, and a control proves that. The visitor's own context, where a stored payload is shown to somebody else, has a sentinel and a control of its own. The basic payloads stay under 40
+characters, because the search drops longer terms (BUG-27); the attribute payloads are longer (up to 51), so the search is given only those that fit.
 
 | Input | Where it is shown | Target | Spec | Status |
 |---|---|---|---|---|
-| Search box (3 payloads) | search caption | both (read-only) | security/xss-reflected | covered |
+| Search box (3 payloads, and the attribute payloads that fit the box's 40 characters) | search caption | both (read-only) | security/xss-reflected | covered |
 | Chat "Find a product" (3 payloads) | chat transcript | both (read-only) | security/xss-reflected | covered |
 | Contact message (API) | admin inbox list and message page | self-hosted only | security/xss-stored | covered (self-hosted) |
 | Brand name (admin form) | admin brand list, the storefront's brand filter and the admin product form's brand list | self-hosted only | security/xss-stored | covered (self-hosted) |
 | First name at registration | header account menu after login | self-hosted only | security/xss-stored | covered (self-hosted) |
 | Contact form submission (guest, script tag included) | admin inbox | self-hosted only | security/xss-stored | covered (self-hosted) |
-| A product's name, in the picture's `alt` attribute and as text: an attribute payload that adds a focus handler, one that adds a `srcdoc`, a `javascript:` URL and an entity-encoded quote (4 payloads; the sentinel has a control for each, a vulnerable sink and a safe one) | storefront card and product page, in the text and in the attribute | self-hosted only | security/xss-stored | covered (self-hosted) |
+| A product's description (3 payloads), shown below the name on the product page and under the card on the rentals list | product page, rentals list | self-hosted only | security/xss-stored | covered (self-hosted) |
+| A customer's last name and street, saved on the profile | header account menu, profile fields | self-hosted only | security/xss-stored | covered (self-hosted) |
+| A product's name, in the picture's `alt` attribute (the rentals card's too) and as text: an attribute payload that adds a focus handler, one that adds a `srcdoc`, a `javascript:` URL and an entity-encoded quote (4 payloads; the sentinel has a control for each, a vulnerable sink and a safe one) | storefront card and product page, in the text and in the attribute | self-hosted only | security/xss-stored | covered (self-hosted) |
 | Route segment `/category/<payload>` (3 payloads, as tagged templates) | the page title: echoed, title-cased | both (read-only) | security/xss-reflected | covered |
 | Route segment `/product/<payload>` (3 payloads) | not echoed (nothing is shown of the id); must still not run | both (read-only) | security/xss-reflected | covered |
 | The sentinel itself (a control for every payload and its injected element, a dialog in the page, in a popup and in a tab, and an inline script that calls `alert` while the page loads, which proves the sentinel is installed before any page script) | – | both | security/xss-sentinel | covered |
-| Response headers: CSP (without `*` or `data:` sources), X-Frame-Options or CSP frame-ancestors, `nosniff`, Referrer-Policy, HSTS max-age of at least 15552000 s, Server (real values judged by matchers, not presence; a Cloudflare challenge skips instead of satisfying a pin) | – | live only (headers belong to the deployment) | security/headers | bug found (SEC-01..06) |
+| Response headers: CSP (without `*`, `data:`, `https:`, `http:` or `'unsafe-eval'` sources, which let scripts load from anywhere or turn text into code), X-Frame-Options or CSP frame-ancestors, `nosniff`, Referrer-Policy, HSTS max-age of at least 15552000 s, Server (real values judged by matchers, not presence; a Cloudflare challenge skips instead of satisfying a pin) | – | live only (headers belong to the deployment) | security/headers | bug found (SEC-01..06) |
 | Cookie flags (Secure, HttpOnly, SameSite; guarded, so a site with no cookie is not read as a pass), CORS with credentials from an unknown origin, Permissions-Policy for camera, microphone and geolocation (checks, not pins: a red nightly run is the finding) | – | live only | security/headers | covered |
+| The header matchers themselves (`directivesOf`, `limitsScripts`, `hstsMaxAge` and its 180-day bound, nosniff, Referrer-Policy, framing, Permissions-Policy), run offline on sample header values: what each refuses and what it accepts, and that the unsafe-source list is the one the pin quotes | – | offline (no site) | security/header-matchers (`@framework`) | covered |
 | Authorisation of the API: 401 without a token on `/users/me`, `/invoices`, `/favorites`, `/messages`, `/users` and the reports; 403 for a customer on the admin endpoints (users, three reports); another customer's invoice and account refused; DELETE of brands, categories and products refused | – | self-hosted only | security/authorization | covered (self-hosted) |
 | Forged tokens on an admin-only path (`GET /users`): the real admin token is accepted there, and a changed signature, an altered payload with the old signature, `alg: none` with and without a signature, a made-up unsigned admin token, text that is not a token, and a customer's token with its role changed to admin and the old signature are all refused | – | self-hosted only | security/authorization | covered (self-hosted) |
 | List scoping: a customer's `GET /invoices`, `/favorites` and `/messages` hold only their own rows (the other customer's records are made through the API and read back) | – | self-hosted only | security/authorization | covered (self-hosted) |
 | Role mass assignment: the admin can set a role through `PUT /users/{id}`, and a customer cannot make themselves an admin through their own profile (the role of a fresh sign-in is read from the token's claims) | – | self-hosted only | security/authorization | covered (self-hosted) |
+| Tokens after the session ended: a token is refused once its holder signed out; the token of an account the admin deleted should be too, and `/users/me`, the invoices, favourites, messages and refresh still accept it | – | self-hosted only | security/authorization | bug found (SEC-14) |
 | Authorisation of writes to other records: another customer's profile cannot be changed and their account cannot be deleted, their favourite survives a refused delete (and the customer can remove their own), an order's and a message's status cannot be set anonymously; every write is read back as the admin, and an admin control proves the same calls work for the admin | – | self-hosted only | security/authorization | covered (self-hosted) |
 | Who may set a status: a customer cannot set an order's or a message's status; and another customer's favourite is refused, not answered with a success | – | self-hosted only | security/authorization | bug found (SEC-10 orders, SEC-11 messages, SEC-12 favourites) |
 | Authorisation of the catalogue writes: create and update of a brand, category and product refused to an anonymous caller and to a customer | – | self-hosted only | security/authorization | bug found (SEC-07 brands, SEC-08 categories, SEC-09 products) |
@@ -457,7 +478,7 @@ characters, because the search drops longer terms (BUG-27).
 The header checks are soft: they are defence in depth, not functional defects, and the shop is a
 training site. They are pinned so that a header appearing turns the live run red.
 
-The authorisation specs write to our own database, so they run on the self-hosted shop only, once, in Chromium (`@api`: nothing in them depends on the browser). Every record they make, customers included, is created under a unique "Qa Lab Authz …" name through the admin's token and removed in teardown, pass or fail (a customer is found by email and deleted through `findUserByEmail`, registered before the sign-in so a failed sign-in still cleans up). Products are created as rentals, which the shop's default list never shows, so a record that exists for a moment cannot disturb the catalogue specs running in parallel.
+The authorisation specs write to our own database, so they run on the self-hosted shop only, once, in Chromium (`@api`: nothing in them depends on the browser). Every record they make, customers included, is created under a unique "Qa Lab Authz …" name through the admin's token and removed in teardown, pass or fail (a customer is found by email and deleted through `findUserByEmail`, registered before the sign-in so a failed sign-in still cleans up). Products are created as rentals, which the shop's default list never shows, so a record that exists for a moment cannot disturb the catalogue specs running in parallel. The lists that do show rentals (the rentals page, a search, the pick of "any rental") compare only the seeded products and leave out any named "QaLab …" or "Qa Lab …" (`SUITE_OWNED_NAME`). A cleanup that fails inside a pin is recorded as a `cleanup failed` annotation rather than lost.
 
 ## Performance
 
@@ -475,11 +496,12 @@ measure Cloudflare and the network, not the shop.
 
 How it is measured, so the numbers mean something:
 
-- in a `perf` project of its own, one worker, nothing else running;
+- in a `perf` project of its own, one worker, no retries (the median of 5 absorbs the noise a retry would hide), nothing else running;
 - 4× CPU throttling and a 40 ms, 10/5 Mbps network (a mid-range phone on a good connection), cache off, so every sample is a cold load;
 - the median of 5 fresh page loads per budget, each product sample starting from an empty cart (`freshCart`), so one sample's add to cart cannot change the next;
 - a test fails if no LCP or no interaction was observed, so an empty measurement can never pass;
 - a run that schedules `perf` next to another project is refused by the run-guard reporter;
+- a second control puts a click handler that blocks for a known time on a test page and requires the INP proxy to report at least that much, so an INP of 16 to 32 ms means "fast" and not "event timing not collected";
 - a control test runs a known 150 ms task before any interaction and requires the blocking time to count at least 100 ms of it, so the zeros reported for TBT mean "no long task" and not "observer asleep". (A task blocking inside `page.evaluate` is not reported as a long task by the browser, so the control runs it from a timer.)
 
 **Baseline limit, per environment.** The absolute budgets above only catch a gross regression, so each
@@ -487,29 +509,29 @@ budget also has a limit relative to a recorded baseline: the median plus a margi
 floor (LCP 100 ms, CLS 0.02, TBT 50 ms, INP proxy 32 ms; see `fixtures/performance.ts`); the margin is capped at 2 times that floor, so one noisy recording cannot widen the limit past meaning. `tests/performance/baseline.json` holds
 the medians and spreads in one set per environment: `ci` when `CI` is set, otherwise `local`, keyed by a hash of the CPU model and core count, because medians
 recorded on one machine mean nothing on another. The baseline is enforced only when an entry for the
-current environment exists. When none does, the test attaches the measured medians with an annotation saying so (on CI also a workflow warning), and the absolute budgets still apply. The baseline covers the LCP, TBT and (as noisy, so not enforced) INP of the five budget pages and the CLS of the four slow-API pages, the PERF-01 pages included: their CLS is ratcheted so a pinned page cannot get worse either.
+current environment exists. When none does, the test attaches the measured medians with an annotation saying so (on CI also a workflow warning), and the absolute budgets still apply. The baseline holds the LCP and TBT of the five budget pages and the CLS of the slow-API pages whose shift is steady (home, contact and the cart), the PERF-01 pages included: their CLS is ratcheted so a pinned page cannot get worse either. INP, and the product page's CLS, are too noisy to record.
 - `local`: `UPDATE_PERF_BASELINE=1 npx playwright test --project=perf --workers=1`, on an idle machine
   (the one-minute load average under 4 when the run begins). Recording is refused above that load, from a second worker, and from a run that failed.
 - `ci`: run the CI workflow by hand with the `record_perf_baseline` input. The `record-perf-baseline`
   job records it on a runner and uploads `baseline.json` as the `perf-baseline-ci` artifact; committing
   it back is a human step.
 
-Medians of 5 on the self-hosted shop, `local` baseline (recorded at a one-minute load average of 3.5 when the run began; the limit is 4): LCP 1.06–1.29 s (home 1248, search 1252, product 1288, cart 1064, contact 1056 ms), INP proxy
-16–32 ms, TBT 0. TBT stays at 0 even throttled (the first load has no long task above 50 ms), so that
-budget is weak on this app; the control above is what shows the collector would see one. CLS on the 500 ms API: home 0.258, product 0.316, contact 0.17, cart 0.107.
+Medians of 5 on the self-hosted shop, `local` baseline (recorded at a one-minute load average of 2.25 when the run began; the limit is 4): LCP 1.05–1.27 s (home 1240, search 1240, product 1272, cart 1052, contact 1048 ms), INP proxy
+16–32 ms (not recorded: too noisy to ratchet), TBT 0. The INP control, a click handler that blocks for 300 ms, reads 304 ms. TBT stays at 0 even throttled (the first load has no long task above 50 ms), so that
+budget is weak on this app; the control above is what shows the collector would see one. CLS on the 500 ms API: home 0.258, product 0.23–0.38 (too noisy across samples to be recorded, so the product page is held by its fixed ceiling, 0.38, alone), contact 0.17, cart 0.107.
 
-**Fixed ceilings, on every machine.** The CI baseline cannot be recorded without a push, so each measurement also has a fixed ceiling in `tests/performance/budgets.spec.ts` (`CEILING`) that holds with or without a recorded baseline, derived from the values above with the margin written next to it: LCP the recorded median times 1.5 rounded up to 50 ms (home and search 1900, product 1950, cart 1600, contact 1600 ms), TBT 100 ms (half the budget and twice the noise floor; recorded 0), the INP proxy 80 ms (2.5 times the highest recorded median, 32 ms, and 3 to 5 times the others; the budget is 200 ms), and CLS on the slow API the recorded median plus about 20% (home 0.31, product 0.38, contact 0.21, cart 0.13). On CI the time ceilings (LCP, TBT, INP, not CLS, which is a race with the network and not with the CPU) are multiplied by 1.5 until a `ci` baseline is recorded, and never above the budget. The baseline limit is the tighter ratchet under them where one is recorded, for LCP, TBT and CLS; **INP has no baseline ratchet**: every recorded INP spread (32 to 48 ms, event timing is rounded to 8 ms) is wider than the margin cap allows, so it is recorded as noisy and held only by its ceiling and the budget. Each sample must also have made the inputs the test expects (a missed click is not a fast interaction).
+**Fixed ceilings, on every machine.** The CI baseline cannot be recorded without a push, so each measurement also has a fixed ceiling in `tests/performance/budgets.spec.ts` (`CEILING`) that holds with or without a recorded baseline, derived from the values above with the margin written next to it: LCP the recorded median times 1.5 rounded up to 50 ms (home and search 1900, product 1950, cart 1600, contact 1600 ms), TBT 100 ms (half the budget and twice the noise floor; recorded 0), the INP proxy 80 ms (2.5 times the highest recorded median, 32 ms, and 3 to 5 times the others; the budget is 200 ms), and CLS on the slow API the recorded median plus about 20% (home 0.31, product 0.38, contact 0.21, cart 0.13). On CI the time ceilings (LCP, TBT, INP, not CLS, which is a race with the network and not with the CPU) are multiplied by 1.5 until a `ci` baseline is recorded, and never above the budget. The baseline limit is the tighter ratchet under them where one is recorded, for LCP, TBT and CLS; **INP has no baseline ratchet**: every recorded INP spread (32 to 48 ms, event timing is rounded to 8 ms) is wider than the margin cap allows, so it is not written to the baseline and is held only by its ceiling and the budget. Each sample must also have made the inputs the test expects (a missed click is not a fast interaction).
 
-**Noisy metrics, and the host.** A metric whose margin (3 times its spread) would exceed the cap is recorded as noisy and is not enforced as a ratchet (the fixed ceiling and the budget still apply); record it again on an idle machine. Every perf test annotates the host's one-minute load average (at the end of its measurement and when the run began), and recording needs the run to have begun under a load of 4 and a single worker.
+**Noisy metrics, and the host.** A metric whose margin (3 times its spread) would exceed the cap is not recorded (the run annotates it as noisy), so it is not enforced as a ratchet (the fixed ceiling and the budget still apply); record it again on an idle machine. Every perf test annotates the host's one-minute load average (at the end of its measurement and when the run began), and recording needs the run to have begun under a load of 4 (a platform with no load average is refused) and a single worker, and is written only after the console guard and the write guard have passed. The margin arithmetic is `ratchetLimits` in `fixtures/performance.ts`, tested on its own in `tests/framework/performance-maths`.
 
 | Page and interaction | LCP / TBT / INP | CLS (500 ms API) | Spec | Status |
 |---|---|---|---|---|
 | Home, filter click | within budget | 0.26 | performance/budgets | bug found (PERF-01) |
 | Search for a term | within budget | – | performance/budgets | covered |
-| Product: quantity, add to cart | within budget | 0.30–0.38 | performance/budgets | bug found (PERF-01) |
+| Product: quantity, add to cart | within budget | 0.23–0.38 | performance/budgets | bug found (PERF-01) |
 | Cart: proceed to sign in | within budget | 0.107 (the same in every sample): held to a fixed 0.13 ceiling and to its baseline, not pinned | performance/budgets | covered (observation) |
-| Collector control: a known 150 ms task is counted as blocking time | – | – | performance/budgets | covered |
-| Home, product and contact: the shift is held to its recorded baseline by a passing test of its own (not an `@bug` pin), so a pinned page cannot get worse | – | 0.17–0.38, ratcheted | performance/budgets | covered (where a baseline is recorded) |
+| Collector controls: a known 150 ms task is counted as blocking time, and a known slow click as the interaction time | – | – | performance/budgets | covered |
+| Home, product and contact: the shift is held to its recorded baseline by a passing test of its own (not an `@bug` pin), so a pinned page cannot get worse (the product page's shift varies too much between samples to be recorded: its fixed ceiling alone holds it) | – | 0.17–0.38, ratcheted where steady | performance/budgets | covered (where a baseline is recorded) |
 | Contact: submit empty | within budget | 0.17 | performance/budgets | bug found (PERF-01) |
 
 PERF-01 pins home, product and contact only (CLS 0.17 to 0.38). The cart's 0.107 is the same footer
@@ -587,6 +609,15 @@ fixed. `npm run test:verify-bugs` runs every `@bug` test as an ordinary test, in
 | BUG-54 | Session | `GET /users/refresh` with no token, or a garbage one, answers 500 (an unhandled `JWTException`, "Token could not be parsed") instead of 401, so every signed-out visit of a protected page (/account and its sections) logs a server error in the browser. A valid token is refreshed (200, and the old one is refused afterwards), so the defect is the refusal, not the renewal. | auth/session (self-hosted) |
 | BUG-55 | Chat | A support ticket whose request is aborted (no answer at all) is followed by the literal text "true" after "There was an error submitting your ticket:", where the reason should be. | widgets/chat |
 
+| BUG-56 | Account area | A 401 on an account call sends the SPA to `/#/auth/login`, which is not a route: home renders and the user stays signed in. | account/account-area |
+| BUG-57 | Account area | That 401 leaves the stale JWT in storage and the account menu visible. | account/account-area |
+| BUG-58 | Contact | The contact form sends a message of only spaces (60 spaces pass the 50-character minimum). | contact |
+| BUG-59 | Contact | A double-click on Send posts the contact message twice. | contact |
+| BUG-60 | Comparison | The comparison lists a rental as "Out of Stock". | catalog/compare |
+| BUG-61 | Search | Later pages of a search come from `/products`, drop the rentals, and the last page comes up short. | catalog/search-paging |
+| BUG-62 | Product | `/products/<unknown>/related` answers 500 (HTML) where the product answers 404. | product/product-related |
+| BUG-63 | Language switcher | A translation file that fails to load (500) leaves English with no message. | navigation/language-load |
+
 BUG-39 was never assigned.
 
 ### Accessibility
@@ -626,6 +657,7 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | ADM-20 | User form | The back office cannot create a user: the add form sends empty `enabled` and `failed_login_attempts` values and the real API answers 500 "Something went wrong". | admin-e2e/back-office.e2e (self-hosted) |
 | ADM-21 | User form | After the API accepts a new user (201) the SPA throws an unhandled Angular error (NG01002, "Must supply a value for form control") although the form says "User saved!". | admin/users |
 | ADM-22 | All lists | A list request refused with 401 (an expired or revoked session) leaves the admin on the page with an empty table and no word: they are not sent to the sign-in page. Pinned once per list (products, brands, categories, orders, users, messages). | admin/lists-failures |
+| ADM-23 | Brand and category forms | An edit the API refuses (409, 500) is not reported: the form stays as it was. | admin/brands, admin/categories |
 
 ### Accessibility (axe)
 
@@ -645,6 +677,7 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | AX-12 | listitem | serious | 1.3.1 | checkout tab items | List items outside a list (the parent's role is overridden). |
 | AX-13 | target-size | serious | 2.5.8 | "More information" on related products | Smaller than 24×24 px and too close together. |
 | AX-14 | keyboard focus (not axe) | – | 2.4.3 | the chat button and window | Opening the chat with Enter leaves the keyboard focus on the page body: the button that had it is gone and nothing in the window takes it. Found by the keyboard checks (a11y/keyboard), not by a scan. |
+| AX-15 | reflow (not axe) | – | 1.4.10 | the cart table on a phone | On a 320 px screen the cart table keeps about 370 px and the page scrolls sideways. Found by comparing the page's scroll width with the viewport (a11y/pages), not by a scan. |
 
 ### Translations
 
@@ -677,10 +710,11 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 | I18N-25 | The status badge of a message in the account list shows the API's raw value, `NEW`. | i18n/completeness |
 | I18N-26 | The menu toggler's aria-label on a phone ("Toggle navigation", the framework's default). | i18n/completeness |
 | I18N-27 | The English translation file lacks `fields.address.label`, `.placeholder` and `.errors.required`, which the six other files define (a key one file lacks shows as its raw name in that language). Found by comparing the files with each other, not by a page. | i18n/translation-files |
+| I18N-28 | The Greek `pages.comparison.remove-product` drops the `{{ name }}` placeholder the English value fills in ("Remove {{ name }} from comparison"), so the remove button of a comparison column has no product in its name. Found by comparing the files' placeholders. | i18n/translation-files |
 
 ### Security
 
-SEC-01..06 are the response headers of the live site; SEC-07..12 are authorisation of the API, checked on the self-hosted shop; SEC-13 is an uncaught error on the category route. The next free id is SEC-14.
+SEC-01..06 are the response headers of the live site; SEC-07..12 are authorisation of the API, checked on the self-hosted shop; SEC-13 is an uncaught error on the category route; SEC-14 is a token the API still accepts after its account was deleted. The next free id is SEC-15.
 
 | ID | Finding | Pinned in |
 |---|---|---|
@@ -697,6 +731,7 @@ SEC-01..06 are the response headers of the live site; SEC-07..12 are authorisati
 | SEC-11 | `PUT /messages/{id}/status` is accepted from a customer. | security/authorization (self-hosted) |
 | SEC-12 | `DELETE /favorites/{id}` by another customer answers 204 (success) although nothing is deleted: the refusal is reported as a success. | security/authorization (self-hosted) |
 | SEC-13 | The category page throws "TypeError: Cannot read properties of undefined (reading 'name')" for a slug it does not know (any slug from the address bar), though it still draws. Found by the console guard. | security/xss-reflected |
+| SEC-14 | The token of a deleted account is still accepted: `GET /users/me` answers 200 (and the invoices, favourites, messages and refresh accept it too). | security/authorization (self-hosted) |
 
 ### Performance
 
@@ -766,13 +801,13 @@ skip:
 
 | Project | Tests | Notes |
 |---|---|---|
-| chromium | 1295 | Everything except `@account`, `@admin`, `@visual`, `@perf`, `@framework` (own projects) and `@mobile` (phone only). |
-| firefox, webkit | 523 each | The same, minus the Chromium-only `@axe`, `@i18n` and `@api`. |
-| perf | 13 | `@perf` budgets, the layout-shift pins and their ratchets, the cart observation and the collector control, alone: one worker, no parallelism. |
+| chromium | 1352 | Everything except `@account`, `@admin`, `@visual`, `@perf`, `@framework` (own projects) and `@mobile` (phone only). |
+| firefox, webkit | 558 each | The same, minus the Chromium-only `@axe`, `@i18n` and `@api`. |
+| perf | 14 | `@perf` budgets, the layout-shift pins and their ratchets, the cart observation and the two collector controls (a long task, a slow click), alone: one worker, no parallelism, no retries. |
 | mobile | 18 | `@smoke` and `@mobile` on a Pixel 7. |
-| framework | 117 | `@framework`: the mock layer, the target configuration, the write guard and its teardown check, the console guard, the run guard, the lint configuration, the preflight and the health check, the Toolshop API helpers, the a11y ratchet's decision (`diffFindings`), the pin verdicts and the orchestration of verify-bugs, and the defect-id check. No site is needed (one test, of the API helpers, uses the self-hosted shop). |
-| account / admin | 6 / 17, plus one setup test each (7 / 18 listed) | Only exist when real sign-ins may run (always on the self-hosted shop). |
-| visual | 24 (23 baselines and the orphan check) | Only inside the Playwright image. |
+| framework | 165 | `@framework`: the mock layer, the target configuration, the write guard and its teardown check, the console guard (its own spec), the run guard, the lint configuration, the preflight and the health check, the Toolshop API helpers, the a11y ratchet's decision (`diffFindings`), the refusal to record the a11y baseline on CI, the performance baseline arithmetic (`ratchetLimits`, noisy metrics, the margin cap, what counts as CI), the `test-all` runner, the security header matchers (`security/header-matchers`, offline), the pin verdicts and the orchestration of verify-bugs (it runs with `--max-failures=0`, so CI's stop after 30 failures cannot cut it short), and the defect-id check. No site is needed (the API-helper test uses the self-hosted shop; the `test-all` and `a11y-record` tests start a nested run and are `@self-hosted`). |
+| account / admin | 7 / 20, plus one setup test each (8 / 21 listed) | Only exist when real sign-ins may run (always on the self-hosted shop). |
+| visual | 26 (25 baselines and the orphan check) | Only inside the Playwright image. |
 
 `@self-hosted` specs are never scheduled against the live site, `@live-only` specs only there. Before
 this, those suites called `test.skip()` at file level, which allure-playwright records as a global

@@ -90,7 +90,9 @@ test.describe('Contact form', () => {
 
     expect((await sent).postDataJSON()).toMatchObject(sentBody(contact));
     await expect(contactPage.successMessage).toBeVisible();
+    // The form is replaced by the thanks, so nothing typed stays on the page for a second message.
     await expect(contactPage.sendButton).toBeHidden();
+    await expect(contactPage.message.input).toBeHidden();
   };
 
   test('a complete message is sent and acknowledged (real)', { tag: ['@smoke', '@flow', '@self-hosted'] }, sendsAndAcknowledges);
@@ -118,6 +120,37 @@ test.describe('Contact form', () => {
 
       expect((await sent).postDataJSON()).toMatchObject(sentBody(contact));
       await expect(contactPage.successMessage).toBeVisible();
+    });
+  });
+
+  test.describe('when the API is slow to accept the message', { tag: ['@mocked', '@bug'] }, () => {
+    test.use(withMocks(mock.respond('POST', '/messages', acceptedMessage, 201)));
+
+    test('a double-click on Send sends one message', async ({ contactPage, apiMock }) => {
+      knownBug('BUG-59', 'Send stays enabled while its request is open: a double-click posts the same message twice.');
+      // The answer is held back, so the second click lands while the first request is still open.
+      await apiMock.delay('POST', '/messages', () => true, 500);
+      await contactPage.fillIn(message());
+
+      await contactPage.submitTwice();
+      // Precondition, true whether or not the bug is fixed: the first message was acknowledged. Both clicks have been handled by then.
+      await expect(contactPage.successMessage).toBeVisible();
+
+      expect(apiMock.requestsTo('POST', '/messages'), 'BUG-59: one message, one request').toBe(1);
+    });
+  });
+
+  test.describe('when the API accepts a message of only spaces', { tag: ['@mocked', '@bug'] }, () => {
+    test.use(withMocks(mock.respond('POST', '/messages', acceptedMessage, 201)));
+
+    test('a message of only spaces is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      knownBug('BUG-58', 'a message of 60 spaces passes the 50-character minimum and is sent: the form does not trim it.', { absence: true });
+      const before = await apiMock.mark();
+
+      await contactPage.send(message({ message: ' '.repeat(MIN_MESSAGE_LENGTH + 10) }));
+
+      await expect(apiMock.expectNoRequest('POST', '/messages', { since: before }), 'BUG-58: a message of spaces is not sent').resolves.toBeUndefined();
+      await expect(contactPage.message.error, 'BUG-58: the form says the message is missing').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 

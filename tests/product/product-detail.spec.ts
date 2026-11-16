@@ -1,9 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
+import { UNKNOWN_PRODUCT_ID } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { FAVORITE_ID } from '@support/payloads';
 import { escapeRegExp } from '@support/regexp';
+import type { Product } from '@support/toolshop-api';
 
 /** What the shop tells the shopper, word for word. */
 const MESSAGES = {
@@ -235,6 +237,19 @@ test.describe('Product detail', () => {
       await expect.poll(() => apiMock.requestsTo('GET', RELATED), 'the related products were asked for').toBeGreaterThan(0);
 
       await expect(failureFeedback(productPage.page).first(), 'BUG-43: a failed related-products request is reported').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+  });
+
+  test.describe('an id no product has', { tag: ['@negative', '@bug'] }, () => {
+    // The page opens on the id, not on a product of the catalogue: the fixture's product is replaced by the unknown id.
+    test.use({ product: async ({}, use) => use({ id: UNKNOWN_PRODUCT_ID } as Product) });
+
+    test('the page says the product is unavailable', async ({ productPage }) => {
+      knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".', { absence: true });
+      // Holds whether or not the page explains itself: nothing can be bought on it.
+      await expect(productPage.addToCartButton).toBeHidden();
+
+      await expect(failureFeedback(productPage.page).or(productPage.unavailableMessage).first(), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 

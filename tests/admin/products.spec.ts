@@ -1,5 +1,5 @@
 import { expect, mock, test } from '@fixtures';
-import { SEARCH_HIT, paginated } from '@support/admin-payloads';
+import { SEARCH_HIT, dollars, paginated } from '@support/admin-payloads';
 
 test.describe('Admin products list (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each product with its stock status and price', async ({ adminProducts, backOffice }) => {
@@ -8,7 +8,7 @@ test.describe('Admin products list (mocked back office)', { tag: ['@mocked'] }, 
     await expect(row).toContainText(backOffice.product.name);
     // The Stock column shows the product's in-stock flag ("true" / "false"), not a count.
     await expect(row.getByRole('cell', { name: String(backOffice.product.in_stock), exact: true })).toBeVisible();
-    await expect(row).toContainText(`$${backOffice.product.price.toFixed(2)}`);
+    await expect(row).toContainText(dollars(backOffice.product.price));
   });
 
   test('searching sends the term and lists the matches', async ({ adminProducts, backOffice, apiMock }) => {

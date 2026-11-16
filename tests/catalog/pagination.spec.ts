@@ -1,6 +1,8 @@
+import { SORT, SORT_OPTIONS } from '@components/FilterPanel';
 import type { ApiMock } from '@support/api-mock';
 import { expect, mock, test } from '@fixtures';
 import type { HomePage } from '@pages/HomePage';
+import { PLIERS } from '@support/catalog-terms';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
@@ -135,8 +137,8 @@ test.describe('Pagination', () => {
       {
         change: 'the sort',
         from: 3,
-        answer: (body: Record<string, unknown>) => body.sort === 'name,desc',
-        apply: (home: HomePage) => home.filters.sortBy('Name (Z - A)'),
+        answer: (body: Record<string, unknown>) => body.sort === SORT_OPTIONS[SORT.nameDescending],
+        apply: (home: HomePage) => home.filters.sortBy(SORT.nameDescending),
       },
       {
         change: 'a filter',
@@ -198,7 +200,6 @@ test.describe('Pagination', () => {
   });
 
   test.describe('when a search result spans several pages', { tag: ['@mocked'] }, () => {
-    const TERM = 'pliers';
     test.use({
       apiMocks: async ({ catalog }, use) => {
         const product = await catalog.inStock();
@@ -207,9 +208,9 @@ test.describe('Pagination', () => {
       },
     });
 
-    test('the pager asks the search for the next page of the same term', async ({ homePage, apiMock }) => {
+    test('the pager asks the product list for the next page, with the term of the search', async ({ homePage, apiMock }) => {
       const first = apiMock.waitForResponse('QUERY', '/products/search');
-      await homePage.search.searchFor(TERM);
+      await homePage.search.searchFor(PLIERS.term);
       await first;
       await expect(homePage.pagination.item(1)).toHaveClass(CURRENT_PAGE);
       // The shop asks the plain product list for the later pages, with the term in the body.
@@ -218,7 +219,7 @@ test.describe('Pagination', () => {
       await homePage.pagination.goNext();
 
       const { body } = await pageTwo;
-      expect(body.q, 'the second page is a page of the same search').toBe(TERM);
+      expect(body.q, 'the second page is a page of the same search').toBe(PLIERS.term);
     });
   });
 });

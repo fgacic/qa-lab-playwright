@@ -1,7 +1,7 @@
 import { expect, test } from '@fixtures';
 import { consoleArgsText } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-import { ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
+import { ATTRIBUTE_XSS_PAYLOADS, MAX_SEARCH_TERM, ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { escapeRegExp } from '@support/regexp';
 
 /**
@@ -16,7 +16,16 @@ import { escapeRegExp } from '@support/regexp';
 test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => {
   test.use({ xssWatch: true });
 
-  for (const [name, payload] of Object.entries(XSS_PAYLOADS)) {
+  // The attribute payloads too: a term is echoed into the caption and the count line, and a payload made for an attribute (a quote
+  // that adds a handler, a `javascript:` URL) is the one a page would break by putting the term into a title, an `alt` or an `href`.
+  // Those longer than the box acts on (BUG-27) would be dropped, so they are not searched. The box itself is no sink to check: the shop
+  // empties it once the search is sent (its `value` is "" afterwards), so it holds nothing to reflect.
+  const searched: [string, string][] = [
+    ...Object.entries(XSS_PAYLOADS),
+    ...Object.entries(ATTRIBUTE_XSS_PAYLOADS).flatMap(([name, { payload }]) => (payload.length <= MAX_SEARCH_TERM ? [[name, payload] as [string, string]] : [])),
+  ];
+
+  for (const [name, payload] of searched) {
     test(`a search for ${name} is shown as text, not run`, async ({ homePage, xss }) => {
       await homePage.search.searchFor(payload);
 

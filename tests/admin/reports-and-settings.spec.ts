@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { ProductPage } from '@pages/ProductPage';
 import { REPORT_TITLES, reportColumns } from '@pages/admin/AdminPages';
 import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import { category, paginated, product, reports } from '@support/admin-payloads';
@@ -151,5 +152,23 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
 
     await expect(sort.getByRole('option', { name: 'Name (A - Z)' })).toBeAttached();
     await expect(sort.getByRole('option', { name: /CO₂/ })).toHaveCount(0);
+  });
+
+  test('switching the eco-friendly badge off removes it from an eco product in the shop', async ({ adminSettings, apiMock }) => {
+    const eco = { ...product, is_eco_friendly: true };
+    await apiMock.use(mock.respond('GET', /^\/products\/[^/]+$/, eco), mock.respond('GET', /^\/products\/[^/]+\/related$/, []));
+    const shopProduct = new ProductPage(adminSettings.page);
+    await expect(adminSettings.ecoBadge, 'the badge starts switched on').toBeChecked();
+    await shopProduct.open(eco.id);
+    await expect(shopProduct.ecoBadge, 'the shop shows the badge while it is on').toHaveText('ECO');
+    await adminSettings.open();
+
+    await adminSettings.ecoBadge.uncheck();
+    await adminSettings.save();
+    await expect(adminSettings.feedback.filter({ hasText: ADMIN_MESSAGES.settingsSaved })).toBeVisible();
+    await shopProduct.open(eco.id);
+
+    await expect(shopProduct.name).toHaveText(eco.name);
+    await expect(shopProduct.ecoBadge).toHaveCount(0);
   });
 });

@@ -45,10 +45,13 @@ process.on('exit', () => rmSync(work, { recursive: true, force: true }));
 // without running a real suite. Never set outside that test.
 const RUNNER = process.env.VERIFY_BUGS_PLAYWRIGHT ? [process.execPath, [process.env.VERIFY_BUGS_PLAYWRIGHT]] : ['npx', ['playwright']];
 
-/** Runs `npx playwright test ...args` and returns its JSON report. Stale output never survives: it is deleted first. */
+/**
+ * Runs `npx playwright test ...args` and returns its JSON report. Stale output never survives: it is deleted first.
+ * `--max-failures=0` because CI=true makes the config stop a run after 30 failures, and every pin that reproduces is a failure here.
+ */
 function playwright(args, name, env = {}) {
   const out = join(work, name);
-  const run = spawnSync(RUNNER[0], [...RUNNER[1], 'test', ...args, '--reporter=json', `--output=${join(work, 'artifacts')}`], {
+  const run = spawnSync(RUNNER[0], [...RUNNER[1], 'test', ...args, '--reporter=json', '--max-failures=0', `--output=${join(work, 'artifacts')}`], {
     stdio: ['ignore', 'ignore', 'inherit'],
     env: { ...process.env, ...env, PLAYWRIGHT_JSON_OUTPUT_NAME: out },
   });

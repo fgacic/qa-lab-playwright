@@ -17,6 +17,10 @@ import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/
  * deliberately left behind, uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
  * for every CI run (the same trade-off as tests/admin-e2e): a contact message per contact test, because the API cannot
  * delete a message (DELETE /messages/{id} answers 405).
+ *
+ * Reading the checks: `expectNoInjectedElements` is a snapshot, so it is only ever called after the element that carries the
+ * payload is visible (the row, the option, the heading, the field's value): anchored on the page having drawn it, a "no parsed payload"
+ * is read off a finished page and not an empty one. `expectNotExecuted` comes last: it is the one that waits.
  */
 const payload = XSS_PAYLOADS['img onerror'];
 const breakout = XSS_PAYLOADS['svg onload, breaking out of an attribute'];
@@ -36,7 +40,7 @@ const uniqueKey = () => randomUUID().slice(0, 8);
  * product by the id the test arranged, a customer by the e-mail the test registered with. A cleanup that fails fails the test,
  * so a leak is never silent.
  */
-const test = base.extend<{ brandNames: Set<string>; productIds: Set<string>; customerEmails: Set<string> }>({
+const test = base.extend<{ brandNames: Set<string>; productIds: Set<string>; customerEmails: Set<string>; makeRental: (product: { name: string; description?: string }) => Promise<string> }>({
   brandNames: async ({ request, api, adminToken }, use) => {
     const names = new Set<string>();
     await use(names);
@@ -54,9 +58,30 @@ const test = base.extend<{ brandNames: Set<string>; productIds: Set<string>; cus
     const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
     if (failures.length) throw new AggregateError(failures, 'Cleaning up the products this test made failed');
   },
+  /**
+   * Makes a rental of the test's own through the admin API, removed after the test by `productIds`, and returns its id. A rental, because
+   * the shop's default list shows none, so no catalogue spec sees it while it exists.
+   */
+  makeRental: async ({ api, catalog, adminToken, productIds }, use) => {
+    await use(async ({ name, description = 'Made by the stored-input checks.' }) => {
+      const template = await catalog.inStock();
+      const { id } = await api.createProduct(await adminToken(), {
+        name,
+        description,
+        price: 1.5,
+        category_id: template.category.id,
+        brand_id: template.brand.id,
+        product_image_id: template.product_image.id,
+        is_rental: true,
+      });
+      productIds.add(id);
+      return id;
+    });
+  },
   customerEmails: async ({ api, adminToken }, use) => {
     const emails = new Set<string>();
     await use(emails);
+    if (!emails.size) return;
     const token = await adminToken();
     const outcomes = await Promise.allSettled(
       [...emails].map(async (email) => {
@@ -138,22 +163,12 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     await xss.expectNotExecuted();
   });
 
-  // Attribute context: a product's name is also the `alt` of its picture, so a name that closes the quote would add an attribute
-  // of its own. The product is the test's own (a rental, which the shop's default list does not show, so no catalogue spec sees it).
+  // Attribute context: a product's name is also the `alt` of its picture (on the product page and on the card in the storefront's list),
+  // so a name that closes the quote would add an attribute of its own. The product is the test's own (see `makeRental`).
   for (const [kind, { payload: attributePayload }] of Object.entries(ATTRIBUTE_XSS_PAYLOADS)) {
-    test(`a product name with ${kind} is shown as text, in the picture attribute that carries it too`, async ({ api, catalog, adminToken, productIds, productPage, xss }) => {
-      const template = await catalog.inStock();
+    test(`a product name with ${kind} is shown as text, in the picture attribute that carries it too`, async ({ makeRental, productPage, rentalsPage, xss }) => {
       const name = `Qa Lab ${attributePayload} ${uniqueKey()}`;
-      const { id } = await api.createProduct(await adminToken(), {
-        name,
-        description: 'Made by the stored-input checks.',
-        price: 1.5,
-        category_id: template.category.id,
-        brand_id: template.brand.id,
-        product_image_id: template.product_image.id,
-        is_rental: true,
-      });
-      productIds.add(id);
+      const id = await makeRental({ name });
 
       await productPage.open(id);
 
@@ -161,6 +176,32 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
       await expect(productPage.name).toHaveText(new RegExp(`^\\s*${escapeRegExp(name)}\\s*(?:ECO\\s*)?$`));
       // The picture is found by the whole name as its alt text: a quote that closed the attribute early would have cut it short.
       await expect(productPage.image(name)).toBeVisible();
+      await xss.expectNoInjectedElements();
+
+      // The storefront's rentals list is the second sink of the same name: the card's picture, whose alt is the name, whole. Found by
+      // that alt text on the page, not through the grid: the grid's card locator expects the upper-case ids of the seeded rentals, and a
+      // product made through the API has a lower-case one.
+      await rentalsPage.open();
+      await expect(rentalsPage.page.getByRole('img', { name, exact: true })).toHaveAttribute('alt', name);
+      await xss.expectNoInjectedElements();
+      await xss.expectNotExecuted();
+    });
+  }
+
+  // The description is free text the shop prints on the product page, below the name, and again under the card on the rentals list:
+  // sinks of a different kind from a name.
+  for (const [kind, payload] of Object.entries(XSS_PAYLOADS)) {
+    test(`a product description with ${kind} is shown as text`, async ({ makeRental, productPage, rentalsPage, xss }) => {
+      const description = `Made by the stored-input checks. ${payload} ${uniqueKey()}`;
+      const id = await makeRental({ name: `Qa Lab description ${uniqueKey()}`, description });
+
+      await productPage.open(id);
+
+      await expect(productPage.description).toHaveText(description);
+      await xss.expectNoInjectedElements();
+
+      await rentalsPage.open();
+      await expect(rentalsPage.page.getByText(description, { exact: true })).toBeVisible();
       await xss.expectNoInjectedElements();
       await xss.expectNotExecuted();
     });
@@ -186,6 +227,34 @@ test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@se
     const profilePage = new ProfilePage(registerPage.page);
     await profilePage.open();
     await expect(profilePage.firstName.input).toHaveValue(customer.firstName);
+    await xss.expectNoInjectedElements();
+    await xss.expectNotExecuted();
+  });
+
+  test('a last name and an address saved on the profile are shown as text, in the header and in the profile fields', async ({ api, loginPage, customerEmails, xss }) => {
+    const customer = fakeCustomer();
+    customerEmails.add(customer.email); // before the registration, so the fixture removes the account even if its answer never arrives
+    await api.registerCustomer(customer);
+    const account = await loginPage.login(customer.email, customer.password);
+    await expect(account.header.userMenu, 'signed in before the profile is opened').toHaveText(`${customer.firstName} ${customer.lastName}`);
+    const profilePage = new ProfilePage(loginPage.page);
+    await profilePage.open();
+    await expect(profilePage.firstName.input, 'the profile has loaded the account before it is edited').toHaveValue(customer.firstName);
+    // A last name may have 20 characters, too few for a payload that calls the hook (the shortest is 29): this one is a bare image
+    // tag, which `injectedCount` recognises by its `src="x"` all the same, so a parsed one is still seen. The street takes the full payload.
+    const lastName = 'Qa<img src=x>';
+    const street = payload;
+
+    await profilePage.lastName.input.fill(lastName);
+    await profilePage.street.input.fill(street);
+    await profilePage.update();
+    await expect(profilePage.alerts.filter({ hasText: 'Your profile is successfully updated!' })).toBeVisible();
+    // Read back from the server: a fresh load of the page, not the form the payload was typed into.
+    await profilePage.open();
+
+    await expect(profilePage.lastName.input).toHaveValue(lastName);
+    await expect(profilePage.street.input).toHaveValue(street);
+    await expect(account.header.userMenu).toHaveText(`${customer.firstName} ${lastName}`);
     await xss.expectNoInjectedElements();
     await xss.expectNotExecuted();
   });

@@ -46,6 +46,34 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     await apiMock.expectNoRequest('GET', '/brands', { within: 300 });
   });
 
+  test('a sequence answers in the order of asking and repeats its last answer, and a new mock replays it from the start', async ({ page }) => {
+    const sequence = mock.sequence('GET', '/brands', { status: 500, json: { message: 'first' } }, { status: 200, json: [{ id: 'second' }] }, { status: 404, json: { message: 'last' } });
+    const apiMock = new ApiMock(page);
+    await apiMock.use(sequence);
+    await openBlankPage(page);
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) statuses.push(await send(page, 'GET', '/brands'));
+    expect(statuses).toEqual([500, 200, 404, 404, 404]);
+
+    const again = new ApiMock(page);
+    await again.use(sequence);
+    expect(await send(page, 'GET', '/brands'), 'the route itself is untouched: a describe-level sequence starts over in the next test').toBe(500);
+  });
+
+  test('a mock of the test overrides a default for the same endpoint, whichever was registered first; a default answers where nothing else does', async ({ page }) => {
+    const apiMock = new ApiMock(page);
+    await apiMock.useDefaults(mock.respond('GET', '/brands', [], 200), mock.respond('GET', '/categories', [], 200));
+    await apiMock.use(mock.fail('GET', '/brands', 503));
+    await openBlankPage(page);
+    expect(await send(page, 'GET', '/brands'), 'the test mock wins').toBe(503);
+    expect(await send(page, 'GET', '/categories'), 'the default answers').toBe(200);
+
+    const later = new ApiMock(page);
+    await later.use(mock.fail('GET', '/categories', 502));
+    await later.useDefaults(mock.respond('GET', '/categories', [], 200));
+    expect(await send(page, 'GET', '/categories'), 'a default registered after a mock still loses to it').toBe(502);
+  });
+
   test('a path pattern with the /g flag is refused up front, by every method that takes one', async ({ page }) => {
     const apiMock = new ApiMock(page);
     await expect(apiMock.expectNoRequest('GET', /brands/g, { within: 0 })).rejects.toThrow(/must not use the \/g or \/y flag/);

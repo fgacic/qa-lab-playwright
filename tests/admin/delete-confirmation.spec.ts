@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { DELETABLE } from '@pages/admin/deletable';
+import { DELETABLE } from '@support/admin-deletable';
 import { knownBug } from '@support/known-bug';
 
 test.describe('Admin delete confirmation (mocked back office)', { tag: ['@mocked'] }, () => {

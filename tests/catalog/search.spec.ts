@@ -1,4 +1,7 @@
+import { SORT, SORT_OPTIONS } from '@components/FilterPanel';
+import { productsFoundFor, searchedFor } from '@components/SearchBar';
 import { expect, mock, test, withMocks } from '@fixtures';
+import { HAMMER, PLIERS } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
@@ -9,8 +12,10 @@ const NO_MATCH = 'qa-lab-no-such-product';
 /** The search box ignores terms outside these lengths (BUG-27, BUG-35). */
 const MIN_TERM = 3;
 const MAX_TERM = 40;
+/** A term whose products are not in the category the test ticks first, so the search has to untick it. */
+const SAW_TERM = 'saw';
 /** A term with spaces on both sides, as typed. */
-const PADDED_TERM = '  pliers  ';
+const PADDED_TERM = `  ${PLIERS.term}  `;
 
 /**
  * Whether the shop reacts at all: any of `reactions` (each a promise that rejects when its window runs out) comes true.
@@ -26,23 +31,23 @@ test.describe('Search', () => {
   test('lists exactly the products the search found', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
 
-    await homePage.search.searchFor('pliers');
+    await homePage.search.searchFor(PLIERS.term);
 
     const { json: found } = await results;
     expect(found.total, 'the catalogue should contain pliers').toBeGreaterThan(0);
-    await expect(homePage.search.caption).toHaveText('Searched for: pliers');
-    await expect(homePage.search.resultCount).toHaveText(`${found.total} products found for 'pliers'`);
+    await expect(homePage.search.caption).toHaveText(searchedFor(PLIERS.term));
+    await expect(homePage.search.resultCount).toHaveText(productsFoundFor(found.total, PLIERS.term));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
   test('pressing Enter in the search box searches too', async ({ homePage, apiMock }) => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
 
-    await homePage.search.searchFor('hammer', { submitWith: 'enter' });
+    await homePage.search.searchFor(HAMMER.term, { submitWith: 'enter' });
 
     const { json: found } = await results;
     expect(found.total, 'the catalogue should contain hammers').toBeGreaterThan(0);
-    await expect(homePage.search.caption).toHaveText('Searched for: hammer');
+    await expect(homePage.search.caption).toHaveText(searchedFor(HAMMER.term));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
@@ -50,7 +55,7 @@ test.describe('Search', () => {
     await homePage.search.searchFor(NO_MATCH);
 
     await expect(homePage.grid.emptyState).toBeVisible();
-    await expect(homePage.search.resultCount).toHaveText(`0 products found for '${NO_MATCH}'`);
+    await expect(homePage.search.resultCount).toHaveText(productsFoundFor(0, NO_MATCH));
     await expect(homePage.grid.cards).toHaveCount(0);
   });
 
@@ -65,23 +70,24 @@ test.describe('Search', () => {
       expect(body.q).toBe(term);
       // No product is named like any of these, so a wildcard or markup taking effect would show.
       expect(found.total).toBe(0);
-      await expect(homePage.search.caption).toHaveText(`Searched for: ${term}`);
-      await expect(homePage.search.resultCount).toHaveText(`0 products found for '${term}'`);
+      await expect(homePage.search.caption).toHaveText(searchedFor(term));
+      await expect(homePage.search.resultCount).toHaveText(productsFoundFor(0, term));
       await expect(homePage.grid.emptyState).toBeVisible();
     });
   }
 
   test('spaces around the term do not change what is found', async ({ homePage, apiMock }) => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
-    await homePage.search.searchFor('pliers');
+    await homePage.search.searchFor(PLIERS.term);
     const exact = (await results).json;
-    const padded = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search', (body) => String(body.q).trim() === PADDED_TERM.trim());
+    // The padded term may reach the API as typed or trimmed (the page decides): either is the same search, so the match ignores the spaces.
+    const padded = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search', (body) => String(body.q).trim() === PLIERS.term);
 
     await homePage.search.searchFor(PADDED_TERM);
 
     const { json: found } = await padded;
     expect(found.data.map((p) => p.name)).toEqual(exact.data.map((p) => p.name));
-    await expect(homePage.search.caption).toHaveText('Searched for: pliers');
+    await expect(homePage.search.caption).toHaveText(searchedFor(PLIERS.term));
     await expect(homePage.grid.names).toHaveText(exact.data.map((p) => p.name));
   });
 
@@ -102,32 +108,32 @@ test.describe('Search', () => {
   // The search and the sort/filter menu share one grid. These two pin how they combine, as the shop
   // does today: a sort applies to the searched list, and a new search starts over without the filters.
   test('sorting after a search keeps the search and orders its results', async ({ homePage, apiMock }) => {
-    await homePage.search.searchFor('pliers');
-    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc');
+    await homePage.search.searchFor(PLIERS.term);
+    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === SORT_OPTIONS[SORT.priceAscending]);
 
-    await homePage.filters.sortBy('Price (Low - High)');
+    await homePage.filters.sortBy(SORT.priceAscending);
 
     const { body, json: found } = await sorted;
-    expect(body.q, 'the sort request carries the search term').toBe('pliers');
+    expect(body.q, 'the sort request carries the search term').toBe(PLIERS.term);
     expect(found.total, 'the catalogue should contain pliers').toBeGreaterThan(0);
-    expect(found.data.every((p) => /pliers/i.test(p.name))).toBe(true);
+    expect(found.data.every((p) => new RegExp(PLIERS.term, 'i').test(p.name))).toBe(true);
     expect(found.data.map((p) => p.price)).toBeSorted();
-    await expect(homePage.search.caption).toHaveText('Searched for: pliers');
+    await expect(homePage.search.caption).toHaveText(searchedFor(PLIERS.term));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
   test('searching after a filter shows the search results and unticks the filter', async ({ homePage, apiMock }) => {
-    await homePage.filters.filterByCategory('Hammer');
-    await expect(homePage.filters.category('Hammer')).toBeChecked();
+    await homePage.filters.filterByCategory(HAMMER.category);
+    await expect(homePage.filters.category(HAMMER.category)).toBeChecked();
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
 
-    await homePage.search.searchFor('saw');
+    await homePage.search.searchFor(SAW_TERM);
 
     const { json: found } = await results;
     expect(found.total, 'the catalogue should contain saws').toBeGreaterThan(0);
-    await expect(homePage.search.caption).toHaveText('Searched for: saw');
+    await expect(homePage.search.caption).toHaveText(searchedFor(SAW_TERM));
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
-    await expect(homePage.filters.category('Hammer'), 'a ticked filter that no longer applies is not left on screen').not.toBeChecked();
+    await expect(homePage.filters.category(HAMMER.category), 'a ticked filter that no longer applies is not left on screen').not.toBeChecked();
   });
 
   test('clearing the search restores the full catalogue', async ({ homePage, api }) => {
@@ -153,8 +159,8 @@ test.describe('Search', () => {
       const { response, body } = await results;
       expect(response.status()).toBe(200);
       expect(body.q).toBe(term);
-      await expect(homePage.search.caption).toHaveText(`Searched for: ${term}`);
-      await expect(homePage.search.resultCount).toHaveText(`0 products found for '${term}'`);
+      await expect(homePage.search.caption).toHaveText(searchedFor(term));
+      await expect(homePage.search.resultCount).toHaveText(productsFoundFor(0, term));
     });
   }
 
@@ -179,10 +185,10 @@ test.describe('Search', () => {
     test.use(withMocks(mock.respond('QUERY', '/products/search', emptyProductPage())));
 
     test('the empty state is shown', async ({ homePage }) => {
-      await homePage.search.searchFor('hammer');
+      await homePage.search.searchFor(HAMMER.term);
 
       await expect(homePage.grid.emptyState).toBeVisible();
-      await expect(homePage.search.resultCount).toHaveText("0 products found for 'hammer'");
+      await expect(homePage.search.resultCount).toHaveText(productsFoundFor(0, HAMMER.term));
     });
   });
 
@@ -191,8 +197,8 @@ test.describe('Search', () => {
 
     test('the shopper is told the search failed', async ({ homePage }) => {
       knownBug('BUG-03', 'a failed search is shown as "0 products found", as if nothing matched.', { absence: true });
-      await homePage.search.searchFor('hammer');
-      await expect(homePage.search.caption).toHaveText('Searched for: hammer');
+      await homePage.search.searchFor(HAMMER.term);
+      await expect(homePage.search.caption).toHaveText(searchedFor(HAMMER.term));
 
       await expect(failureFeedback(homePage.page).first(), 'BUG-03: a failed search is reported as a failure').toBeVisible({ timeout: BUG_TIMEOUT });
     });

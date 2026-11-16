@@ -91,6 +91,26 @@ test.describe('Live shop activity', () => {
     });
   });
 
+  test.describe('when one event of the feed is not valid JSON', { tag: ['@mocked', '@negative'] }, () => {
+    const intact = fakeSale({ name: 'Qa Lab Intact Saw' });
+    // The stream's opening, then the broken event, then the good sale: a panel that stopped listening at the broken one would show nothing.
+    const opening = salesStream([]);
+    const brokenEvent = 'id: 1\nevent: sale\ndata: {not json\n\n';
+    const goodEvent = salesStream([intact]).slice(opening.length);
+    test.use(withMocks(mock.eventStream('/sales-stream', opening + brokenEvent + goodEvent)));
+    // The shop's own handler logs the JSON.parse failure of the event this test serves on purpose.
+    test.beforeEach(({ consoleGuard }) => consoleGuard.allow(/SyntaxError[^\n]*JSON/, 'the malformed event this test serves on purpose: the shop logs its JSON.parse failure'));
+
+    test('the sale after it is still listed and the counters count only the valid one', async ({ homePage }) => {
+      const { liveActivity } = homePage.shell;
+
+      await liveActivity.open();
+
+      await expect(liveActivity.items).toHaveText([new RegExp(escapeRegExp(intact.name))]);
+      await expect(liveActivity.salesCount).toHaveText('1');
+    });
+  });
+
   test.describe('when the feed drops and comes back', { tag: ['@mocked'] }, () => {
     // An established stream that ends is a dropped connection: every browser reconnects after the stream's own retry delay,
     // which is what the second answer serves. (A request that never connects is not retried by Firefox, so it would not be a drop.)

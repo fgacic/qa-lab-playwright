@@ -1,7 +1,7 @@
 import { ADMIN_SECTIONS } from '@components/Header';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
-import { ORDER_STATUS, paginated } from '@support/admin-payloads';
+import { ORDER_STATUS, paginated, reports } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** What only the back office reads: the dashboard's orders and sales report, the user list and the inbox. */
@@ -13,7 +13,15 @@ const ADMIN_ONLY_ENDPOINTS = /^\/(?:invoices|users|messages|reports\/[^/]+)$/;
  * The real journeys are tests/admin-e2e, against the self-hosted Toolshop.
  */
 test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'] }, () => {
-  test('the dashboard shows the sales chart', async ({ adminDashboard }) => {
+  test('the dashboard shows the sales chart, fed by the yearly sales report', async ({ adminDashboard, apiMock }) => {
+    // The fixture opened the page already; open it again to catch the answer that feeds the chart.
+    const answered = apiMock.waitForResponse('GET', '/reports/total-sales-of-years');
+    await adminDashboard.open();
+    const { response, json } = await answered;
+
+    // A <canvas> has nothing to read, so the data is checked on the answer that feeds it.
+    expect(response.ok(), 'the sales report was answered').toBe(true);
+    expect(json, 'the report the chart is drawn from').toEqual(reports.totalSalesOfYears);
     await expect(adminDashboard.salesHeading).toBeVisible();
     await expect(adminDashboard.salesChart).toBeVisible();
   });

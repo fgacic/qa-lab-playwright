@@ -58,9 +58,6 @@ const DATA = [
   'tr:has([data-test="compare-spec"]) > th', 'img.comparison-img',
   // What the visitor typed into the search box, echoed back above the results, and the signed-in customer's name on the account menu.
   '[data-test="search-term"]', '[data-test="nav-menu"]',
-  // The records of the account's lists (invoices, messages): the billing address, the subject, the message text, the dates and the
-  // totals are what the customer typed or the shop stored. The Details button and the status badge in the same row, and any cell holding a control (the cart's quantity field), are the shop's own words and are read.
-  '.table-hover tbody td:not(:has(a, button, input, .badge))',
   // The two training-aid overlays (see EXCLUDED in fixtures/a11y.ts).
   '.testing-notification-bar', '.guide-container',
   // Never visible text, but the tree walker would read their source as text nodes.
@@ -75,12 +72,21 @@ const DATA = [
 const KEY_SCAN_DATA = ['.card:has(img) .card-title', '.card:has(img) .card-text'];
 
 /**
+ * The records of the account's lists (invoices, messages): the billing address, the subject, the message text, the dates and the totals are
+ * what the customer typed or the shop stored, so they are never compared with English. The Details button and the status badge in the same
+ * row, and any cell holding a control (the cart's quantity field), are the shop's own words and are read. Only the stray-English read skips
+ * them: a raw key in a plain cell is still a defect, and the key-leak read looks at it.
+ */
+const RECORD_CELLS = '.table-hover tbody td:not(:has(a, button, input, .badge))';
+
+/**
  * What the stray-English read skips on top of DATA, the same two parts of a product card as the key scan (a card that shows a picture is a
  * product's or a rental's: its name and description are data) and the whole <figure> around the product page's image, whose caption
- * credits the photographer (a name and a link to an external site, the same in every language). A card with no picture is the shop's own
+ * credits the photographer (a name and a link to an external site, the same in every language), and the plain cells of the account's
+ * record lists (RECORD_CELLS). A card with no picture is the shop's own
  * (the account tiles), so its words are compared with English like any other.
  */
-const STRAY_SCAN_DATA = [...KEY_SCAN_DATA, 'figure'];
+const STRAY_SCAN_DATA = [...KEY_SCAN_DATA, 'figure', RECORD_CELLS];
 
 /**
  * Wording that is legitimately the same in every language, which only the stray-English comparison
@@ -204,7 +210,8 @@ export function watchDataTraffic(page: Page): DataTraffic {
  * (`traffic`, from `watchDataTraffic`, which the caller starts before the navigation: required, because a read with no view of the requests would pass for a page that has not loaded) and two
  * reads in a row, 250 ms apart, are the same. The route's own content, the translation file and the
  * toasts all arrive on their own schedule, so a single read can be taken before they are in; the
- * quiet period only covers what no request announces (a render after the last answer, a fade).
+ * quiet period only covers what no request announces (a render after the last answer, a fade). The
+ * read also needs at least one string of the route itself (`part: 'page'`), so a page that drew only the shell never counts as settled.
  */
 export async function settledUiText(page: Page, traffic: DataTraffic, readFor: ReadFor = 'strays'): Promise<UiText[]> {
   let previous = '';
@@ -214,11 +221,12 @@ export async function settledUiText(page: Page, traffic: DataTraffic, readFor: R
       async () => {
         latest = await visibleUiText(page, readFor);
         const now = JSON.stringify(latest);
-        const settled = now === previous && traffic.inFlight() === 0;
+        // The route's own content must be in: a read of the shell alone is stable too, and would pass for a page that rendered nothing.
+        const settled = now === previous && traffic.inFlight() === 0 && latest.some((t) => t.part === 'page');
         previous = now;
         return settled;
       },
-      { message: 'the UI text to stop changing', intervals: [250] },
+      { message: 'the UI text, the route\'s own included, to stop changing', intervals: [250] },
     )
     .toBe(true);
   return latest;
@@ -228,10 +236,13 @@ export async function settledUiText(page: Page, traffic: DataTraffic, readFor: R
  * Stops the page's timers where they are, so a toast or a message that fades on its own is still there however long the reads after
  * it take. The clock must have been installed before the page loaded (`page.clock.install()`); time moves on by a tick only,
  * enough for what is already due.
+ * The target lies a quarter of a second ahead of the page's time, not a few milliseconds: the clock keeps running while the
+ * call travels to the page, and a target already behind it is refused ("Cannot fast-forward to the past"). The toasts and messages
+ * fade after three seconds or more, so what the jump fires is nothing a test is waiting on.
  */
 export async function freezeClock(page: Page): Promise<void> {
   const now = await page.evaluate(() => Date.now());
-  await page.clock.pauseAt(now + 10);
+  await page.clock.pauseAt(now + 250);
 }
 
 /**

@@ -2,7 +2,7 @@
 // guard (fixtures/console-guard.ts). `test.fail` would accept any failure, so these run real probe tests in a nested Playwright
 // process (tests/framework/probe) and read from its JSON report which test failed and with what message.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -13,7 +13,7 @@ interface Outcome {
 }
 
 /** Runs the probe specs once and maps each test title to what happened to it. */
-function runProbes(): Record<string, Outcome> {
+async function runProbes(): Promise<Record<string, Outcome>> {
   const dir = mkdtempSync(join(tmpdir(), 'probe-'));
   try {
     const out = join(dir, 'report.json');
@@ -23,6 +23,11 @@ function runProbes(): Record<string, Outcome> {
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: out },
     });
     expect(run.error, 'the nested run started').toBeUndefined();
+    // No report means the nested run never got going (a config that failed to load): its stderr says why.
+    if (!existsSync(out)) {
+      await test.info().attach('nested-run-stderr.txt', { body: run.stderr, contentType: 'text/plain' });
+      throw new Error(`the nested run wrote no report (exit ${run.status}); its stderr is attached`);
+    }
     interface Spec { title: string; tests: { results: { status: string; errors: { message: string }[] }[] }[] }
     const report = JSON.parse(readFileSync(out, 'utf8')) as { suites: { specs: Spec[] }[] };
     const outcomes: Record<string, Outcome> = {};
@@ -40,10 +45,12 @@ function runProbes(): Record<string, Outcome> {
 }
 
 test.describe('fixture teardown guards', { tag: ['@framework', '@self-hosted'] }, () => {
+  // One nested run feeds every test below: in one worker, so a retry or a second worker never repeats it.
+  test.describe.configure({ mode: 'default' });
   let outcomes: Record<string, Outcome>;
-  test.beforeAll(() => {
+  test.beforeAll(async () => {
     test.setTimeout(120_000); // the nested run starts a second Playwright: longer than a test's own budget
-    outcomes = runProbes();
+    outcomes = await runProbes();
   });
 
   test('a write no mock answered fails the test that sent it, at teardown, naming the write', () => {

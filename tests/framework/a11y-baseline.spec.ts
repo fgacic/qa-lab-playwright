@@ -3,9 +3,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { KNOWN_VIOLATIONS } from '@support/a11y-baseline';
+import { KNOWN_VIOLATIONS, SCAN_NAMES } from '@support/a11y-baseline';
 
 const PIN_SPEC = readFileSync(join(__dirname, '..', 'a11y', 'known-violations.a11y.spec.ts'), 'utf8');
+const SCAN_SPEC = readFileSync(join(__dirname, '..', 'a11y', 'pages.a11y.spec.ts'), 'utf8');
+const scannedNames = [...SCAN_SPEC.matchAll(/\ba11y\.scan\(\s*'([^']+)'/g)].map(([, name]) => name);
 const pinnedPages = new Set([...PIN_SPEC.matchAll(/\bon\('([^']+)'\)/g)].map(([, page]) => page));
 
 test.describe('the accessibility baseline', { tag: ['@framework'] }, () => {
@@ -26,5 +28,12 @@ test.describe('the accessibility baseline', { tag: ['@framework'] }, () => {
   test('every entry is recorded on the page its pin scans, and lists no page twice', () => {
     expect(KNOWN_VIOLATIONS.filter((v) => !v.pages.includes(v.page)).map((v) => v.id), 'entries whose pin scans a page the entry was not recorded on').toEqual([]);
     expect(KNOWN_VIOLATIONS.filter((v) => new Set(v.pages).size !== v.pages.length).map((v) => v.id), 'entries that list a page twice').toEqual([]);
+  });
+
+  test('every state in SCAN_NAMES is scanned in pages.a11y.spec.ts, exactly once, and no scan names a state outside the list', () => {
+    expect(scannedNames.length, 'the scan of the spec found no `a11y.scan(...)` call at all').toBeGreaterThan(0);
+    expect(SCAN_NAMES.filter((name) => !scannedNames.includes(name)), 'named in SCAN_NAMES, scanned nowhere (its baseline entries could never be checked)').toEqual([]);
+    expect(scannedNames.filter((name, i) => scannedNames.indexOf(name) !== i), 'scanned twice under one name').toEqual([]);
+    expect(scannedNames.filter((name) => !(SCAN_NAMES as readonly string[]).includes(name)), 'scanned, but not in SCAN_NAMES').toEqual([]);
   });
 });

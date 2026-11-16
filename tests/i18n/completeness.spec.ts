@@ -470,12 +470,13 @@ test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
 /**
  * The two checks above pass when nothing leaks, which they would also do if they could not see a leak. So the same reads and the same
  * verdicts run once more on a German translation file the test spoils: one key removed (the page shows the key itself) and one value
- * put back to its English wording. Both must be reported, and only those.
+ * put back to its English wording, and one key that a page uses as an `aria-label` (the Compare button on a product card), which a read of the
+ * text alone would never see. All three must be reported, and only those.
  */
 test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, () => {
-  const spoiled = { removed: 'header.menu.home', english: 'header.menu.contact' };
+  const spoiled = { removed: 'header.menu.home', english: 'header.menu.contact', label: 'pages.comparison.add' };
 
-  test('a key missing from the German file is reported as a leak, and a value left in English as stray English', async ({ context, consoleGuard, apiMock, catalog, api, request }) => {
+  test('a key missing from the German file is reported as a leak (in text and in an aria-label), and a value left in English as stray English', async ({ context, consoleGuard, apiMock, catalog, api, request }) => {
     const home = visitNamed('home');
     const english = (await (await request.get('/assets/i18n/en.json')).json()) as Record<string, unknown>;
     await context.route('**/assets/i18n/de.json', async (route) => {
@@ -483,6 +484,7 @@ test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, (
       const file = (await response.json()) as Record<string, unknown>;
       const menu = (file.header as { menu: Record<string, string> }).menu;
       delete menu.home;
+      delete (file.pages as { comparison: Record<string, string> }).comparison.add;
       menu.contact = (english.header as { menu: Record<string, string> }).menu.contact;
       await route.fulfill({ response, json: file });
     });
@@ -491,7 +493,9 @@ test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, (
     const { texts: keyRead } = await readPage('de', home, await arrange(home, arrangement), 'keys');
     const { english: englishRead, texts } = await bothRenderings('de', home, arrangement);
 
-    expect(leakedKeys(keyRead, home, 'de'), `only the key removed from the file (${spoiled.removed}) is reported`).toEqual([spoiled.removed]);
+    expect(keyRead, `the key removed from the file (${spoiled.label}) is read as an aria-label`).toContainEqual(expect.objectContaining({ kind: 'aria-label', text: spoiled.label }));
+    // Once per place it shows (the Compare button's aria-label and tooltip on every card), so the distinct keys are compared.
+    expect([...new Set(leakedKeys(keyRead, home, 'de'))].sort(), `only the keys removed from the file (${spoiled.removed}, ${spoiled.label}) are reported`).toEqual([spoiled.removed, spoiled.label].sort());
     expect(strayEnglish(texts, englishRead, home, 'de'), `only the value put back to English (${spoiled.english}) is reported`).toEqual(['"Contact"']);
   });
 });

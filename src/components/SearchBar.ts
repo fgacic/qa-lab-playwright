@@ -8,6 +8,10 @@ import { step } from '@support/step';
  */
 const LENGTH_RULE = /(?:at least|at most|no more than|too (?:short|long)|minimum|maximum)\b[^.]*\bcharacters?\b|\bcharacters?\b[^.]*(?:at least|at most|too (?:short|long)|minimum|maximum)/i;
 
+/** What the shop prints about a search, word for word: the caption over the grid and the count under it. */
+export const searchedFor = (term: string): string => `Searched for: ${term}`;
+export const productsFoundFor = (count: number, term: string): string => `${count} products found for '${term}'`;
+
 export class SearchBar {
   readonly query: Locator;
   readonly submitButton: Locator;

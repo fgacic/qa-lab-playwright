@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { step } from '@support/step';
+import type { ContactSubject } from '@support/payloads';
+import type { Person } from '@support/test-data';
 
 export type ChatAction = 'Find a product' | 'Order a product' | 'Checkout' | 'Create support ticket';
 
@@ -32,13 +34,11 @@ export class ChatWidget {
     return this.window.getByText(text).last();
   }
 
-  /** Every time the assistant has said this, in order: a question asked again shows up as a second one. */
-  asked(text: string): Locator {
-    return this.window.getByText(text, { exact: true });
-  }
-
-  /** A line the visitor typed, echoed in the transcript. */
-  said(text: string): Locator {
+  /**
+   * Every line of the transcript with exactly this text, whoever said it: what the visitor typed, or a question the assistant
+   * asked. A question asked again shows up as a second one, so `toHaveCount(1)` proves it was asked once.
+   */
+  line(text: string): Locator {
     return this.window.getByText(text, { exact: true });
   }
 
@@ -67,6 +67,20 @@ export class ChatWidget {
   @step('Answer the chat with "{0}"')
   async pick(option: string): Promise<void> {
     await this.window.getByRole('button', { name: option, exact: true }).last().click();
+  }
+
+  /**
+   * Answers the support-ticket dialogue as far as its attachment question: the three personal questions, the subject and the
+   * description. The ticket is not sent yet: what follows (skip or attach) is the caller's.
+   */
+  @step('Answer the support-ticket questions as {0.email}')
+  async fillTicketUntilAttachment(guest: Person, subject: ContactSubject, description: string): Promise<void> {
+    await this.choose('Create support ticket');
+    await this.send(guest.firstName);
+    await this.send(guest.lastName);
+    await this.send(guest.email);
+    await this.pick(subject);
+    await this.send(description);
   }
 
   @step('Ask the chat for "{0}"')

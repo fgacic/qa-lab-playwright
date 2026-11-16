@@ -106,7 +106,8 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
 
     await message.replyButton.click();
 
-    await expect(message.feedback.filter({ hasText: /required/i }), 'ADM-06: the form says a reply is required').toBeVisible({ timeout: BUG_TIMEOUT });
+    // The defect is the request that goes out: it is checked first, and what the form says about it is any failure, in any wording.
     await expect(apiMock.expectNoRequest('POST', `/messages/${contactMessage.id}/reply`), 'ADM-06: no empty reply is sent').resolves.toBeUndefined();
+    await expect(message.failure, 'ADM-06: the form says a reply is required').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 });

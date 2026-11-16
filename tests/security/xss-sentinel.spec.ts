@@ -81,11 +81,25 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
     });
   }
 
+  // Counted, not run: an `<svg onload>` put into a document with `innerHTML` is inert in every engine (only a parser run on a whole document,
+  // a frame's `srcdoc`, fires it), so this control is about the walk into the frame and the shadow root. The id is its own (11), so a
+  // hit from another payload could never be mistaken for it.
   test('counts payloads left inside an iframe and a shadow root', async ({ homePage, xss }) => {
     await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
-    await xss.insertInFrameAndShadowRoot('<img src="x">', '<svg onload="__qaLabXssHit(9)"></svg>');
+    await xss.insertInFrameAndShadowRoot('<img src="x">', '<svg onload="__qaLabXssHit(11)"></svg>');
 
     await expect.poll(() => xss.injectedCount(), { message: 'one payload in the frame and one in the shadow root' }).toBe(2);
+  });
+
+  // The live counterpart: a frame's `srcdoc` is parsed as a document, which is the one sink where an svg handler really runs.
+  test('detects an svg handler that runs in a frame, and counts it once', async ({ homePage, xss }) => {
+    await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+
+    await xss.parseInFrame('<svg onload=__qaLabXssHit(12)>');
+
+    await expect.poll(() => xss.executions(), 'the handler ran').toEqual(['12']);
+    // The frame is counted by its `srcdoc` attribute, and its own parsed document is not counted again.
+    await expect.poll(() => xss.injectedCount(), { message: 'one payload: the frame' }).toBe(1);
   });
 
   // The sentinel's wrappers and hook are installed on the context before the first navigation. A payload that runs while

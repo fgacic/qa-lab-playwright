@@ -85,7 +85,6 @@ export interface AdminFixtures {
 /** Every admin endpoint the back office calls, answered with realistic records. */
 function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
   const productPage = A.paginated([product], 9);
-  const spec = { id: '01QALABSPEC00000000000000', product_id: product.id, spec_name: 'Weight', spec_value: '340', spec_unit: 'g' };
   return [
     mock.respond('GET', '/users/me', A.adminUser),
     mock.respond('GET', '/invoices', A.paginated([order])),
@@ -117,11 +116,11 @@ function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
     mock.respond('QUERY', '/products', productPage),
     mock.respond('QUERY', '/products/search', productPage),
     mock.respond('GET', /^\/products\/[^/]+$/, product),
-    mock.respond('GET', /^\/products\/[^/]+\/specs$/, [spec]),
+    mock.respond('GET', /^\/products\/[^/]+\/specs$/, [A.spec]),
     mock.respond('POST', '/products', product, 201),
     mock.respond('PUT', /^\/products\/[^/]+$/, A.updated),
     mock.respond('DELETE', /^\/products\/[^/]+$/, '', 204),
-    mock.respond('POST', /^\/products\/[^/]+\/specs$/, { ...spec, id: '01QALABSPEC00000000000001' }, 201),
+    mock.respond('POST', /^\/products\/[^/]+\/specs$/, { ...A.spec, id: '01QALABSPEC00000000000001' }, 201),
     mock.respond('DELETE', /^\/products\/[^/]+\/specs\/[^/]+$/, '', 204),
     mock.respond('GET', '/images', [product.product_image]),
     mock.respond('GET', '/reports/total-sales-of-years', A.reports.totalSalesOfYears),
@@ -211,10 +210,12 @@ export const test = mergeTests(adminTokenTest, mocksTest).extend<AdminFixtures>(
     const failures = outcomes.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
     if (failures.length) throw new AggregateError(failures, 'Cleaning up the users this test created failed');
   },
-  brandFactory: async ({ api, adminToken }, use) => {
+  brandFactory: async ({ api, adminToken, adminSession }, use) => {
     const made = new Set<string>(); // slugs, so a brand the UI saved under the same slug is removed as well
     await use({
       async create() {
+        // Like `createdProducts` and `createdUsers`, it never touches the real API in the mocked session: that session has its own mocked brand (`A.brand`).
+        if (adminSession !== 'storage-state') throw new Error("brandFactory arranges real brands: it needs adminSession 'storage-state' (the mocked back office serves A.brand).");
         const suffix = randomUUID().slice(0, 8);
         const brand = { name: `QaLab Brand ${suffix}`, slug: `qalab-brand-${suffix}` };
         made.add(brand.slug);
@@ -222,8 +223,9 @@ export const test = mergeTests(adminTokenTest, mocksTest).extend<AdminFixtures>(
       },
     });
     if (!made.size) return;
+    // The sign-in is part of the cleanup: a login that fails is reported with the removals, not thrown past them.
     // Every removal is attempted whatever the others do, and every failure is reported at once, like the product cleanup.
-    const [outcome] = await Promise.allSettled([removeBrands(api, made, await adminToken())]);
+    const [outcome] = await Promise.allSettled([(async () => removeBrands(api, made, await adminToken()))()]);
     const failures = outcome.status === 'rejected' ? [outcome.reason] : outcome.value;
     if (failures.length) throw new AggregateError(failures, 'Cleaning up the brands this test created failed');
   },

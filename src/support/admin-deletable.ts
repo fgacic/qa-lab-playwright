@@ -1,6 +1,6 @@
-import { brand, category, customer, product } from '@support/admin-payloads';
-import { ADMIN_MESSAGES } from './alerts';
-import type { AdminListName } from './admin-lists';
+import type { AdminListName } from '@pages/admin/admin-lists';
+import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import { brand, category, customer, product } from './admin-payloads';
 
 /** What one entity of a deletable list is called in the messages the back office shows. */
 type DeletedEntity = 'product' | 'brand' | 'category' | 'user';

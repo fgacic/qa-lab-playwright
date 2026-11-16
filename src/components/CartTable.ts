@@ -7,7 +7,6 @@ export const CART_MESSAGES = {
   quantityUpdated: 'Product quantity updated.',
   lineDeleted: 'Product deleted.',
   atMost99: 'You can order at most 99 of this product.',
-  notAnInteger: 'The quantity field must be an integer.',
   serverError: 'Server Error',
   rentalPerHour: 'Item for rent, price per hour',
 } as const;

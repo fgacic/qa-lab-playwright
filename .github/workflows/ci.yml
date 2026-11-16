@@ -243,9 +243,12 @@ jobs:
       - name: Fetch the Allure history of earlier runs
         run: |
           mkdir -p allure-history
-          curl -fsSL "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/history/history.jsonl" -o allure-history/history.jsonl \
-            && echo "history: $(wc -l < allure-history/history.jsonl) earlier runs" \
-            || { echo "no published history yet, starting one"; rm -f allure-history/history.jsonl; }
+          if curl -fsSL "https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/history/history.jsonl" -o allure-history/history.jsonl; then
+            echo "history: $(wc -l < allure-history/history.jsonl) earlier runs"
+          else
+            echo "no published history yet, starting one"
+            rm -f allure-history/history.jsonl
+          fi
           # A truncated download or an error page served with 200 would poison every later report:
           # reuse the file only when every line parses as JSON.
           if [ -f allure-history/history.jsonl ] && ! node -e '

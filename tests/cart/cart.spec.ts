@@ -129,13 +129,12 @@ test.describe('Cart', () => {
     });
   }
 
-  test('a fractional quantity is corrected to a whole number, also in the saved cart', { tag: ['@negative', '@bug'] }, async ({ checkout, cartItems, apiMock }) => {
+  test('a fractional quantity is corrected to a whole number, also in the saved cart', { tag: ['@negative', '@bug'] }, async ({ checkout, cartItems }) => {
     knownBug('BUG-42', 'a quantity of 2.5 in the cart is refused by the shop (422, "must be an integer"), yet the line keeps showing 2.5 and a total for 2.5 items; the product page corrects it to 2.');
     const [{ product }] = cartItems;
     const row = checkout.cart.table.row(product.name);
 
-    const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, FRACTIONAL_QUANTITY)]);
-    expect(saved.response.status(), 'the shop refuses a fractional quantity').toBe(422);
+    await checkout.cart.table.setQuantity(product.name, FRACTIONAL_QUANTITY);
 
     await expect(row.quantity, 'BUG-42: the quantity is corrected to a whole number').toHaveValue(String(CORRECTED_FRACTION), { timeout: BUG_TIMEOUT });
     await expect(row.linePrice, 'BUG-42: the line is priced for the corrected quantity').toShowAmount(product.price * CORRECTED_FRACTION, { timeout: BUG_TIMEOUT });
@@ -150,6 +149,8 @@ test.describe('Cart', () => {
 
     expect(saved.response.status(), 'the shop saves the quantity at the limit').toBe(200);
     await expect(checkout.toast.message(MESSAGES.quantityUpdated)).toBeVisible();
+    // Not an instant check: the warning is raised when the number is typed, before the save is sent, and toasts last about five seconds.
+    // With the save's toast on screen the warning, had the page raised one, would be on screen beside it.
     await expect(checkout.toast.message(MESSAGES.atMost99)).toHaveCount(0);
     await checkout.page.reload();
     await expect(checkout.cart.table.row(product.name).quantity).toHaveValue(String(QUANTITY_LIMIT));

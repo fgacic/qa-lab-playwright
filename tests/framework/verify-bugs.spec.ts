@@ -2,7 +2,7 @@
 // for another reason, the perf pass of its own and the live-only listing. The verdicts are table-tested in pin-verdict.spec.ts; this
 // drives the orchestration itself, against a stand-in for Playwright (tests/framework/probe/fake-playwright.mjs) that answers from a scenario.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -17,19 +17,20 @@ interface Pin {
   projects: string[];
   onLive?: true;
   runs: ('reproduces' | 'fixed' | 'other')[];
+  noResult?: true;
 }
-interface Call { listing: boolean; live: boolean; projects: string[]; rerun: boolean; env: { VERIFY_BUGS?: string } }
+interface Call { args: string[]; listing: boolean; live: boolean; projects: string[]; rerun: boolean; env: { VERIFY_BUGS?: string } }
 interface Outcome { status: number | null; stdout: string; stderr: string; calls: Call[]; summary: Record<string, string[]> }
 
 const pin = (title: string, over: Partial<Pin> = {}): Pin => ({ file: 'tests/x/x.spec.ts', line: 10, title, id: 'PIN-1', projects: ['chromium'], runs: ['reproduces'], ...over });
 
 /** Runs verify-bugs.mjs against the stand-in, in a directory of its own (it writes test-results/ there). */
-function verify(pins: Pin[]): Outcome {
+function verify(pins: Pin[], runErrors?: string[]): Outcome {
   const dir = mkdtempSync(join(tmpdir(), 'verify-bugs-spec-'));
   try {
     const scenario = join(dir, 'scenario.json');
     const log = join(dir, 'calls.jsonl');
-    writeFileSync(scenario, JSON.stringify({ pins }));
+    writeFileSync(scenario, JSON.stringify({ pins, runErrors }));
     writeFileSync(log, '');
     const run = spawnSync(process.execPath, [join(ROOT, 'scripts', 'verify-bugs.mjs')], {
       cwd: dir,
@@ -39,7 +40,9 @@ function verify(pins: Pin[]): Outcome {
     });
     expect(run.error, 'verify-bugs started').toBeUndefined();
     const calls = readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Call);
-    const summary = JSON.parse(readFileSync(join(dir, 'test-results', 'verify-bugs.json'), 'utf8')) as Record<string, string[]>;
+    // Written only when the run got as far as judging the pins.
+    const summaryFile = join(dir, 'test-results', 'verify-bugs.json');
+    const summary = existsSync(summaryFile) ? (JSON.parse(readFileSync(summaryFile, 'utf8')) as Record<string, string[]>) : {};
     return { status: run.status, stdout: run.stdout, stderr: run.stderr, calls, summary };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -55,6 +58,18 @@ test.describe('verify-bugs orchestration', { tag: ['@framework'] }, () => {
     expect(runs.map((call) => call.projects.slice().sort()), 'one pass for every project but perf, then perf alone').toEqual([['admin', 'chromium'], ['perf']]);
     expect(runs.every((call) => call.env.VERIFY_BUGS === '1'), 'pins run as ordinary tests').toBe(true);
     expect(outcome.summary.reproduces).toHaveLength(3);
+  });
+
+  test('every Playwright call lifts the config\'s CI failure cap, so more than 30 reproducing pins still all run', () => {
+    const outcome = verify([pin('first'), pin('second', { line: 20 })]);
+    expect(outcome.calls.length).toBeGreaterThan(2);
+    for (const call of outcome.calls) expect(call.args, 'a listing and every run').toContain('--max-failures=0');
+  });
+
+  test('a report that carries errors fails the gate with the first line of the message', () => {
+    const outcome = verify([pin('first')], ['Error: config exploded\n    at somewhere']);
+    expect(outcome.status).toBe(1);
+    expect(outcome.stderr).toContain('verify-bugs: Playwright reported errors: Error: config exploded');
   });
 
   test('a pin that fails for another reason is run once more, alone: reproducing the second time is reported as flaky, not as a pass', () => {
@@ -73,6 +88,13 @@ test.describe('verify-bugs orchestration', { tag: ['@framework'] }, () => {
     expect(outcome.status).toBe(1);
     expect(outcome.calls.filter((call) => call.rerun)).toHaveLength(1);
     expect(outcome.stdout).toMatch(/fails for another reason: .*broken precondition.*\(the same on a rerun\)/);
+  });
+
+  test('a pin that is scheduled but produced no result is not verified, and fails the gate', () => {
+    const outcome = verify([pin('steady'), pin('vanished', { line: 20, noResult: true })]);
+    expect(outcome.status).toBe(1);
+    expect(outcome.stdout).toMatch(/not verified: .*vanished.*scheduled but produced no result/);
+    expect(outcome.summary.notVerified).toHaveLength(1);
   });
 
   test('a pin that passes is a fix to record, and fails the gate without a rerun', () => {

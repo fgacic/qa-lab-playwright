@@ -1,5 +1,6 @@
-import { SORT_OPTIONS, type SortOption } from '@components/FilterPanel';
+import { SORT, SORT_OPTIONS, type SortOption } from '@components/FilterPanel';
 import { expect, test } from '@fixtures';
+import { PLIERS } from '@support/catalog-terms';
 import type { Product, ProductPage } from '@support/toolshop-api';
 
 const CO2_ORDER = ['A', 'B', 'C', 'D', 'E'];
@@ -18,7 +19,9 @@ const sortKey: Record<SortField, (p: Product) => string | number> = {
 };
 
 /** A category with several products, to sort inside a filter. */
-const FILTERED_CATEGORY = 'Pliers';
+const FILTERED_CATEGORY = PLIERS.category;
+/** The sort the paging and filter tests use: its menu label, and the value the shop sends for it. */
+const PRICE_ASCENDING = SORT_OPTIONS[SORT.priceAscending];
 
 test.describe('Sorting', () => {
   for (const [label, value] of Object.entries(SORT_OPTIONS) as [SortOption, string][]) {
@@ -39,10 +42,10 @@ test.describe('Sorting', () => {
   }
 
   test('page 2 continues the order of page 1', async ({ homePage, apiMock }) => {
-    const first = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc');
-    await homePage.filters.sortBy('Price (Low - High)');
+    const first = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === PRICE_ASCENDING);
+    await homePage.filters.sortBy(SORT.priceAscending);
     const pageOne = (await first).json;
-    const second = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc' && body.page === '2');
+    const second = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === PRICE_ASCENDING && body.page === '2');
 
     await homePage.pagination.goTo(2);
 
@@ -55,9 +58,9 @@ test.describe('Sorting', () => {
 
   test('sorting a filtered list keeps the filter and orders what is left', async ({ homePage, apiMock }) => {
     await homePage.filters.filterByCategory(FILTERED_CATEGORY);
-    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc' && !!body.by_category);
+    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === PRICE_ASCENDING && !!body.by_category);
 
-    await homePage.filters.sortBy('Price (Low - High)');
+    await homePage.filters.sortBy(SORT.priceAscending);
 
     const { json: found } = await sorted;
     expect(found.data.length, `the catalogue should hold at least two ${FILTERED_CATEGORY}`).toBeGreaterThan(1);

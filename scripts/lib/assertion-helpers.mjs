@@ -4,7 +4,6 @@
 export const ASSERTION_HELPERS = [
   'expectEdits',
   'expectFixed',
-  'expectImagesLoaded',
   'expectNoInjectedElements',
   'expectNoNewViolations',
   'expectNoRequest',

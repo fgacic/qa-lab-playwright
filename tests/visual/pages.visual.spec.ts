@@ -83,6 +83,26 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await expect(page).toHaveScreenshot('cart.png');
   });
 
+  test('checkout guest form with errors', async ({ checkout, page }) => {
+    await checkout.cart.proceed();
+    await checkout.signIn.guestTab.click();
+    await checkout.signIn.continueAsGuestButton.click();
+    await expect(checkout.signIn.guestEmail.error).toBeVisible();
+    await settleImages(page);
+    await expect(page).toHaveScreenshot('checkout-guest-errors.png');
+  });
+
+  test.describe('empty cart (mocked)', { tag: ['@mocked'] }, () => {
+    // The shop answers the cart with no lines: the state it words ("The cart is empty."), unlike a visitor with no cart at all (BUG-13).
+    test.use(withMocks(mock.respond('GET', /^\/carts\/[^/]+$/, { id: 'qa-lab', additional_discount_percentage: null, lat: null, lng: null, cart_items: [] })));
+
+    test('empty cart', async ({ checkout, page }) => {
+      await expect(checkout.cart.emptyMessage).toBeVisible();
+      await settleImages(page);
+      await expect(page).toHaveScreenshot('cart-empty.png');
+    });
+  });
+
   test('checkout billing step', async ({ checkout, page }) => {
     await checkout.cart.proceed();
     await checkout.signIn.continueAsGuest(fakeGuest());
@@ -164,6 +184,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
   test('chat open', async ({ homePage }) => {
     await homePage.shell.chat.open();
     await expect(homePage.shell.chat.greeting).toBeVisible();
+    // An element shot of a small window, not a page: the default 150 differing pixels would be a large share of it (a changed word is about that many), so the budget is tighter, 30 pixels, which still absorbs the anti-aliasing of its rounded corners.
     await expect(homePage.shell.chat.window).toHaveScreenshot('chat.png', { maxDiffPixels: 30 });
   });
 

@@ -13,6 +13,8 @@ import { ProductPage } from './ProductPage';
 export class HomePage {
   readonly shell: AppShell;
   readonly heading: Locator;
+  /** The banner picture over the heading: a click on the page that goes nowhere (the heading is behind it, so a click on that one is intercepted). */
+  readonly banner: Locator;
   readonly search: SearchBar;
   readonly filters: FilterPanel;
   readonly grid: ProductGrid;
@@ -25,6 +27,7 @@ export class HomePage {
     const body = page.locator('body');
     this.shell = new AppShell(page);
     this.heading = page.getByRole('heading', { name: 'Practice Software Testing - Toolshop', level: 1 });
+    this.banner = page.getByRole('img', { name: 'Banner' });
     this.search = new SearchBar(body);
     this.filters = new FilterPanel(body);
     this.grid = new ProductGrid(body);

@@ -23,7 +23,7 @@ export class AdminFormChrome {
   constructor(readonly page: Page) {
     this.heading = page.getByRole('heading', { level: 2 });
     this.id = page.getByRole('textbox', { name: 'Id', exact: true });
-    this.saveButton = page.getByRole('button', { name: 'Save' });
+    this.saveButton = page.getByRole('button', { name: 'Save', exact: true });
     this.backLink = page.getByRole('link', { name: 'Back' });
     this.alerts = page.getByRole('alert');
     this.failure = reportedFailure(page);

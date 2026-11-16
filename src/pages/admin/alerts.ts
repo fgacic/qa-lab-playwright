@@ -52,4 +52,6 @@ export const ADMIN_MESSAGES = {
   statusUpdated: 'Status updated!',
   settingsSaved: 'Settings saved!',
   quantityRequired: 'Quantity is required',
+  /** What the order page says for an invoice it could not load, a missing one or not (ADM-13). */
+  invoiceMissing: "This invoice doesn't exist.",
 } as const;

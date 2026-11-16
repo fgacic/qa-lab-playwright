@@ -65,6 +65,12 @@ export const product: Product = {
   product_image: { id: '01QALABIMAGE00000000000000', title: 'Qa Lab Pliers', file_name: 'pliers01.avif', by_name: 'Qa Lab', by_url: 'https://example.com', source_name: 'Qa Lab', source_url: 'https://example.com' },
 };
 
+/** The one specification the mocked product carries: what its edit form lists, and what a removal of it targets. */
+export const spec = { id: '01QALABSPEC00000000000000', product_id: product.id, spec_name: 'Weight', spec_value: '340', spec_unit: 'g' };
+
+/** A price as the back office draws it: dollars, two decimals. */
+export const dollars = (amount: number): string => `$${amount.toFixed(2)}`;
+
 /** A record the mocked search answers with: not in the full list, so a table that shows it has really been replaced. */
 export const SEARCH_HIT = 'Qa Lab Search Hit';
 

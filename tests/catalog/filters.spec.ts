@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { HAMMER, PLIERS } from '@support/catalog-terms';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -6,12 +7,11 @@ import { emptyProductPage } from '@support/payloads';
 import { settleRequests } from '@support/settle';
 import type { ProductPage } from '@support/toolshop-api';
 
-/**
- * Every one-dollar step of the price slider sends its own QUERY /products, and the shop shows
- * whichever answer arrives last (BUG-30). The slider tests are about the filter, not that race,
- * so they call `apiMock.serialize('QUERY', '/products')`: the answers reach the page in the order
- * they were asked for. The race itself is pinned on its own, with `apiMock.delay`.
- */
+// Every one-dollar step of the price slider sends its own QUERY /products, and the shop shows
+// whichever answer arrives last (BUG-30). The slider tests are about the filter, not that race,
+// so they call `apiMock.serialize('QUERY', '/products')`: the answers reach the page in the order
+// they were asked for. The race itself is pinned on its own, with `apiMock.delay`.
+
 /** The upper and lower price limits the slider tests set. */
 const MAX_PRICE = 80;
 const MIN_PRICE = 15;
@@ -21,12 +21,12 @@ const MIN_PRICE = 15;
  * against the API's answer for these, so only their existence is assumed here.
  */
 const SEED = {
-  category: 'Pliers',
+  category: PLIERS.category,
   parentCategory: 'Power Tools',
   /** The subcategories of `parentCategory`, which ticking the parent ticks too. */
   children: ['Grinder', 'Sander', 'Saw', 'Drill'],
   /** A category that is not under `parentCategory`. */
-  otherCategory: 'Hammer',
+  otherCategory: HAMMER.category,
   brand: 'MightyCraft Hardware',
   /** A brand that sells in `otherCategory`. */
   hammerBrand: 'ForgeFlex Tools',
@@ -206,9 +206,18 @@ test.describe('Product filters', () => {
     // The key presses go past the max handle: the slider either stops the min there or carries the max along.
     await settleRequests(homePage.page, '/products', () => filters.setMinPrice(CROSSED_MIN));
 
-    const [min, max] = await Promise.all([filters.minPrice, filters.maxPrice].map(async (handle) => Number(await handle.getAttribute('aria-valuenow'))));
-    expect(min, 'the min handle is never above the max handle').toBeLessThanOrEqual(max);
-    await expect.poll(async () => (await homePage.grid.priceValues()).filter((price) => price < min || price > max), 'prices on the grid outside the range').toEqual([]);
+    // Read together, again and again, so the handles and the grid are judged as one state: a slider that is still moving, or a grid that
+    // has not drawn the last answer, only gets the poll to try once more.
+    await expect
+      .poll(
+        async () => {
+          const [min, max] = await Promise.all([filters.minPrice, filters.maxPrice].map(async (handle) => Number(await handle.getAttribute('aria-valuenow'))));
+          const outside = (await homePage.grid.priceValues()).filter((price) => price < min || price > max);
+          return { minAboveMax: min > max, outside };
+        },
+        { message: 'the min handle is never above the max handle, and no price on the grid is outside the range' },
+      )
+      .toEqual({ minAboveMax: false, outside: [] });
   });
 
   test('the grid shows the last price step, even when an earlier answer arrives late', { tag: ['@bug'] }, async ({ homePage, apiMock }) => {

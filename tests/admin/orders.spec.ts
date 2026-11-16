@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADMIN_MESSAGES, alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
 import { ORDER_STATUSES } from '@pages/admin/AdminPages';
-import { ORDER_STATUS, orderLine, orderPayment, paginated } from '@support/admin-payloads';
+import { ORDER_STATUS, dollars, orderLine, orderPayment, paginated } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
@@ -9,7 +9,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     const row = adminOrders.table.row(backOffice.order.invoice_number);
 
     await expect(row).toContainText(backOffice.order.status);
-    await expect(row).toContainText(`$${backOffice.order.total.toFixed(2)}`);
+    await expect(row).toContainText(dollars(backOffice.order.total));
   });
 
   test('searching sends the term and lists the matches', async ({ adminOrders, backOffice, apiMock }) => {
@@ -29,12 +29,12 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     const order = await adminOrders.edit(backOffice.order.invoice_number);
 
     await expect(order.invoiceNumber).toHaveValue(backOffice.order.invoice_number);
-    await expect(order.total).toHaveValue(`$ ${backOffice.order.total.toFixed(2)}`);
+    await expect(order.total).toHaveValue(dollars(backOffice.order.total).replace('$', '$ '));
     await expect(order.paymentMethod).toHaveValue(orderPayment.label);
     await expect(order.billingCity).toHaveValue(backOffice.order.billing_city);
     await expect(order.lines).toHaveCount(1);
     // Quantity, product, unit price and line total, as the fixed order line has them.
-    await expect(order.lineCells()).toHaveText([String(orderLine.quantity), backOffice.product.name, `$${orderLine.unitPrice}`, `$${orderLine.total}`]);
+    await expect(order.lineCells()).toHaveText([String(orderLine.quantity), backOffice.product.name, dollars(orderLine.unitPrice), dollars(orderLine.total)]);
   });
 
   // The order's current status is not offered as an option, so every other status is set in turn.

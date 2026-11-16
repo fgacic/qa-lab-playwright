@@ -85,7 +85,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
       await form.chrome.save();
       await sent;
 
-      await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the category was refused').toBeVisible({ timeout: BUG_TIMEOUT });
+      await expect(form.chrome.failure, 'ADM-12: the form says the category was refused').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -106,4 +106,25 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
       await expect(form.chrome.failure, 'ADM-14: a failed category load tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
+
+  // The refusal of an edit: 409 when the slug is taken, 500 when the server fails.
+  for (const status of [409, 500]) {
+    test.describe(`when saving an edit is refused (${status})`, { tag: ['@negative', '@bug'] }, () => {
+      test.use(withMocks(mock.fail('PUT', /^\/categories\/[^/]+$/, status, { message: 'The category could not be saved.' })));
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+      test(`the admin is told the edited category was not saved`, async ({ adminCategories, apiMock }) => {
+        knownBug('ADM-23', 'a brand or category edit the API refuses to save (409 slug taken, 500) leaves the form as it was: no message, no "saved", nothing (ADM-12 is the same for a new one).', { absence: true });
+        const form = await adminCategories.edit(category.name);
+        await expect(form.name.input).toHaveValue(category.name);
+        const refused = apiMock.waitForResponse('PUT', `/categories/${category.id}`);
+
+        await form.slug.input.fill('qa-lab-renamed');
+        await form.chrome.save();
+        expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
+
+        await expect(form.chrome.failure, 'ADM-23: a refused category edit tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
+      });
+    });
+  }
 });

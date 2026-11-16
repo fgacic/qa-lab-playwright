@@ -140,6 +140,22 @@ test.describe('Registration form', () => {
     });
   });
 
+  test.describe('when the postcode lookup fails', { tag: ['@mocked', '@negative'] }, () => {
+    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 500)));
+
+    test('the address stays as typed and the form is still usable', async ({ registerPage }) => {
+      await registerPage.street.input.fill('Typed Street');
+      await registerPage.country.input.selectOption('NL');
+      await registerPage.postalCode.input.fill('1234 AB');
+      await registerPage.houseNumber.input.fill('1');
+
+      await expect(registerPage.street.input).toHaveValue('Typed Street');
+      await registerPage.city.input.fill('Typed City');
+      await expect(registerPage.city.input).toHaveValue('Typed City');
+      await expect(registerPage.error).toHaveCount(0);
+    });
+  });
+
   test.describe('when registration succeeds', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.respond('POST', '/users/register', { id: NEW_CUSTOMER_ID }, 201)));
 

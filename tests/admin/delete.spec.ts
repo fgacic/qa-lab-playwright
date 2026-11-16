@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
-import { DELETABLE, deletedMessage } from '@pages/admin/deletable';
+import { DELETABLE, deletedMessage } from '@support/admin-deletable';
 import { LIST_ANSWERS } from '@support/admin-payloads';
 
 /**

@@ -117,6 +117,29 @@ test.describe('Product comparison', () => {
     });
   });
 
+  test.describe('with a rental and a product', () => {
+    test.use({
+      comparedProducts: async ({ catalog }, use) => use([await catalog.rental(), await catalog.inStock()]),
+    });
+
+    test('the rental has a column of its own, with its price, brand and category', async ({ comparisonPage, comparedProducts }) => {
+      const [rental, product] = comparedProducts;
+
+      await expect(comparisonPage.productColumns).toContainText([rental.name, product.name]);
+      await expect(comparisonPage.cells('Price')).toHaveText([`$${rental.price.toFixed(2)}`, `$${product.price.toFixed(2)}`]);
+      await expect(comparisonPage.cells('Brand')).toHaveText([rental.brand.name, product.brand.name]);
+      await expect(comparisonPage.cells('Category')).toHaveText([rental.category.name, product.category.name]);
+    });
+
+    test('a rental is not called out of stock, as the rentals page and its own page do not', { tag: ['@bug'] }, async ({ comparisonPage }) => {
+      knownBug('BUG-60', 'the comparison lists a rental as "Out of Stock" (the API marks the seeded rentals in_stock: false), while the rentals page and the rental\'s own page offer it for hire with an enabled Add to cart.');
+      await expect(comparisonPage.cells('Availability'), 'one cell for the rental and one for the product').toHaveCount(2);
+      await expect(comparisonPage.cells('Availability').nth(1), 'the product in stock is listed as such').toHaveText('In Stock');
+
+      await expect(comparisonPage.cells('Availability').first(), 'BUG-60: a rental is not listed as out of stock').not.toHaveText('Out of Stock', { timeout: BUG_TIMEOUT });
+    });
+  });
+
   test.describe('with two products of the same brand', () => {
     test.use({
       comparedProducts: async ({ api, catalog }, use) => {

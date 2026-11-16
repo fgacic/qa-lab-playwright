@@ -4,7 +4,6 @@ import type { AdminProductForm } from '@pages/admin/AdminForms';
 import type { AdminListPage } from '@pages/admin/AdminListPage';
 import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import type { HomePage } from '@pages/HomePage';
-import { API_URL } from '@support/env';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 import { contactSubjectSlug } from '@support/payloads';
@@ -95,7 +94,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       await adminProducts.open();
       await adminProducts.search.searchFor(name);
       await adminProducts.table.delete(name);
-      await expect(adminProducts.feedback.filter({ hasText: ADMIN_MESSAGES.productDeleted })).toBeVisible();
+      await expect(adminProducts.alert(ADMIN_MESSAGES.productDeleted)).toBeVisible();
       await expect.poll(() => createdProducts.pending(), 'the UI delete really removed the product').toHaveLength(0);
       await searchShopFor(shop.home, name);
       await expect(shop.home.grid.emptyState).toBeVisible();
@@ -182,9 +181,12 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       street: customer.address.street, city: customer.address.city, state: customer.address.state, postalCode: customer.address.postalCode, country: customer.address.country,
     });
     await form.chrome.save();
-    const { response } = await answered;
+    const { response, body } = await answered;
 
-    expect(response.status(), 'ADM-20: the real API accepts the user the add form sends').toBe(201);
+    // The documented cause, asserted as the behaviour a fixed form would show: the form sends a value for both account flags.
+    expect.soft(body.enabled, 'ADM-20: the add form sends a value for `enabled`').not.toBe('');
+    expect.soft(body.failed_login_attempts, 'ADM-20: the add form sends a value for `failed_login_attempts`').not.toBe('');
+    expect(response.status(), `ADM-20: the real API accepts the user the add form sends (it answered ${response.status()})`).toBe(201);
     await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved), 'ADM-20: the form confirms the new user').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
@@ -200,15 +202,15 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(order.status).toHaveValue('SHIPPED');
   });
 
-  test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, request, adminToken }) => {
+  test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, adminToken }) => {
     const sender = `${LEFTOVER} sender ${unique()}`;
     const text = `Sent by the qa-lab suite (${unique()}) and safe to delete, long enough to be a real message.`;
     await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: contactSubjectSlug('Webmaster'), message: text });
 
     // The inbox lists newest first, 15 to a page, and has no search: the row is on page 1 unless 15 newer messages
     // arrive first. Reading page 1 from the API first makes that precondition explicit instead of a timeout on a row.
-    const inbox = await request.get(`${API_URL}/messages`, { headers: { authorization: `Bearer ${await adminToken()}` } });
-    expect((await inbox.json()).data.map((m: { name: string }) => m.name), 'the new message is on the first page of the inbox').toContain(sender);
+    const inbox = await api.listMessages(await adminToken());
+    expect(inbox.map((m) => m.name), 'the new message is on the first page of the inbox').toContain(sender);
     await adminMessages.open();
     const message = await adminMessages.details(sender);
     await expect(message.text(text)).toBeVisible();

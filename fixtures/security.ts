@@ -6,8 +6,8 @@ import { IS_SELF_HOSTED } from '@support/env';
  * Injection payloads, typed into forms as plain text; the specs then check the text comes back as
  * text. Each one calls `__qaLabXssHit`, a function the sentinel exposes to the page, so running
  * it is recorded whether or not it opens a dialog (a payload that fetches, writes to the DOM or
- * redirects is caught the same way). All are under 40 characters, the longest search the shop
- * accepts (BUG-27). The number it passes says which one ran.
+ * redirects is caught the same way). Each is at most 40 characters, the longest search the shop
+ * accepts (BUG-27), so one can be searched for. The number it passes says which one ran.
  *
  * Caveat shared by every payload that uses `<img src=x>`: the DOM check (`injectedCount`) recognises a parsed payload by the
  * attribute `src="x"`, so a payload that used another source would go uncounted, and a genuine image whose source is
@@ -18,6 +18,8 @@ export const XSS_PAYLOADS = {
   'script tag': `<script>__qaLabXssHit(2)</script>`,
   'svg onload, breaking out of an attribute': `"><svg onload=__qaLabXssHit(3)>`,
 } as const;
+/** The longest term the shop's search box acts on: a longer one is silently dropped, no request and no message (BUG-27). */
+export const MAX_SEARCH_TERM = 40;
 export type XssPayload = (typeof XSS_PAYLOADS)[keyof typeof XSS_PAYLOADS];
 
 /**
@@ -41,7 +43,8 @@ export const ROUTE_XSS_PAYLOADS = {
  * - srcdoc: the same break, adding a `srcdoc` to an iframe, whose script the browser runs;
  * - `javascript:` URL: a value that is itself the whole URL of a link, which runs when the link is followed (`activate`);
  * - entity-encoded: the quote arrives as `&quot;` and a sink that decodes entities before it builds the attribute turns it into a real one.
- * Each is under 40 characters, like the rest.
+ * These are longer than the payloads above (up to 51 characters: they need a quote, a handler and the closing quote of the sink), so only
+ * the ones that fit the search box's 40 characters (BUG-27) can be searched for, and the first name cap (also 40) rules the rest out as a first name.
  */
 export interface AttributePayload {
   payload: string;

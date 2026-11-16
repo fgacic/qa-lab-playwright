@@ -46,11 +46,16 @@ export function selectedProjects(argv: readonly string[], configured: readonly s
   return [...picked];
 }
 
+/** What the user typed: argv without the node binary, the Playwright cli path and the command word (`test`), so a directory named "perf-lab" says nothing about the run. */
+function userArgs(argv: readonly string[]): string[] {
+  const at = argv.indexOf('test');
+  return argv.slice(at >= 0 ? at + 1 : 2); // after `playwright test`, or after `node <script>` when the command word is absent
+}
+
 /** Whether the command line narrows the run to some tests (a path filter or a grep), so that "every configured project" is not "every project with tests". */
 function filtersTests(argv: readonly string[]): boolean {
+  const rest = userArgs(argv);
   const VALUE_FLAGS = new Set(['--project', '-p', '--grep', '-g', '--grep-invert', '--reporter', '--workers', '-j', '--retries', '--output', '--config', '-c', '--timeout', '--repeat-each', '--shard', '--max-failures', '--tag', '--trace', '--ui-host', '--ui-port']);
-  const at = argv.indexOf('test');
-  const rest = argv.slice(at >= 0 ? at + 1 : 2); // after `playwright test`, or after `node <script>` when the command word is absent
   const positional = rest.some((arg, i) => !arg.startsWith('-') && !(i > 0 && VALUE_FLAGS.has(rest[i - 1])));
   return positional || rest.some((arg) => /^(?:--grep|-g|--grep-invert|--tag)(?:=|$)/.test(arg));
 }
@@ -67,7 +72,7 @@ export function perfAloneViolationFor(argv: readonly string[], configured: reado
   if (!configured.includes('perf')) return undefined;
   if (projectPatterns(argv).length) return perfAloneViolation(selectedProjects(argv, configured));
   if (!filtersTests(argv)) return perfAloneViolation(configured);
-  if (/perf/i.test(argv.join(' '))) {
+  if (/perf/i.test(userArgs(argv).join(' '))) {
     return 'This run names perf in a filter but no --project, so which projects it schedules cannot be told. Pass --project=perf (the perf budgets run alone: `npm run test:perf`).';
   }
   return undefined;

@@ -1,13 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import { customer, paginated } from '@support/admin-payloads';
+import { consoleArgsText } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** The error the SPA throws after the API accepts a new user (ADM-21): the same pattern as the suite-wide allowance (console-guard.ts), read from the log's text or the arguments the page passed, whichever engine prints which. */
 const NEW_USER_ERROR = /NG01002|Must supply a value for form control/;
-/** What the SPA logs for any error it catches: every engine starts the line with its own `ERROR` prefix, whatever follows. */
-const SPA_ERROR_LOG = /^ERROR\b/;
-
 /** The user the add form is filled in with: only the required fields, the others stay empty and the form accepts that. */
 const newUser = { firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: 'newly.added@example.com' };
 
@@ -80,9 +78,11 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     knownBug('ADM-21', 'after the API accepts a new user (201) the SPA throws an unhandled Angular error (NG01002, "Must supply a value for form control") although the form says "User saved!".');
     const form = await adminUsers.add();
     await form.fillIn(newUser);
-    // Listening right before the save: the error is raised while the save is answered. The window ends at the first error the SPA logs
-    // (or after BUG_TIMEOUT on a page that logs none); what that error is, is read from the guard, which also sees its arguments.
-    const logged = page.waitForEvent('console', { predicate: (message) => message.type() === 'error' && SPA_ERROR_LOG.test(message.text()), timeout: BUG_TIMEOUT }).catch(() => undefined);
+    // Listening right before the save: the error is raised while the save is answered. The window ends at the error itself
+    // (or after BUG_TIMEOUT on a page that never logs it). Engines put it in the text or only in the arguments, so both are read.
+    const logged = page
+      .waitForEvent('console', { predicate: async (message) => message.type() === 'error' && NEW_USER_ERROR.test(`${message.text()} ${await consoleArgsText(message.args())}`), timeout: BUG_TIMEOUT })
+      .catch(() => undefined);
 
     await form.chrome.save();
     await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
@@ -94,7 +94,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   test.describe('when the new user is refused', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('POST', '/users/register', 422, { email: ['A customer with this email address already exists.'] })));
 
-    test('the API error is shown and nothing is reported as saved', async ({ adminUsers }) => {
+    test('a refused new user shows the API\'s reason and is not reported as saved', async ({ adminUsers }) => {
       const form = await adminUsers.add();
 
       await form.fillIn({ ...newUser, email: customer.email });
@@ -125,7 +125,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   test.describe('when the email is already taken', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, 422, { email: ['A customer with this email address already exists.'] })));
 
-    test('the API error is shown', async ({ adminUsers }) => {
+    test('a taken email on an edit shows the API\'s reason', async ({ adminUsers }) => {
       const form = await adminUsers.edit(customer.email);
       await expect(form.email).toHaveValue(customer.email);
 
@@ -134,4 +134,24 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
       await expect(form.chrome.alert('A customer with this email address already exists.')).toBeVisible();
     });
   });
+
+  for (const status of [409, 500]) {
+    test.describe(`when saving an edited user is refused (${status})`, { tag: ['@negative'] }, () => {
+      test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, status, { message: 'The user could not be saved.' })));
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+      test('the failure is shown and nothing is reported as saved', async ({ adminUsers, apiMock }) => {
+        const form = await adminUsers.edit(customer.email);
+        await expect(form.email).toHaveValue(customer.email);
+        const refused = apiMock.waitForResponse('PUT', `/users/${customer.id}`);
+
+        await form.firstName.fill('Renamed');
+        await form.chrome.save();
+        expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
+
+        await expect(form.chrome.failure).toBeVisible();
+        await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeHidden();
+      });
+    });
+  }
 });

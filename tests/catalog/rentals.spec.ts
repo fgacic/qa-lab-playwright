@@ -2,6 +2,7 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { SUITE_OWNED_NAME } from '@support/catalog-terms';
 import { emptyProductPage } from '@support/payloads';
 
 test.describe('Rentals', () => {
@@ -9,9 +10,13 @@ test.describe('Rentals', () => {
     const rentals = await api.listProducts({ is_rental: 'true' });
     // The page shows one page of rentals and no pager: if the list outgrows a page, fail here rather than compare a partial list.
     expect(rentals.last_page, 'the rentals should fit on one page').toBe(1);
+    // Only the seeded rentals are compared. The back-office and stored-XSS specs make rentals of their own (the one list the
+    // default catalogue leaves them out of is this one) and delete them again, and a spec on another worker may have one up now.
+    const seeded = rentals.data.filter((p) => !SUITE_OWNED_NAME.test(p.name));
+    expect(seeded, 'the shop is seeded with rentals').not.toHaveLength(0);
 
     await expect(rentalsPage.title).toBeVisible();
-    await expect(rentalsPage.grid.names).toHaveText(rentals.data.map((p) => p.name));
+    await expect(rentalsPage.grid.names.filter({ hasNotText: SUITE_OWNED_NAME })).toHaveText(seeded.map((p) => p.name));
   });
 
   test('a rental opens on its own page, without a quantity picker', async ({ catalog, rentalsPage, page }) => {

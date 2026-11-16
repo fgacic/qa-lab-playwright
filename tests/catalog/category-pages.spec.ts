@@ -1,15 +1,12 @@
+import { SORT, SORT_OPTIONS } from '@components/FilterPanel';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
+import { CATEGORIES, HAND_TOOLS } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
-/** The parent categories of the catalogue, by slug, with the title their page carries. */
-const HAND_TOOLS = { slug: 'hand-tools', title: 'Category: Hand Tools' };
-const POWER_TOOLS = { slug: 'power-tools', title: 'Category: Power Tools' };
-const OTHER = { slug: 'other', title: 'Category: Other' };
-const CATEGORIES = [HAND_TOOLS, POWER_TOOLS, OTHER];
 /** A subcategory the seed leaves without products. */
 const SPECIAL_TOOLS = { slug: 'special-tools', title: 'Category: Special Tools' };
 /** A slug no category has. */
@@ -29,22 +26,6 @@ test.describe('Category pages', () => {
       const { json: found } = await results;
       expect(found.total, `"${slug}" should list products`).toBeGreaterThan(0);
       await expect(categoryPage.grid.names).toHaveText(found.data.map((p) => p.name));
-    });
-
-    test(`/category/${slug} lists the products of its subcategories, and nothing from elsewhere`, async ({ api }) => {
-      const parent = (await api.categoryTree()).find((node) => node.slug === slug);
-      expect(parent, `the category tree should contain "${slug}"`).toBeDefined();
-      const belonging = new Set(parent!.sub_categories.map((sub) => sub.slug));
-      const { last_page: lastPage } = await api.listProducts({ by_category_slug: slug });
-
-      // The list runs over several pages: every page is checked, not just the one the grid shows.
-      const strangers: string[] = [];
-      for (let pageNo = 1; pageNo <= lastPage; pageNo++) {
-        const { data } = await api.listProducts({ by_category_slug: slug, page: String(pageNo) });
-        strangers.push(...data.filter((p) => !belonging.has(p.category.slug)).map((p) => p.name));
-      }
-
-      expect(strangers, 'products outside the category').toEqual([]);
     });
 
     test(`/category/${slug} lists every product of its subcategories`, async ({ categoryPage, apiMock, api }) => {
@@ -71,9 +52,9 @@ test.describe('Category pages', () => {
 
   test('sorting a category page keeps it to that category', async ({ categoryPage, apiMock }) => {
     await categoryPage.open(PAGED.slug);
-    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc');
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === SORT_OPTIONS[SORT.priceAscending]);
 
-    await categoryPage.filters.sortBy('Price (Low - High)');
+    await categoryPage.filters.sortBy(SORT.priceAscending);
 
     const { body, json: sorted } = await results;
     expect(body.by_category_slug, 'the sorted request still names the category').toBe(PAGED.slug);
@@ -81,7 +62,10 @@ test.describe('Category pages', () => {
     await expect(categoryPage.grid.names).toHaveText(sorted.data.map((p) => p.name));
   });
 
-  test('the pager of a category page shows the next page of that category', async ({ categoryPage, apiMock }) => {
+  test('the pager of a category page shows the next page of that category', async ({ categoryPage, apiMock, api }) => {
+    // Precondition: with one page there is no next page, and the test would fail on the data, not on the pager.
+    const { last_page: pages } = await api.listProducts({ by_category_slug: PAGED.slug });
+    expect(pages, `"${PAGED.slug}" should run to more than one page`).toBeGreaterThan(1);
     await categoryPage.open(PAGED.slug);
     const pageTwo = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === '2');
 

@@ -131,10 +131,13 @@ type Baseline = Record<string, Record<string, Partial<Recorded>>>;
  * file is committed to a public repository, and the owner's hardware is nobody's business. Only an entry for the current environment is enforced.
  */
 export const baselineEnvironment = (): string => {
-  if (process.env.CI) return 'ci';
+  if (onCI()) return 'ci';
   const hash = createHash('sha256').update(`${cpus()[0]?.model.trim() ?? 'unknown CPU'}|${cpus().length}`).digest('hex');
   return `local-${hash.slice(0, 10)}`;
 };
+
+/** Whether this is a CI run: CI set to anything but empty, `0` or `false` (a shell that exports `CI=false` is a laptop). */
+export const onCI = (value: string | undefined = process.env.CI): boolean => !['', '0', 'false'].includes((value ?? '').trim().toLowerCase());
 
 /**
  * What the measured browser is slowed to. CPU: 4x, Lighthouse's mobile setting (a mid-range
@@ -148,6 +151,8 @@ export interface PerformanceFixtures {
   /** Install the collector and the throttling. An option, so both are in place before any page fixture navigates. */
   measureVitals: boolean;
   vitalsCollector: void;
+  /** The measurements to record as the baseline, written once the test and every other fixture's teardown has passed (see `record`). */
+  baselineRecordings: { measurement: Measurement; metrics: (keyof Vitals)[] }[];
   vitals: {
     /**
      * Runs `scenario` (the visit being budgeted) once per sample, each time on a fresh navigation to the address the fixtures
@@ -203,11 +208,24 @@ export const test = base.extend<PerformanceFixtures>({
     },
     { auto: true },
   ],
-  vitals: async ({ page, measureVitals }, use, testInfo) => {
-    const recordings: { measurement: Measurement; metrics: (keyof Vitals)[] }[] = [];
+  // An auto fixture with no dependency, so it is set up before the page and the guards and torn down after them: the console guard
+  // and the write guard have failed the test by the time it looks at `testInfo.errors`, and only then is a baseline believed.
+  baselineRecordings: [
+    async ({}, use, testInfo) => {
+      const recordings: { measurement: Measurement; metrics: (keyof Vitals)[] }[] = [];
+      await use(recordings);
+      if (recordings.length) record(testInfo, recordings);
+    },
+    { auto: true },
+  ],
+  vitals: async ({ page, measureVitals, baselineRecordings: recordings }, use, testInfo) => {
+    let measured = false;
     await use({
       measure: async (name, scenario, { inputs, samples = 5, freshCart = false }) => {
         if (!measureVitals) throw new Error('vitals.measure needs test.use({ measureVitals: true }): the collector and the throttling were never installed.');
+        // One measurement per test: the annotations, the attachment and the baseline entry are all keyed by the test, and a second run would be judged by the first one's load.
+        if (measured) throw new Error(`vitals.measure was called twice in one test ("${name}"): measure one scenario per test.`);
+        measured = true;
         const start = page.url();
         loadAtRunStart ??= loadavg()[0];
         const taken: { vitals: Vitals; entries: Observed; lcpElement: string }[] = [];
@@ -263,6 +281,10 @@ export const test = base.extend<PerformanceFixtures>({
           if (testInfo.parallelIndex !== 0) {
             throw new Error(`Refusing to record the performance baseline from worker ${testInfo.parallelIndex}: recording rewrites one shared file and needs the perf project's single worker (run with --workers=1).`);
           }
+          // Windows reports a load average of 0 always: that is "unknown", not "idle".
+          if (loadavg().every((value) => value === 0)) {
+            throw new Error('Refusing to record the performance baseline: this platform reports no load average, so an idle machine cannot be told from a busy one.');
+          }
           const load = loadAtRunStart ?? loadavg()[0];
           if (load > MAX_LOAD_TO_RECORD) {
             throw new Error(`Refusing to record the performance baseline: the one-minute load average was ${load.toFixed(2)} when the run began (limit ${MAX_LOAD_TO_RECORD}). Record on an idle machine.`);
@@ -276,7 +298,6 @@ export const test = base.extend<PerformanceFixtures>({
         return limits;
       },
     });
-    if (recordings.length) record(testInfo, recordings);
   },
 });
 
@@ -290,7 +311,7 @@ function missingBaseline(testInfo: TestInfo, { name, median }: Measurement): voi
   const message = `no performance baseline for "${name}" on ${env}: only the fixed budgets apply, so a slide inside them goes unnoticed. Record it (UPDATE_PERF_BASELINE=1, on CI the record-perf-baseline workflow run) and commit tests/performance/baseline.json. Measured: LCP ${median.lcp} ms, CLS ${median.cls}, TBT ${median.tbt} ms, INP-proxy ${median.inp} ms.`;
   testInfo.annotations.push({ type: 'baseline', description: message });
   if (process.env.GITHUB_ACTIONS) console.log(`::warning title=Performance baseline missing::${message}`);
-  else if (process.env.CI) console.warn(`warning: ${message}`);
+  else if (onCI()) console.warn(`warning: ${message}`);
 }
 
 /**
@@ -311,10 +332,11 @@ function record(testInfo: TestInfo, recordings: { measurement: Measurement; metr
     }
     const recorded: Baseline = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
     const env = baselineEnvironment();
-    const entry = Object.fromEntries(metrics.map((metric) => [metric, { median: measurement.median[metric], spread: measurement.spread[metric] }]));
+    // A noisy metric is left out of the file, not written for something else to ignore: only the spec's fixed limits hold it.
     const noisy = metrics.filter((metric) => isNoisy(metric, measurement.spread[metric]));
+    const entry = Object.fromEntries(metrics.filter((metric) => !noisy.includes(metric)).map((metric) => [metric, { median: measurement.median[metric], spread: measurement.spread[metric] }]));
     if (noisy.length) {
-      testInfo.annotations.push({ type: 'baseline', description: `NOISY for "${measurement.name}": ${noisy.join(', ')} (${MARGIN_SPREADS} x spread is over the cap), recorded but not enforced as a ratchet; record again on an idle machine` });
+      testInfo.annotations.push({ type: 'baseline', description: `NOISY for "${measurement.name}": ${noisy.join(', ')} (${MARGIN_SPREADS} x spread is over the cap), not recorded, so only the fixed limits hold it; record again on an idle machine` });
     }
     recorded[env] = { ...recorded[env], [measurement.name]: entry };
     writeFileSync(BASELINE_FILE, `${JSON.stringify(recorded, null, 2)}\n`);
@@ -361,23 +383,36 @@ async function read(page: Page, name: string, interactive: boolean, testInfo: Te
 function baselineLimits({ name }: Measurement, metrics: (keyof Vitals)[], testInfo: TestInfo): Partial<Vitals> | undefined {
   const env = baselineEnvironment();
   const recorded: Baseline = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
-  const base = recorded[env]?.[name];
-  if (!base) return undefined;
-  const limits = metrics.map((metric) => {
+  const { limits, unratcheted } = ratchetLimits(recorded[env]?.[name], metrics);
+  if (unratcheted.length) testInfo.annotations.push({ type: 'baseline', description: `the ${env} baseline of "${name}" does not ratchet ${unratcheted.join(', ')} (too noisy, or not recorded because it was): only the fixed limits hold them until it is recorded again on an idle machine` });
+  return limits;
+}
+
+/**
+ * The limits a recorded entry sets: median plus margin, the margin being the larger of MARGIN_SPREADS x spread, MARGIN_SHARE of the
+ * median and the noise floor, capped at MARGIN_CAP_FLOORS floors. A metric whose recorded spread is too noisy, or that the entry
+ * does not hold (a recording leaves a noisy one out), has no limit and is listed in `unratcheted`. No entry at all: no limits.
+ * Exported for tests/framework/performance-maths.spec.ts.
+ */
+export function ratchetLimits(base: Partial<Recorded> | undefined, metrics: (keyof Vitals)[]): { limits: Partial<Vitals> | undefined; unratcheted: (keyof Vitals)[] } {
+  if (!base) return { limits: undefined, unratcheted: [] };
+  const limits: Partial<Vitals> = {};
+  const unratcheted: (keyof Vitals)[] = [];
+  for (const metric of metrics) {
     const value = base[metric];
-    if (value === undefined) throw new Error(`The ${env} baseline of "${name}" has no ${metric}: record it with UPDATE_PERF_BASELINE=1 npm run test:perf.`);
+    if (!value || isNoisy(metric, value.spread)) {
+      unratcheted.push(metric);
+      continue;
+    }
     const margin = Math.min(Math.max(MARGIN_SPREADS * value.spread, MARGIN_SHARE * value.median, NOISE_FLOOR[metric]), MARGIN_CAP_FLOORS * NOISE_FLOOR[metric]);
     const limit = value.median + margin;
-    return [metric, metric === 'cls' ? Number(limit.toFixed(3)) : Math.round(limit)] as const;
-  });
-  const trusted = Object.fromEntries(limits.filter(([metric]) => !isNoisy(metric, base[metric]!.spread)));
-  const noisy = limits.map(([metric]) => metric).filter((metric) => !(metric in trusted));
-  if (noisy.length) testInfo.annotations.push({ type: 'baseline', description: `the ${env} baseline of "${name}" is too noisy to ratchet ${noisy.join(', ')}: only the fixed limits hold them until it is recorded again on an idle machine` });
-  return trusted;
+    limits[metric] = metric === 'cls' ? Number(limit.toFixed(3)) : Math.round(limit);
+  }
+  return { limits, unratcheted };
 }
 
 /** The recorded spread is too wide for a margin that stays meaningful: the cap would clip it, so the metric has no ratchet (see MARGIN_CAP_FLOORS). */
-function isNoisy(metric: keyof Vitals, spread: number): boolean {
+export function isNoisy(metric: keyof Vitals, spread: number): boolean {
   return MARGIN_SPREADS * spread > MARGIN_CAP_FLOORS * NOISE_FLOOR[metric];
 }
 

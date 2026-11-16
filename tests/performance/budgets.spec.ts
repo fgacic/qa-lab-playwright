@@ -1,5 +1,6 @@
 import { expect, test } from '@fixtures';
 import { knownBug } from '@support/known-bug';
+import { slowEveryClick } from '@support/slow-click';
 import type { Measurement, Vitals } from '@fixtures/performance';
 
 /**
@@ -83,6 +84,8 @@ const scaled = (ms: number, budget: number) => Math.min(Math.round(ms * CI_SLOWD
  *   one step of it moves a median by a quarter) and well under half the 200 ms budget. The
  *   recorded INP spreads (32 to 48 ms) are all wider than the baseline's cap allows (see isNoisy in fixtures/performance.ts), so
  *   INP has no baseline ratchet at all today: this ceiling and the budget are the only limits on it.
+ * - On CI (CI_SLOWDOWN 1.5, never above the budget) the effective ceilings are: LCP 2 500 ms for home, search and product (their scaled
+ *   value is over the budget, so the budget is the ceiling) and 2 400 ms for cart and contact; TBT 150 ms; INP proxy 120 ms; CLS as below, unscaled.
  * - CLS, on the slow API: the recorded median plus about 20%, rounded up to 0.01 (recorded: home 0.258, product 0.316 with a
  *   spread of 0.082 (the race between first paint and the API), contact 0.17, cart 0.107).
  */
@@ -289,9 +292,10 @@ test.describe('Layout stability of the cart on a 500 ms API (self-hosted)', { ta
 });
 
 /**
- * Control for the collector. A TBT of 0 is the normal result, so on its own it cannot be told from a collector that
- * sees no long tasks. Here a known long task is run before any interaction and must be counted: that proves the observer is
- * alive in this browser, which is what gives the zeros above their meaning.
+ * Controls for the collector. A TBT of 0 is the normal result, so on its own it cannot be told from a collector that
+ * sees no long tasks, and the shop's quick INP cannot be told from one that sees no interactions. Here a known long task and a known
+ * slow click are run and must be counted: that proves the observers are alive in this browser, which is what gives the small numbers
+ * above their meaning.
  */
 test.describe('Performance collector (control)', { tag: ['@perf', '@self-hosted'] }, () => {
   const BLOCKING_MS = 150;
@@ -309,5 +313,25 @@ test.describe('Performance collector (control)', { tag: ['@perf', '@self-hosted'
 
     expect(observed.longTaskObserver, 'the browser reports long tasks').toBe(true);
     expect(median.tbt, `a ${BLOCKING_MS} ms task counted as blocking time (ms)`).toBeGreaterThanOrEqual(EXPECTED_TBT);
+  });
+
+  /** The click's handler blocks for this long, and the interaction takes at least that long to reach the next paint. */
+  const SLOW_CLICK_MS = 300;
+  /** Event timing rounds a duration to 8 ms, so a 300 ms handler may be reported as 296. */
+  const EVENT_TIMING_ROUNDING_MS = 8;
+
+  test('counts a known slow click as the interaction time', async ({ homePage, vitals }) => {
+    await slowEveryClick(homePage.page, SLOW_CLICK_MS);
+    const click = async () => {
+      await expect(homePage.banner).toBeVisible();
+      await homePage.banner.click();
+    };
+
+    const { median, observed, inputsPerSample } = await vitals.measure('slow-click-control', click, { inputs: 1, samples: 3 });
+
+    expect(inputsPerSample, 'every sample received its click').toEqual([1, 1, 1]);
+    expect(observed.interactions, 'the browser timed the click as an interaction').toBeGreaterThan(0);
+    expect(median.inp, `a click that blocks for ${SLOW_CLICK_MS} ms counted as interaction time (ms)`).toBeGreaterThanOrEqual(SLOW_CLICK_MS - EVENT_TIMING_ROUNDING_MS);
+    expect(median.inp, 'and it is over the INP budget, which is what the budgets exist to catch').toBeGreaterThan(BUDGET.inp);
   });
 });

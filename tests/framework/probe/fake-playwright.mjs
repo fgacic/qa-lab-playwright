@@ -2,6 +2,8 @@
 // (VERIFY_BUGS_PLAYWRIGHT). It answers from the scenario file in FAKE_PLAYWRIGHT_SCENARIO and appends every call to its log.
 //
 // scenario = { pins: [{ file, line, title, id, projects, onLive?: true, runs: [outcome, ...] }] }
+// A pin may also set `noResult: true` (listed, but absent from the run's report) and the scenario `runErrors: [message]` (a report
+// whose `errors` is set when the run is not a listing). The log records every argument the runner was given.
 // An outcome is 'reproduces' | 'fixed' | 'other' (a failure that does not name the id); the nth run of a pin takes the nth outcome
 // (the last repeats), so [other, reproduces] is a pin that fails for another reason and then reproduces on its rerun.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,7 +17,7 @@ const projects = args.filter((a) => a.startsWith('--project=')).map((a) => a.sli
 const rerun = args.includes('--workers=1');
 const grep = args[args.indexOf('--grep') + 1];
 
-appendFileSync(process.env.FAKE_PLAYWRIGHT_LOG, `${JSON.stringify({ listing, live, projects, rerun, env: { VERIFY_BUGS: process.env.VERIFY_BUGS } })}\n`);
+appendFileSync(process.env.FAKE_PLAYWRIGHT_LOG, `${JSON.stringify({ listing, live, projects, rerun, args, env: { VERIFY_BUGS: process.env.VERIFY_BUGS } })}\n`);
 
 // Counted across processes (each call of verify-bugs is a new one), in a file next to the log.
 const countsFile = `${process.env.FAKE_PLAYWRIGHT_LOG}.counts`;
@@ -25,6 +27,7 @@ for (const pin of scenario.pins) {
   if (!live && pin.onLive) continue; // scheduled only on the live target
   const here = listing ? pin.projects : pin.projects.filter((p) => projects.includes(p));
   if (!here.length) continue;
+  if (!listing && pin.noResult) continue;
   if (rerun && !new RegExp(grep).test(pin.title)) continue;
   const tests = here.map((projectName) => {
     if (listing) return { projectName, status: 'skipped', annotations: [], results: [] };
@@ -41,5 +44,5 @@ for (const pin of scenario.pins) {
   specs.push({ file: pin.file, line: pin.line, title: pin.title, tags: ['bug'], tests });
 }
 writeFileSync(countsFile, JSON.stringify(Object.fromEntries(counts)));
-writeFileSync(out, JSON.stringify({ suites: [{ specs }], errors: [] }));
+writeFileSync(out, JSON.stringify({ suites: [{ specs }], errors: !listing && scenario.runErrors ? scenario.runErrors.map((message) => ({ message })) : [] }));
 process.exit(listing ? 0 : 1);

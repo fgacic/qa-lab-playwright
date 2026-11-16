@@ -52,7 +52,7 @@ function expectVerdict(response: APIResponse, what: string): void {
 type Cleanups = (() => Promise<void>)[];
 
 const test = base.extend<{ cleanups: Cleanups }>({
-  cleanups: async ({}, use) => {
+  cleanups: async ({}, use, testInfo) => {
     const cleanups: Cleanups = [];
     await use(cleanups);
     const failures: unknown[] = [];
@@ -63,6 +63,10 @@ const test = base.extend<{ cleanups: Cleanups }>({
         failures.push(error);
       }
     }
+    // A pin is an expected failure, and an expected failure swallows a teardown error along with the bug's own: the throw below would end
+    // in a green "expected to fail". Each failure is also written into the test's annotations, which the report keeps either way, so a
+    // record that leaked from a pin is never silent.
+    for (const failure of failures) testInfo.annotations.push({ type: 'cleanup failed', description: String(failure instanceof Error ? failure.message : failure) });
     if (failures.length) throw new AggregateError(failures, `${failures.length} record(s) made by the test could not be removed`);
   },
 });
@@ -107,6 +111,21 @@ async function newCustomer({ request, api, adminToken, cleanups }: World): Promi
 /** The token a caller presents: none for an anonymous one, a freshly registered customer's otherwise. */
 async function tokenFor(world: World, caller: Caller): Promise<string | undefined> {
   return caller === 'customer' ? (await newCustomer(world)).token : undefined;
+}
+
+/**
+ * A contact message of the test's own: sent through the public API, then found again in the admin's inbox by its sender (the inbox is
+ * paged, so every page is read until it turns up) and its id returned. A message nobody can delete is left behind, uniquely named.
+ */
+async function contactMessage(world: World, name: string): Promise<string> {
+  await world.api.sendContactMessage({ name, email: uniqueEmail('authz'), subject: 'webmaster', message: 'Sent by the authorisation checks to see who may list or change it.' });
+  const admin = await world.adminToken();
+  for (let page = 1; ; page++) {
+    const inbox = await (await call(world.request, 'GET', `/messages?page=${page}`, { token: admin })).json();
+    const found = (inbox.data as { id: string; name: string }[]).find((message) => message.name === name);
+    if (found) return found.id;
+    expect(page, `the message from "${name}" is in the admin's inbox`).toBeLessThan(inbox.last_page);
+  }
 }
 
 test.describe('API authorisation, read access (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
@@ -219,6 +238,38 @@ test.describe('API authorisation, forged tokens (self-hosted only)', { tag: ['@s
       expect(response.status(), `GET ${ADMIN_PATH} with ${name} answered`).toBe(401);
     });
   }
+});
+
+/**
+ * A token that was valid, and whose session or account has ended since: it must stop working at once, not when it expires. The
+ * token is a real one in both cases (a fresh sign-in), judged on `GET /users/me`, where it works until the session ends.
+ */
+test.describe('API authorisation, tokens after the session ended (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
+  test('a token is refused once its holder signed out', async ({ request, api, adminToken, cleanups }) => {
+    const { token } = await newCustomer({ request, api, adminToken, cleanups });
+    expect((await call(request, 'GET', '/users/me', { token })).status(), 'the token worked before signing out').toBe(200);
+    expect((await call(request, 'GET', '/users/logout', { token })).status(), 'signing out answered').toBe(200);
+
+    const response = await call(request, 'GET', '/users/me', { token });
+
+    expect(response.status(), 'GET /users/me with the token of a signed-out session answered').toBe(401);
+  });
+
+  test.describe('after the account was deleted', { tag: ['@bug'] }, () => {
+    test('a token of a deleted account is refused', async ({ request, api, adminToken, cleanups }) => {
+      knownBug('SEC-14', "the token of an account the admin deleted is still accepted: GET /users/me answers 200 with the deleted customer's profile.");
+      const { id, token } = await newCustomer({ request, api, adminToken, cleanups });
+      expect((await call(request, 'GET', '/users/me', { token })).status(), 'the token worked before the account was deleted').toBe(200);
+      const admin = await adminToken();
+      await api.deleteUser(admin, id);
+      // Precondition, true whether or not the bug is fixed: the account is gone for the admin, so what is wrong is only that the token outlived it.
+      expect((await call(request, 'GET', `/users/${id}`, { token: admin })).status(), 'the admin no longer finds the deleted account').toBe(404);
+
+      const response = await call(request, 'GET', '/users/me', { token });
+
+      expect(REFUSED, `SEC-14: GET /users/me with the token of a deleted account answered ${response.status()}`).toContain(response.status());
+    });
+  });
 });
 
 /**
@@ -374,12 +425,10 @@ test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@se
   });
 
   test('a customer lists no contact message that somebody else sent', async ({ request, api, adminToken, cleanups }) => {
-    const admin = await adminToken();
-    const sender = `Authz scoping ${randomUUID().slice(0, 8)}`;
-    await api.sendContactMessage({ name: sender, email: uniqueEmail('authz'), subject: 'webmaster', message: 'Sent by the authorisation checks to see who can list it.' });
-    const inbox = await (await call(request, 'GET', '/messages?page=1', { token: admin })).json();
-    expect((inbox.data as { name: string }[]).map((message) => message.name), 'the admin sees the message in the first page of the inbox, so it exists').toContain(sender);
-    const { token } = await newCustomer({ request, api, adminToken, cleanups });
+    const world = { request, api, adminToken, cleanups };
+    // The control: the admin's inbox holds the message (found by paging through it), so its absence below is about who is asking.
+    await contactMessage(world, `Authz scoping ${randomUUID().slice(0, 8)}`);
+    const { token } = await newCustomer(world);
 
     const listed = await (await call(request, 'GET', '/messages', { token })).json();
 
@@ -434,7 +483,8 @@ test.describe('API authorisation, the role field of a profile (self-hosted only)
 
     const response = await call(request, 'PUT', `/users/${account.id}`, { token: account.token, data: bodyOf(account, 'admin') });
 
-    expect(REFUSED, `a customer sending role "admin" in their own profile got ${response.status()}`).toContain(response.status());
+    // The verdict is what the account became (the role a fresh sign-in carries); how the shop answered is the softer signal, kept next to it.
+    expect.soft(REFUSED, `a customer sending role "admin" in their own profile got ${response.status()}`).toContain(response.status());
     expect(await roleOf(api, account), 'the account is still a plain user').toBe('user');
   });
 });
@@ -571,18 +621,6 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   async function guestOrder(world: World, catalog: { inStock(): Promise<Product> }) {
     const order = await world.api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], fakeGuest());
     return order.id;
-  }
-
-  /** A contact message of the test's own: sent through the public API, then found again in the admin's inbox by its sender. */
-  async function contactMessage(world: World, name: string): Promise<string> {
-    await world.api.sendContactMessage({ name, email: uniqueEmail('authz'), subject: 'webmaster', message: 'Sent by the authorisation checks to test who may change its status.' });
-    const admin = await world.adminToken();
-    for (let page = 1; ; page++) {
-      const inbox = await (await call(world.request, 'GET', `/messages?page=${page}`, { token: admin })).json();
-      const found = (inbox.data as { id: string; name: string }[]).find((message) => message.name === name);
-      if (found) return found.id;
-      expect(page, `the message from "${name}" is in the admin's inbox`).toBeLessThan(inbox.last_page);
-    }
   }
 
   const statusOf = async (request: APIRequestContext, path: string, token: string) => ((await (await call(request, 'GET', path, { token })).json()) as { status: string }).status;

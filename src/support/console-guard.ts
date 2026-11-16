@@ -146,8 +146,10 @@ export const SUITE_WIDE_ALLOWANCES: readonly Allowance[] = [...THIRD_PARTY_NOISE
 /**
  * "Failed to load resource: the server responded with a status of 500" is the browser's own line for any failed request. It is
  * the mirror of an answer the suite already controls or asserts, so it adds nothing, only in these two cases:
- * - the shop answered with a status the suite expects of it (`EXPECTED_API_STATUSES`: the 401 of an anonymous `GET /users/me`, the
- *   404 of an id it does not know, the 422 and 409 with which it refuses invalid or conflicting input, which the tests that send such input assert), or
+ * - the shop answered that path with a status the suite expects of it (`EXPECTED_API_STATUSES`: the 401 of an anonymous `GET /users/me`, the
+ *   404 of an id it does not know, the 422 and 409 with which it refuses invalid or conflicting input, which the tests that send such input
+ *   assert): a response of that status for that path must have been received (`answered`), so a console line alone, with no such
+ *   answer behind it, is not enough, or
  * - the request is one a mock of this test answered (with that status, or by aborting it): the test chose that failure.
  * Anything else (a real 5xx, a refused connection, a broken image, script or font) is a defect and fails the test.
  */
@@ -155,11 +157,11 @@ const RESOURCE_FAILURE = /^Failed to load resource/;
 const STATUS_OF = /status of (\d{3})/;
 export const EXPECTED_API_STATUSES: readonly number[] = [401, 404, 409, 422];
 
-export function isApiResourceFailure(error: BrowserError, mocked: readonly MockAnswer[] = []): boolean {
+export function isApiResourceFailure(error: BrowserError, mocked: readonly MockAnswer[] = [], answered: readonly ApiAnswer[] = []): boolean {
   if (error.kind !== 'console' || !RESOURCE_FAILURE.test(error.text) || !error.url || !isApiUrl(error.url)) return false;
   const status = Number(STATUS_OF.exec(error.text)?.[1]);
-  if (EXPECTED_API_STATUSES.includes(status)) return true;
   const pathname = apiPath(error.url);
+  if (EXPECTED_API_STATUSES.includes(status) && answered.some((answer) => answer.pathname === pathname && answer.status === status)) return true;
   return mocked.some((answer) => answer.pathname === pathname && (answer.outcome === 'aborted' ? /net::ERR_/.test(error.text) : answer.outcome === status));
 }
 
@@ -174,7 +176,7 @@ export function unexpectedErrors(
   answered: readonly ApiAnswer[] = [],
 ): BrowserError[] {
   return errors.filter((error) => {
-    if (isApiResourceFailure(error, mocked)) return false;
+    if (isApiResourceFailure(error, mocked, answered)) return false;
     const covered = allowances.some((allowance) => {
       if (!(allowance.pattern.test(error.text) || (error.args !== undefined && allowance.pattern.test(error.args)))) return false;
       if (allowance.route && !(error.route !== undefined && allowance.route.test(error.route))) return false;

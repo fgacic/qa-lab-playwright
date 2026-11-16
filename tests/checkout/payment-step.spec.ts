@@ -16,9 +16,6 @@ const PLAIN_TEXT = 'QA Lab';
 /** The instalment plan the passing BNPL check chooses. */
 const INSTALMENT_PLAN = '6';
 
-/** Letters and digits in the shape the gift card field accepts (16), so it is no card number: the typed value only has to survive a switch of method. */
-const PLAIN_GIFT_CARD = 'qalabqalabqalab1';
-
 /** `length` characters that are neither digits nor letters. */
 const junkOf = (length: number) => '!'.repeat(length);
 
@@ -28,7 +25,6 @@ const paymentPasses = mock.respond('POST', '/payment/check', PAYMENT_PASSED);
 
 /** The cart itself: once an order is placed the page deletes it (answered here, so the real cart is untouched). */
 const CART = /^\/carts\/[^/]+$/;
-/** What the shop answers an accepted guest order with (201), as far as the page reads it. */
 
 test.describe('Checkout: payment step', () => {
   // None of these is about the postcode lookup, so it is answered by a mock: an outage of the real
@@ -181,8 +177,10 @@ test.describe('Checkout: payment step', () => {
     knownBug('BUG-52', 'the details typed for a payment method stay in the form when another method is chosen, and are still there when the shopper comes back to the first.');
     const { payment } = checkout;
     await payment.choose('gift-card');
-    await payment.field(FIELD.giftCardNumber).fill(PLAIN_GIFT_CARD);
-    await expect(payment.field(FIELD.giftCardNumber)).toHaveValue(PLAIN_GIFT_CARD);
+    // Junk of the field's length, as everywhere in this file: the value only has to survive a switch of method, and no value here could pass for a card number.
+    const typed = junkOf(16);
+    await payment.field(FIELD.giftCardNumber).fill(typed);
+    await expect(payment.field(FIELD.giftCardNumber)).toHaveValue(typed);
     await payment.choose('credit-card');
 
     await payment.choose('gift-card');

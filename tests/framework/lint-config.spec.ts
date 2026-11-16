@@ -72,11 +72,18 @@ const REFUSED: [code: string, message: string][] = [
   ['const t = performance.now();', 'No performance.now() in a spec'],
   ['const t = Date.now();', 'No Date.now in a spec'],
   ['const r = Math.random();', 'No Math.random in a spec'],
+  ['await page.goto("http://example.test/a");', 'No hard-coded http(s)'],
+  ['await page.goto("https://example.test/a");', 'No hard-coded http(s)'],
+  ['const url = `http://example.test/${id}`;', 'No hard-coded http(s)'],
+  ['test.describe.serial("a", () => {});', 'No serial describe'],
+  ['test.describe.configure({ mode: "serial" });', 'No configure({ mode'],
 ];
 const ALLOWED = [
   'const at = new Date("2026-01-02T03:04:05Z"); const n = new Date(0); await page.clock.install({ time: at });',
   'await expect(page.getByRole("button")).toBeVisible(); const t = await storedToken(page); await consoleArgsText(args);',
   'const ms = await elapsedMs(() => page.goto("/"));',
+  'await page.goto("/products/" + id); const note = "see http docs"; const label = `${id}/https`;',
+  'test.describe.parallel("a", () => {}); test.describe.configure({ mode: "parallel" }); test.describe.configure({ retries: 2 });',
 ];
 
 test.describe('the hazard rules for specs', { tag: ['@framework'] }, () => {

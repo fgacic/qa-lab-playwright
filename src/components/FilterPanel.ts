@@ -12,6 +12,12 @@ export const SORT_OPTIONS = {
 } as const;
 export type SortOption = keyof typeof SORT_OPTIONS;
 
+/** The options specs choose by name, typed against `SORT_OPTIONS`: a label the menu drops stops compiling here, not at run time in four specs. */
+export const SORT = {
+  priceAscending: 'Price (Low - High)',
+  nameDescending: 'Name (Z - A)',
+} as const satisfies Record<string, SortOption>;
+
 /** Sort, price range and the category / brand / sustainability checkboxes in the sidebar. */
 export class FilterPanel {
   readonly sort: Locator;

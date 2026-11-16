@@ -166,4 +166,20 @@ test.describe('The UI text read from a page', { tag: ['@i18n'] }, () => {
     // Both scans skip the same product card; the stray-English scan also skips the credit (the same name in every language), and reads the tile.
     expect(strays, 'the stray-English scan reads the tile, and skips the product card and the credit').toEqual(['account.favorites.title', 'account.favorites.text']);
   });
+
+  test('a plain cell of an account list is data to the stray-English scan, and read by the key scan', async ({ page }) => {
+    await page.setContent(`
+      <main>
+        <table class="table-hover"><tbody><tr>
+          <td>Customer wrote this</td><td>invoice.total.label</td>
+          <td><span class="badge">invoice.status.badge</span></td><td><a href="#">invoice.details.link</a></td>
+        </tr></tbody></table>
+      </main>`);
+
+    const keys = (await visibleUiText(page, 'keys')).map((t) => t.text);
+    const strays = (await visibleUiText(page, 'strays')).map((t) => t.text);
+
+    expect(keys, 'the key scan reads every cell: a leaked key in a record is still a defect').toEqual(expect.arrayContaining(['Customer wrote this', 'invoice.total.label', 'invoice.status.badge', 'invoice.details.link']));
+    expect(strays, 'the stray-English scan skips the plain cells and reads the badge and the link, which are the shop\'s words').toEqual(['invoice.status.badge', 'invoice.details.link']);
+  });
 });
