@@ -9,7 +9,7 @@ name: toolshop
 
 services:
   mariadb:
-    image: yobasystems/alpine-mariadb:10.6.11@sha256:8bb25ca2d68c81118fcf745959560de2f316a178abf9decc8bb5b6f86c929084
+    image: yobasystems/alpine-mariadb:11.4.9-03@sha256:8f13179e0a3b40b0176289d5666322e450b0189dc3748ad34949c479218ce701
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_USER: user
