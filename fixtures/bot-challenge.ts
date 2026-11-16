@@ -1,5 +1,5 @@
 import { test as base } from '@playwright/test';
-import { BOT_CHALLENGE_REASON, isBotChallenge } from '@support/bot-challenge';
+import { BOT_CHALLENGE_REASON, challengedPages, isBotChallenge, isChallengeResponse } from '@support/bot-challenge';
 import { TARGET } from '@support/env';
 
 export interface BotChallengeFixtures {
@@ -14,6 +14,12 @@ export const test = base.extend<BotChallengeFixtures>({
       const challenged: string[] = [];
       page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame() && isBotChallenge(frame.url())) challenged.push(new URL(frame.url()).pathname);
+      });
+      page.on('response', (response) => {
+        if (response.request().isNavigationRequest() && response.frame() === page.mainFrame() && isChallengeResponse(response)) {
+          challengedPages.add(page);
+          challenged.push(new URL(response.url()).pathname);
+        }
       });
       await use();
       if (challenged.length) testInfo.annotations.push({ type: 'bot challenge', description: `${BOT_CHALLENGE_REASON} Challenged: ${challenged.join(', ')}` });

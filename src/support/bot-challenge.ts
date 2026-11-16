@@ -17,15 +17,44 @@ export const BOT_CHALLENGE_REASON = 'Cloudflare bot challenge on the live site (
  */
 export const MAX_BOT_CHALLENGE_SKIP_RATIO = 0.2;
 
+/** A challenge page's URL carries Cloudflare's `__cf_chl` token. */
 export function isBotChallenge(url: string): boolean {
   return url.includes('__cf_chl');
 }
 
-/** Call right after a navigation the test itself made. */
-export async function skipIfBotChallenge(page: Page): Promise<void> {
+/** Cloudflare marks a challenged response with `cf-mitigated: challenge`, whatever URL and title the page then shows. */
+export function isChallengeResponse(response: { headers(): Record<string, string> }): boolean {
+  return response.headers()['cf-mitigated']?.toLowerCase() === 'challenge';
+}
+
+/** Pages whose own navigation was answered with a challenge response; filled by fixtures/bot-challenge.ts, read by `skipIfBotChallenge`. */
+export const challengedPages = new WeakSet<Page>();
+
+/**
+ * Skips the test when this response (a `request.get` the test made, with no page behind it) is a Cloudflare challenge.
+ * Live runs only; the same runtime skip as `skipIfBotChallenge`, counted and bounded by the run-guard reporter.
+ */
+export function skipIfChallengedResponse(response: { headers(): Record<string, string> }): void {
   if (TARGET !== 'live') return;
-  const challenged = isBotChallenge(page.url()) || (await page.title().catch(() => '')) === 'Just a moment...';
-  // The one runtime skip the suite allows: an environmental block, counted and bounded by the run-guard reporter.
+  skipForChallenge(isChallengeResponse(response));
+}
+
+/**
+ * Call right after a navigation the test itself made. Pass the response of that navigation (`page.goto`'s result, or a
+ * `request.get`'s) when you have it: the challenge is then recognised by its header as well as by the URL and the title.
+ */
+export async function skipIfBotChallenge(page: Page, response?: { headers(): Record<string, string> } | null): Promise<void> {
+  if (TARGET !== 'live') return;
+  skipForChallenge(
+    challengedPages.has(page) ||
+      (!!response && isChallengeResponse(response)) ||
+      isBotChallenge(page.url()) ||
+      (await page.title().catch(() => '')) === 'Just a moment...',
+  );
+}
+
+/** The one runtime skip the suite allows: an environmental block, counted and bounded by the run-guard reporter. */
+function skipForChallenge(challenged: boolean): void {
   // eslint-disable-next-line playwright/no-skipped-test
   test.skip(challenged, BOT_CHALLENGE_REASON);
 }

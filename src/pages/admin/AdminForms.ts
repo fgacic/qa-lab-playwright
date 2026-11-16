@@ -1,6 +1,10 @@
 import type { Locator, Page } from '@playwright/test';
 import { FormField } from '@components/FormField';
 import { step } from '@support/step';
+import { reportedFailure } from './alerts';
+
+/** Brand, category and image start on a placeholder option (index 0): the first real record is index 1. */
+const FIRST_RECORD = 1;
 
 /**
  * What every back-office form shares: heading, Id, Save, Back, and the alerts that carry both
@@ -13,6 +17,8 @@ export class AdminFormChrome {
   readonly backLink: Locator;
   /** Validation labels and the "… saved!" / error messages are all ARIA alerts (the brand form's per-field errors also have test ids). */
   readonly alerts: Locator;
+  /** What the form says when a request fails, in whatever form (an alert, or the site's plain error text). */
+  readonly failure: Locator;
 
   constructor(readonly page: Page) {
     this.heading = page.getByRole('heading', { level: 2 });
@@ -20,6 +26,7 @@ export class AdminFormChrome {
     this.saveButton = page.getByRole('button', { name: 'Save' });
     this.backLink = page.getByRole('link', { name: 'Back' });
     this.alerts = page.getByRole('alert');
+    this.failure = reportedFailure(page);
   }
 
   alert(text: string | RegExp): Locator {
@@ -103,6 +110,8 @@ export interface ProductInput {
   image?: string;
   /** Tick "Item for rent": the shop's default list, categories and filters leave rentals out. */
   rental?: boolean;
+  /** Tick "Location offer". */
+  locationOffer?: boolean;
 }
 
 export class AdminProductForm {
@@ -151,18 +160,19 @@ export class AdminProductForm {
     await this.price.fill(product.price);
     if (product.rental) await this.rental.check();
     if (product.co2Rating) await this.co2Rating.selectOption({ label: product.co2Rating });
-    // Brand, category and image default to the first real option unless named.
-    await this.brand.selectOption(product.brand ? { label: product.brand } : { index: 1 });
-    await this.category.selectOption(product.category ? { label: product.category } : { index: 1 });
-    await this.image.selectOption(product.image ? { label: product.image } : { index: 1 });
+    if (product.locationOffer) await this.locationOffer.check();
+    // Brand, category and image default to the first real record unless named.
+    await this.brand.selectOption(product.brand ? { label: product.brand } : { index: FIRST_RECORD });
+    await this.category.selectOption(product.category ? { label: product.category } : { index: FIRST_RECORD });
+    await this.image.selectOption(product.image ? { label: product.image } : { index: FIRST_RECORD });
   }
 
   /** The first real brand, category and image, for a form that did not preselect them (ADM-09). */
   @step('Choose a brand, category and image')
   async chooseRelations(): Promise<void> {
-    await this.brand.selectOption({ index: 1 });
-    await this.category.selectOption({ index: 1 });
-    await this.image.selectOption({ index: 1 });
+    await this.brand.selectOption({ index: FIRST_RECORD });
+    await this.category.selectOption({ index: FIRST_RECORD });
+    await this.image.selectOption({ index: FIRST_RECORD });
   }
 
   @step('Add spec {0}: {1}')

@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeCustomer } from '@support/test-data';
 
 /**
@@ -65,7 +65,7 @@ test.describe('Registration form', () => {
     // The other required fields are empty, so the form stops here whether or not the date is flagged.
     await expect(registerPage.firstName.error).toBeVisible();
 
-    await expect(registerPage.dateOfBirth.error, 'BUG-18: a future birth date is flagged').toBeVisible({ timeout: 5_000 });
+    await expect(registerPage.dateOfBirth.error, 'BUG-18: a future birth date is flagged').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
   test('the form lists the password rules', async ({ registerPage }) => {
@@ -77,30 +77,50 @@ test.describe('Registration form', () => {
     ]);
   });
 
-  test('the eye button reveals the password', async ({ registerPage }) => {
+  test('the eye button shows and hides the password', async ({ registerPage }) => {
     await registerPage.password.input.fill('Qa-lab-visible-1!');
     await expect(registerPage.password.input).toHaveAttribute('type', 'password');
 
     await registerPage.showPasswordButton.click();
-
     await expect(registerPage.password.input).toHaveAttribute('type', 'text');
+    await expect(registerPage.password.input).toHaveValue('Qa-lab-visible-1!');
+
+    await registerPage.showPasswordButton.click();
+
+    await expect(registerPage.password.input).toHaveAttribute('type', 'password');
   });
 
   test('the password rules and the validation message ask for the same minimum length', { tag: ['@negative', '@bug'] }, async ({ registerPage, apiMock }) => {
     knownBug('BUG-31', 'the page lists "at least 8 characters" for the password but the validation message says "minimal 6 characters long".');
     await apiMock.blockUnmockedWrites();
-    const minimumIn = (text: string) => Number(/(\d+) characters/.exec(text)?.[1]);
     await registerPage.password.input.fill('a');
     await registerPage.submit();
     // Both statements exist, whichever number a fix settles on.
     await expect(registerPage.passwordRules.first()).toContainText(/\d+ characters/);
     await expect(registerPage.password.error).toContainText(/\d+ characters/);
+    const rule = await registerPage.passwordRules.first().innerText();
+    const listedMinimum = /(\d+) characters/.exec(rule)?.[1];
 
-    const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
-    const [rule, message] = [oneLine(await registerPage.passwordRules.first().innerText()), oneLine(await registerPage.password.error.innerText())];
-
-    expect(minimumIn(message), `BUG-31: the message ("${message}") names the minimum the rules list ("${rule}")`).toBe(minimumIn(rule));
+    await expect(registerPage.password.error, `BUG-31: the message names the minimum the rules list ("${rule}")`).toContainText(new RegExp(`\\b${listedMinimum} characters`), { timeout: BUG_TIMEOUT });
   });
+
+  // The minimum the page lists is 8 (BUG-31 is about the validation message saying 6). Probed: the form really enforces 8, so the
+  // pairs are 6 against 8 (the number the message names) and 7 against 8 (the number the rules list). A password is `Ab1!` plus filler,
+  // so only its length changes between a pair.
+  const passwordOfLength = (length: number) => `Ab1!${'x'.repeat(length - 4)}`;
+
+  for (const length of [5, 6, 7]) {
+    test(`a password of ${length} characters is rejected by the form`, { tag: ['@negative'] }, async ({ registerPage, apiMock }) => {
+      await apiMock.blockUnmockedWrites();
+      await registerPage.password.input.fill(passwordOfLength(length));
+
+      await registerPage.submit();
+
+      // Whatever number the message names (BUG-31), it says the password is too short and nothing is sent.
+      await expect(registerPage.password.error).toContainText(/\d+ characters/);
+      await apiMock.expectNoRequest('POST', '/users/register');
+    });
+  }
 
   test.describe('when the postcode lookup knows the address', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('GET', '/postcode-lookup', { street: 'Mockstraat', house_number: '1', city: 'Mockstad', state: 'Mockland', country: 'NL', postcode: '1234 AB' })));
@@ -142,6 +162,17 @@ test.describe('Registration form', () => {
       });
       await expect(page).toHaveURL('/auth/login');
     });
+
+    // The accepting side of the pairs: 8 is the shortest password the form lets through.
+    test('a password of 8 characters is accepted by the form', async ({ registerPage, apiMock, page }) => {
+      const password = passwordOfLength(8);
+      const sent = apiMock.waitForRequest('POST', '/users/register');
+
+      await registerPage.register({ ...fakeCustomer(), password });
+
+      expect((await sent).postDataJSON()).toMatchObject({ password });
+      await expect(page).toHaveURL('/auth/login');
+    });
   });
 
   test.describe('when registration is submitted with Enter', { tag: ['@mocked'] }, () => {
@@ -165,7 +196,7 @@ test.describe('Registration form', () => {
 
       await registerPage.password.input.press('Enter');
 
-      await expect(page, 'BUG-36: Enter in the password field submits the registration').toHaveURL('/auth/login', { timeout: 5_000 });
+      await expect(page, 'BUG-36: Enter in the password field submits the registration').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
     });
   });
 

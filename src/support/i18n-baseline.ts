@@ -48,7 +48,7 @@ export const KNOWN: KnownUntranslated[] = [
   { id: 'I18N-12', title: 'the pagination labels', visit: 'home', everywhere: true, kinds: ['aria-label'], text: /^(Previous|Next|Page-\d+)$/, summary: 'the aria-labels of the pagination buttons ("Previous", "Next", "Page-1") are English in every language' },
   { id: 'I18N-13', title: 'the login page\'s labels', visit: 'login with errors', also: ['login refused'], kinds: ['aria-label'], text: /^(Alternative login methods|Login|Forgot your Password\?|Register your account)$/, summary: 'the aria-labels on the login page (the methods group, the Login button, the forgot-password and register links) are English in every language' },
   { id: 'I18N-14', title: 'the product page\'s category and brand labels', visit: 'product page', also: ['product page with a toast'], kinds: ['aria-label'], text: /^(category|brand)$/, summary: 'the aria-labels "category" and "brand" on the product page are English ids in every language' },
-  { id: 'I18N-15', title: 'the banner image\'s alt text', visit: 'home', also: ['search without results', 'chat open', 'language menu open'], kinds: ['alt'], text: /^Banner$/, summary: 'the home page banner image\'s alt text ("Banner") is English in every language' },
+  { id: 'I18N-15', title: 'the banner image\'s alt text', visit: 'home', also: ['search without results', 'chat open', 'language menu open', 'home on a phone'], kinds: ['alt'], text: /^Banner$/, summary: 'the home page banner image\'s alt text ("Banner") is English in every language' },
   // Found by reading the document title, the cart lines, the payment form and the chat window.
   // One pin per title, on the visit that shows it (and the same title is left out of the stray-English check only there): a title that is fixed
   // turns its own pin red, and a title that moves to another page is not hidden by an exclusion that covers the whole site.
@@ -77,6 +77,8 @@ export const KNOWN: KnownUntranslated[] = [
   { id: 'I18N-24', title: 'the profile page\'s TOTP field label', visit: 'account profile', kinds: ['aria-label'], text: /^TOTP code$/, summary: 'the aria-label of the profile page\'s TOTP code field ("TOTP code") is English in every language' },
   // Found by visiting the account lists with rows in them (mocked invoices, messages).
   { id: 'I18N-25', title: 'the message status badge', visit: 'account messages with items', text: /^NEW$/, summary: 'the status badge of a message in the account list shows the API\'s raw value ("NEW") in every language' },
+  // Found by visiting at phone width, where the header folds behind its toggler.
+  { id: 'I18N-26', title: 'the header toggler\'s label', visit: 'home on a phone', kinds: ['aria-label'], text: /^Toggle navigation$/, summary: 'the aria-label of the header\'s menu toggler on a phone ("Toggle navigation", the framework\'s default) is English in every language' },
 ];
 
 /** The languages a pin is about, and so the languages it is checked in, one test each. */

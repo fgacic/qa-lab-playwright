@@ -6,12 +6,19 @@ const CO2_ORDER = ['A', 'B', 'C', 'D', 'E'];
 /** The fields the sort menu offers, i.e. the part of each SORT_OPTIONS value before the comma. */
 type SortField = 'name' | 'price' | 'co2_rating';
 type SortDirection = 'asc' | 'desc';
-/** One key per field: an option for a new field fails to compile until it has a key here. */
+/**
+ * One key per field: an option for a new field fails to compile until it has a key here.
+ * Names go to `toBeSorted` as they are: it compares text with `localeCompare` (English, case-insensitive), not by code
+ * point, because the shop sorts in the database's collation, which ignores case ("hand saw" comes before "Hammer").
+ */
 const sortKey: Record<SortField, (p: Product) => string | number> = {
   name: (p) => p.name,
   price: (p) => p.price,
   co2_rating: (p) => CO2_ORDER.indexOf(p.co2_rating),
 };
+
+/** A category with several products, to sort inside a filter. */
+const FILTERED_CATEGORY = 'Pliers';
 
 test.describe('Sorting', () => {
   for (const [label, value] of Object.entries(SORT_OPTIONS) as [SortOption, string][]) {
@@ -44,5 +51,19 @@ test.describe('Sorting', () => {
     expect([...pageOne.data, ...pageTwo.data].map(sortKey.price)).toBeSorted();
     await expect(homePage.grid.names).toHaveText(pageTwo.data.map((p) => p.name));
     await expect.poll(() => homePage.grid.priceValues()).toEqual(pageTwo.data.map((p) => p.price));
+  });
+
+  test('sorting a filtered list keeps the filter and orders what is left', async ({ homePage, apiMock }) => {
+    await homePage.filters.filterByCategory(FILTERED_CATEGORY);
+    const sorted = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.sort === 'price,asc' && !!body.by_category);
+
+    await homePage.filters.sortBy('Price (Low - High)');
+
+    const { json: found } = await sorted;
+    expect(found.data.length, `the catalogue should hold at least two ${FILTERED_CATEGORY}`).toBeGreaterThan(1);
+    expect(found.data.every((p) => p.category.name === FILTERED_CATEGORY), 'only the ticked category is listed').toBe(true);
+    expect(found.data.map(sortKey.price)).toBeSorted();
+    await expect(homePage.filters.category(FILTERED_CATEGORY)).toBeChecked();
+    await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 });

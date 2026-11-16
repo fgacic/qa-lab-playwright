@@ -1,16 +1,24 @@
 import type { ApiMock } from '@support/api-mock';
 import { expect, mock, test } from '@fixtures';
 import type { HomePage } from '@pages/HomePage';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
 const CURRENT_PAGE = /\bactive\b/;
+/** The deepest page any test here visits (Next from page 3 reaches 4): the catalogue must have at least this many. */
+const PAGES_NEEDED = 4;
 
 /** The answer for one page of the product list (page numbers are 1-based in the request). */
 const pageAnswer = (apiMock: ApiMock, n: number) => apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === String(n));
 
 test.describe('Pagination', () => {
+  // Shared precondition: with fewer pages, a test that goes to page 3 or 4 would fail on missing data and not on the pager.
+  test.beforeEach(async ({ api }) => {
+    const { last_page: pages } = await api.listProducts();
+    expect(pages, `the catalogue should have at least ${PAGES_NEEDED} pages for the pager to be exercised`).toBeGreaterThanOrEqual(PAGES_NEEDED);
+  });
+
   test('Next shows the following page of products', async ({ homePage, api, apiMock }) => {
     const { per_page: pageSize } = await api.listProducts();
     await expect(homePage.grid.cards).toHaveCount(pageSize);
@@ -121,7 +129,7 @@ test.describe('Pagination', () => {
       expect(json.current_page, 'the list restarts at page 1').toBe(1);
       await expect(homePage.grid.names).toHaveText(json.data.map((p) => p.name));
       await expect(homePage.pagination.item(1), 'the pager still offers page 1').toBeVisible();
-      await expect(homePage.pagination.item(1), 'BUG-33: the pager marks page 1 as current once the list restarts there').toHaveClass(CURRENT_PAGE, { timeout: 5_000 });
+      await expect(homePage.pagination.item(1), 'BUG-33: the pager marks page 1 as current once the list restarts there').toHaveClass(CURRENT_PAGE, { timeout: BUG_TIMEOUT });
     });
   }
 
@@ -130,7 +138,7 @@ test.describe('Pagination', () => {
     knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
     await expect(homePage.pagination.item(1)).toHaveClass(CURRENT_PAGE);
 
-    await expect(homePage.pagination.previous, 'A11Y-03: Previous is disabled on page 1').toBeDisabled({ timeout: 5_000 });
+    await expect(homePage.pagination.previous, 'A11Y-03: Previous is disabled on page 1').toBeDisabled({ timeout: BUG_TIMEOUT });
   });
 
   test('Next is disabled on the last page for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage, apiMock }) => {
@@ -141,7 +149,7 @@ test.describe('Pagination', () => {
     await last;
     await expect(homePage.pagination.item(lastPage)).toHaveClass(CURRENT_PAGE);
 
-    await expect(homePage.pagination.next, 'A11Y-03: Next is disabled on the last page').toBeDisabled({ timeout: 5_000 });
+    await expect(homePage.pagination.next, 'A11Y-03: Next is disabled on the last page').toBeDisabled({ timeout: BUG_TIMEOUT });
   });
 
   test.describe('when everything fits on one page', { tag: ['@mocked'] }, () => {

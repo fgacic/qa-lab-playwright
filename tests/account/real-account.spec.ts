@@ -1,11 +1,5 @@
 import { expect, test } from '@fixtures';
-import { API_URL, CUSTOMER_STORAGE_STATE } from '@support/env';
-import { jwtExpiry } from '@support/payloads';
-import { readSavedToken } from '@support/session';
 import { fakeAddress, fakeCustomer } from '@support/test-data';
-
-/** A saved session that is about to lapse would show up as a redirect to the login page, far from its cause. */
-const MIN_SESSION_LEFT_SECONDS = 60;
 
 /**
  * Against the real auth API: real registration, real sign-in, real account data. Runs on the
@@ -41,10 +35,8 @@ test.describe('Real account', { tag: ['@account'] }, () => {
   test.describe('the saved session (storageState)', () => {
     test.use({ session: 'storage-state' });
 
+    // A saved session that has lapsed is refused by the `session` fixture itself (fixtures/auth.ts), with the reason.
     test('opens the account area without signing in again', async ({ accountPage }) => {
-      const secondsLeft = jwtExpiry(readSavedToken(CUSTOMER_STORAGE_STATE)) - Date.now() / 1000;
-      expect(secondsLeft, 'saved session expired: run the session projects in their own pass (npm test does)').toBeGreaterThan(MIN_SESSION_LEFT_SECONDS);
-
       await expect(accountPage.title).toHaveText('My account');
       await expect(accountPage.header.userMenu).toBeVisible();
     });
@@ -54,23 +46,18 @@ test.describe('Real account', { tag: ['@account'] }, () => {
     // Each worker registers its own customer, so tests that change account data never collide.
     test.use({ session: 'worker-account' });
 
-    test('a saved favourite is listed and can be removed', async ({ api, request, workerAccount, catalog, favoritesPage }) => {
+    test('a saved favourite is listed and can be removed', async ({ api, workerAccount, catalog, favoritesPage }) => {
       const product = await catalog.inStock();
       const { token } = await workerAccount.get();
       await api.addFavorite(token, product.id);
       await favoritesPage.open();
-      // The account's own list, read back from the API (the UI could hide a favourite the account still holds).
-      const favouriteIds = async () => {
-        const response = await request.get(`${API_URL}/favorites`, { headers: { authorization: `Bearer ${token}` } });
-        expect(response.ok(), 'GET /favorites answers').toBe(true);
-        return ((await response.json()) as { product_id: string }[]).map((favourite) => favourite.product_id);
-      };
 
       await expect(favoritesPage.favorite(product.name)).toBeVisible();
       await favoritesPage.remove(product.name);
 
       await expect(favoritesPage.favorite(product.name)).toHaveCount(0);
-      await expect.poll(favouriteIds, { message: 'the favourite is gone from the account' }).not.toContain(product.id);
+      // Read back from the API: the UI could hide a favourite the account still holds.
+      await expect.poll(() => api.favoriteProductIds(token), { message: 'the favourite is gone from the account' }).not.toContain(product.id);
     });
 
     test('a signed-in purchase skips the guest step and is saved to the account', { tag: ['@flow'] }, async ({ api, workerAccount, checkout }) => {

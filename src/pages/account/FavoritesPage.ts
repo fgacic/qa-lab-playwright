@@ -12,7 +12,7 @@ export class FavoritesPage {
     this.shell = new AppShell(page);
     this.title = page.getByTestId('page-title');
     this.favorites = page.getByTestId(/^favorite-/);
-    this.emptyState = page.getByText('There are no favorites yet.', { exact: false });
+    this.emptyState = page.getByText('There are no favorites yet.');
   }
 
   favorite(productName: string): Locator {

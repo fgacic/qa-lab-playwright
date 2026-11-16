@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { POSTCODE_LOOKUP_RESULT, postcodeLookupMock } from '@fixtures/pages';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /** What the step tells the shopper, word for word. */
@@ -101,7 +101,7 @@ test.describe('Checkout: billing address step', () => {
 
       expect(status).toBe(422);
       await expect(billing.lookupError).toHaveText(TEXT.postcodeInvalid);
-      await expect(billing.proceedButton, 'BUG-40: Proceed stays disabled while the postcode is malformed').toBeDisabled({ timeout: 5_000 });
+      await expect(billing.proceedButton, 'BUG-40: Proceed stays disabled while the postcode is malformed').toBeDisabled({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -114,10 +114,13 @@ test.describe('Checkout: billing address step', () => {
     const secondIsServed = new Promise<void>((resolve) => (secondServed = resolve));
     await page.route(/\/postcode-lookup/, async (route) => {
       const house = new URL(route.request().url()).searchParams.get('house_number');
+      // Only the first number's answer waits, and only the second number's answer releases it: any other
+      // lookup (the page may ask while a field is half filled) is answered at once and releases nothing.
       if (house === RACE.first.houseNumber) {
         await secondIsServed;
         return route.fulfill({ json: RACE.first.answer });
       }
+      if (house !== RACE.second.houseNumber) return route.fulfill({ json: { ...POSTCODE_LOOKUP_RESULT, house_number: house } });
       await route.fulfill({ json: RACE.second.answer });
       secondServed();
     });
@@ -134,8 +137,8 @@ test.describe('Checkout: billing address step', () => {
     await fast;
     await slow;
 
-    await expect(billing.city.input, 'BUG-41: the city is the one of the last house number').toHaveValue(RACE.second.answer.city, { timeout: 5_000 });
-    await expect(billing.street.input, 'BUG-41: the street is the one of the last house number').toHaveValue(RACE.second.answer.street, { timeout: 5_000 });
+    await expect(billing.city.input, 'BUG-41: the city is the one of the last house number').toHaveValue(RACE.second.answer.city, { timeout: BUG_TIMEOUT });
+    await expect(billing.street.input, 'BUG-41: the street is the one of the last house number').toHaveValue(RACE.second.answer.street, { timeout: BUG_TIMEOUT });
   });
 
   test.describe('when the postcode lookup finds nothing', { tag: ['@mocked'] }, () => {

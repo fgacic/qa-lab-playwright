@@ -45,6 +45,13 @@ export class AppShell {
     await skipIfBotChallenge(this.page);
   }
 
+  /** Reloads the page the way `goto` opens one: to `domcontentloaded`, and past a bot challenge. */
+  @step('Reload the page')
+  async reload(): Promise<void> {
+    await this.page.reload({ waitUntil: 'domcontentloaded' });
+    await skipIfBotChallenge(this.page);
+  }
+
   /** The privacy policy, reached through the footer link. */
   @step('Open the privacy policy from the footer')
   async openPrivacyPolicy(): Promise<PrivacyPage> {

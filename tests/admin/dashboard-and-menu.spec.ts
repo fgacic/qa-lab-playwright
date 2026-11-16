@@ -1,8 +1,8 @@
 import { ADMIN_SECTIONS } from '@components/Header';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { alertAppears } from '@pages/admin/alerts';
+import { alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
 import { ORDER_STATUS, paginated } from '@support/admin-payloads';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** What only the back office reads: the dashboard's orders and sales report, the user list and the inbox. */
 const ADMIN_ONLY_ENDPOINTS = /^\/(?:invoices|users|messages|reports\/[^/]+)$/;
@@ -13,9 +13,12 @@ const ADMIN_ONLY_ENDPOINTS = /^\/(?:invoices|users|messages|reports\/[^/]+)$/;
  * The real journeys are tests/admin-e2e, against the self-hosted Toolshop.
  */
 test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'] }, () => {
-  test('the dashboard shows the sales chart and the orders awaiting fulfilment', async ({ adminDashboard, backOffice }) => {
+  test('the dashboard shows the sales chart', async ({ adminDashboard }) => {
     await expect(adminDashboard.salesHeading).toBeVisible();
     await expect(adminDashboard.salesChart).toBeVisible();
+  });
+
+  test('the dashboard lists the orders awaiting fulfilment', async ({ adminDashboard, backOffice }) => {
     await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toContainText(ORDER_STATUS);
   });
 
@@ -25,7 +28,7 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
     await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toBeVisible();
     await expect(adminDashboard.salesChart).toBeVisible();
 
-    expect(await alertAppears(adminDashboard.alerts), 'no alert appears on a healthy dashboard').toBe(false);
+    expect(await alertAppears(adminDashboard.failure), 'no failure message appears on a healthy dashboard').toBe(false);
   });
 
   test('an order on the dashboard opens for editing', async ({ adminDashboard, backOffice, page }) => {
@@ -34,13 +37,15 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
     await expect(page).toHaveURL(`/admin/orders/edit/${backOffice.order.id}`);
   });
 
-  test('the admin menu reaches every back-office section', async ({ adminDashboard, page }) => {
-    for (const section of ADMIN_SECTIONS) {
+  // One test per section: a section that breaks fails alone, and the others still say whether they work.
+  for (const section of ADMIN_SECTIONS) {
+    test(`the admin menu reaches ${section}`, async ({ adminDashboard, page }) => {
       await adminDashboard.shell.header.openAdminSection(section);
-      await expect(page, section).toHaveURL(`/admin/${section.toLowerCase()}`);
-      await expect(adminDashboard.sectionHeading(section), section).toBeVisible();
-    }
-  });
+
+      await expect(page).toHaveURL(`/admin/${section.toLowerCase()}`);
+      await expect(adminDashboard.sectionHeading(section)).toBeVisible();
+    });
+  }
 
   test.describe('with no orders waiting', () => {
     test.use(withMocks(mock.respond('GET', '/invoices', paginated([]))));
@@ -53,20 +58,21 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
 
   test.describe('when the dashboard data fails to load', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/invoices', 500), mock.fail('GET', '/reports/total-sales-of-years', 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the admin is told the dashboard could not be loaded', async ({ adminDashboard }) => {
       knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.', { absence: true });
       await expect(adminDashboard.salesHeading).toBeVisible();
 
-      // Any alert will do: the pin does not prescribe the wording (a healthy dashboard shows none, see above).
-      await expect(adminDashboard.alerts.first(), 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: 5_000 });
+      // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording (a healthy dashboard shows none, see above).
+      await expect(adminDashboard.failure, 'ADM-01: a failed dashboard tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });
 
 test.describe('Admin access control (mocked customer session)', { tag: ['@mocked'] }, () => {
-  test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, page, apiMock }) => {
-    await page.goto('/admin/dashboard', { waitUntil: 'domcontentloaded' });
+  test('a signed-in customer cannot open the back office', { tag: ['@negative'] }, async ({ signedIn: _, adminEntrance, page, apiMock }) => {
+    await adminEntrance.tryToOpen();
 
     await expect(page).toHaveURL('/auth/login');
     // Turned away before the dashboard asked for anything: no order list, report, user list or inbox was requested.

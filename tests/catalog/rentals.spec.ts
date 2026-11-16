@@ -1,5 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { allowLoggedFailure } from '@pages/admin/alerts';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 
 test.describe('Rentals', () => {
@@ -32,18 +34,19 @@ test.describe('Rentals', () => {
       knownBug('BUG-07', 'an empty rentals list shows only the heading, no empty-state message.', { absence: true });
       await expect(rentalsPage.title).toBeVisible();
 
-      await expect(rentalsPage.grid.emptyState, 'BUG-07: an empty rentals list shows an empty-state message').toBeVisible({ timeout: 5_000 });
+      await expect(rentalsPage.grid.emptyState, 'BUG-07: an empty rentals list shows an empty-state message').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
   test.describe('when the rentals fail to load', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('QUERY', '/products', 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the page still renders and explains the failure', async ({ rentalsPage }) => {
       knownBug('BUG-08', 'a failed rentals request blanks the whole page, heading included.', { absence: true });
 
-      await expect(rentalsPage.title, 'BUG-08: a failed rentals request keeps the page heading').toBeVisible({ timeout: 5_000 });
-      await expect(rentalsPage.shell.errorAlert, 'BUG-08: a failed rentals request is reported').toBeVisible({ timeout: 5_000 });
+      await expect(rentalsPage.title, 'BUG-08: a failed rentals request keeps the page heading').toBeVisible({ timeout: BUG_TIMEOUT });
+      await expect(failureFeedback(rentalsPage.page).first(), 'BUG-08: a failed rentals request is reported').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

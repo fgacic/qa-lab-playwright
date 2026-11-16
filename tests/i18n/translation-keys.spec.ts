@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { untranslatedKeys } from '@support/i18n';
+import { untranslatedKeys, visibleUiText } from '@support/i18n';
 
 /**
  * The leaked-key detector, on text the shop really renders: a key is flagged wherever it is
  * shown, and an email, a URL, a price, a version or an abbreviation is not mistaken for one.
- * No page is opened (so `test` comes from Playwright itself, not the suite's page fixtures): this guards the guard.
+ * Mostly no page is opened (so `test` comes from Playwright itself, not the suite's page fixtures): this guards the guard.
+ * The one exception reads a page the test builds from a string, to guard how a read labels the text it finds.
  * @i18n: Chromium only, with the rest of the translation checks.
  */
 test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () => {
@@ -75,5 +76,49 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
     ];
 
     expect(untranslatedKeys(real)).toEqual([]);
+  });
+
+  // Documented gap: with no dot, a key cannot be told from a word ("home", "login_title"). It is not flagged here; a leaked
+  // single-segment key is found by the stray-English comparison (it equals English), which is why that check exists beside this one.
+  test('documented gap: a key of one segment is not flagged', () => {
+    expect(untranslatedKeys(['home', 'HOME', 'nav-home', 'login_title', 'nav_home'])).toEqual([]);
+    // The same word glued to a second segment is a key again: the gap is exactly "no dot".
+    expect(untranslatedKeys(['home.title', 'login_title.text'])).toEqual(['home.title', 'login_title.text']);
+  });
+});
+
+test.describe('The UI text read from a page', { tag: ['@i18n'] }, () => {
+  test('a string in the header and in the page is the page\'s', async ({ page }) => {
+    // The header's copy comes first in the document: the label of the string must not stay "shell" because that is the one read first.
+    await page.setContent(`
+      <title>Shared</title>
+      <app-header><a href="#">Contact</a><span>Only in the header</span></app-header>
+      <main><h1>Contact</h1><p>Only in the page</p></main>
+      <app-footer><span>Only in the footer</span></app-footer>`);
+
+    const read = await visibleUiText(page);
+    const partOf = (text: string) => read.find((t) => t.kind === 'text' && t.text === text)?.part;
+
+    expect(partOf('Contact')).toBe('page');
+    expect(partOf('Only in the header')).toBe('shell');
+    expect(partOf('Only in the page')).toBe('page');
+    expect(partOf('Only in the footer')).toBe('shell');
+  });
+
+  test('a card with a picture holds data the key scan skips, a card without one is the shop\'s own words', async ({ page }) => {
+    await page.setContent(`
+      <main>
+        <div class="card"><img src="data:," alt="Claw hammer"><h5 class="card-title">Claw Hammer</h5><p class="card-text">A hammer for nails</p></div>
+        <div class="card"><h5 class="card-title">account.favorites.title</h5><p class="card-text">account.favorites.text</p></div>
+        <figure><img src="data:," alt="Tool"><figcaption>photo.credit</figcaption></figure>
+      </main>`);
+
+    const keys = (await visibleUiText(page, 'keys')).map((t) => t.text);
+    const strays = (await visibleUiText(page, 'strays')).map((t) => t.text);
+
+    expect(keys, 'the key scan reads the tile and the credit, not the product card').toEqual(expect.arrayContaining(['account.favorites.title', 'account.favorites.text', 'photo.credit']));
+    expect(keys).not.toContain('Claw Hammer');
+    expect(keys).not.toContain('A hammer for nails');
+    expect(strays, 'the stray-English scan keeps skipping every card title and text, and the credit').toEqual([]);
   });
 });

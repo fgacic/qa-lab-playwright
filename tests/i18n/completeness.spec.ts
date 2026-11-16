@@ -1,4 +1,5 @@
 import { CheckoutWizard } from '@components/checkout/CheckoutWizard';
+import { PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES } from '@components/checkout/PaymentStep';
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
 import { expect, mock, test } from '@fixtures';
 import { NO_SUCH_PRODUCT } from '@fixtures/a11y';
@@ -63,6 +64,14 @@ interface Visit {
   /** Steps that bring the opened page to the state to read, by test id so they work in any language. */
   drive?: (page: Page) => Promise<void>;
   /**
+   * What shows the page is in the state `drive` brought it to (a toast, a confirmation, an error): asserted after `drive` and again
+   * right after each settled sample, so a state that faded before the read (the toasts do, after three to five seconds) fails the
+   * visit instead of being read as a page without it. Language-proof, because it also runs after a switch of language.
+   */
+  witness?: (page: Page) => Promise<void>;
+  /** A phone-sized tab, with the header collapsed behind its toggler (the text of its closed menu is not drawn, so not read). */
+  phone?: true;
+  /**
    * The steps `drive` takes find things by their English names. They run in English, and the
    * language menu then switches the page, as a visitor who changes language half way would.
    */
@@ -107,8 +116,8 @@ const VISITS: Visit[] = [
     drive: async (page) => {
       await page.getByTestId('search-query').fill(NO_SUCH_PRODUCT);
       await page.getByTestId('search-submit').click();
-      await expect(page.getByTestId('no-results')).toBeVisible();
     },
+    witness: (page) => expect(page.getByTestId('no-results')).toBeVisible(),
   },
   {
     name: 'product page',
@@ -123,8 +132,8 @@ const VISITS: Visit[] = [
     ready: (page) => [page.getByTestId('add-to-cart')],
     drive: async (page) => {
       await page.getByTestId('add-to-cart').click();
-      await expect(page.getByRole('alert').first()).toBeVisible();
     },
+    witness: (page) => expect(page.getByRole('alert').first()).toBeVisible(),
   },
   {
     name: 'product not found',
@@ -148,11 +157,12 @@ const VISITS: Visit[] = [
     driveInEnglish: true,
     mocks: [postcodeLookupMock],
     drive: async (page) => {
-      const { cart, signIn, billing } = new CheckoutWizard(page);
+      const { cart, signIn } = new CheckoutWizard(page);
       await cart.proceed();
       await signIn.continueAsGuest(fakeGuest());
-      await expect(billing.heading).toBeVisible();
     },
+    // The step's own button: the heading's name is English.
+    witness: (page) => expect(page.getByTestId('proceed-3')).toBeVisible(),
   },
   {
     name: 'checkout payment',
@@ -169,10 +179,12 @@ const VISITS: Visit[] = [
       await billing.proceed();
       await payment.choose('credit-card');
       // Invalid input, so the card field's validation message is read too.
-      await payment.field('Credit Card Number').fill('abc');
-      await payment.field('Credit Card Number').blur();
-      await expect(payment.validationMessage('Invalid card number format.')).toBeVisible();
+      await payment.field(FIELD.cardNumber).fill('abc');
+      await payment.field(FIELD.cardNumber).blur();
+      await expect(payment.validationMessage(PAYMENT_MESSAGES.cardNumber)).toBeVisible();
     },
+    // By test id and class, because the message and the label are translated (or not) by language: the field is the one the message is about.
+    witness: (page) => expect(page.getByTestId('credit_card_number')).toHaveClass(/ng-invalid/),
   },
   {
     name: 'order confirmation',
@@ -189,8 +201,9 @@ const VISITS: Visit[] = [
       await checkout.billing.enterAddress(fakeAddress());
       await checkout.billing.proceed();
       await checkout.payment.payOnDelivery();
-      await expect(checkout.confirmation).toBeVisible();
     },
+    // The invoice number the mock issued: the sentence around it is translated.
+    witness: (page) => expect(page.getByText(guestInvoice.invoice_number)).toBeVisible(),
   },
   { name: 'contact with errors', path: '/contact', ready: (page) => [page.getByTestId('contact-submit')], submit: { button: 'contact-submit', error: 'first-name-error' } },
   { name: 'login with errors', path: '/auth/login', ready: (page) => [page.getByTestId('login-submit')], submit: { button: 'login-submit', error: 'email-error' } },
@@ -205,8 +218,8 @@ const VISITS: Visit[] = [
       await page.getByTestId('email').fill(UNKNOWN_EMAIL);
       await page.getByTestId('password').fill(UNKNOWN_PASSWORD);
       await page.getByTestId('login-submit').click();
-      await expect(page.getByTestId('login-error')).toBeVisible();
     },
+    witness: (page) => expect(page.getByTestId('login-error')).toBeVisible(),
   },
   { name: 'registration with errors', path: '/auth/register', ready: (page) => [page.getByTestId('register-submit')], submit: { button: 'register-submit', error: 'first-name-error' } },
   { name: 'forgot password', path: '/auth/forgot-password', ready: (page) => [page.getByTestId('forgot-password-submit')] },
@@ -219,8 +232,9 @@ const VISITS: Visit[] = [
     drive: async (page) => {
       await page.getByTestId('email').fill(fakeUser.email);
       await page.getByTestId('forgot-password-submit').click();
-      await expect(page.getByRole('alert')).toBeVisible();
     },
+    // Visible in the final settled sample too: it fades out after three seconds, so a slow read must fail here, not read the page without it.
+    witness: (page) => expect(page.getByRole('alert')).toBeVisible(),
   },
   { name: 'privacy policy', path: '/privacy', ready: (page) => [page.getByRole('heading', { level: 1 })] },
   { name: 'account', path: '/account', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title'), page.getByTestId('nav-favorites')] },
@@ -237,8 +251,8 @@ const VISITS: Visit[] = [
     ready: (page) => [page.getByTestId('chat-toggle')],
     drive: async (page) => {
       await page.getByTestId('chat-toggle').click();
-      await expect(page.getByTestId('chat-window')).toBeVisible();
     },
+    witness: (page) => expect(page.getByTestId('chat-window')).toBeVisible(),
   },
   {
     name: 'language menu open',
@@ -246,10 +260,20 @@ const VISITS: Visit[] = [
     ready: (page) => [page.getByTestId('language-select')],
     drive: async (page) => {
       await page.getByTestId('language-select').click();
-      await expect(page.getByTestId('lang-en')).toBeVisible();
     },
+    witness: (page) => expect(page.getByTestId('lang-en')).toBeVisible(),
+  },
+  {
+    name: 'home on a phone',
+    path: '/',
+    phone: true,
+    // The header's menu is closed behind its toggler: the page itself is what proves the translation file is in (the categories menu is in the closed menu, read by its text content).
+    ready: (page) => [page.getByTestId('product-name'), page.getByTestId('pagination-next')],
   },
 ];
+
+/** A phone: below 992 px the header folds behind its toggler. */
+const PHONE = { width: 390, height: 844 };
 
 const visitNamed = (name: string): Visit => {
   const visit = VISITS.find((v) => v.name === name);
@@ -288,6 +312,7 @@ async function arrange(visit: Visit, { context, apiMock, catalog, api }: Arrange
     path,
     open: async (language) => {
       const page = await context.newPage();
+      if (visit.phone) await page.setViewportSize(PHONE);
       await startInLanguage(page, language);
       if (visit.signedIn) await installToken(page, token);
       if (ids) await page.addInitScript((ids) => sessionStorage.setItem('compare_ids', JSON.stringify(ids)), ids);
@@ -327,10 +352,17 @@ async function readPage(language: Language, visit: Visit, scene: Scene, readFor:
       await expect(page.getByTestId(visit.submit.error).first()).toBeVisible();
     }
     await visit.drive?.(page);
+    await visit.witness?.(page);
+    // The state must still be drawn when the sample is in, not only when the steps ended: before and after the read bracket it.
+    const sample = async () => {
+      const read = await settledUiText(page, traffic, readFor);
+      await visit.witness?.(page);
+      return read;
+    };
     let english: UiText[] | undefined;
     if (startsIn !== language) {
       await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU.en);
-      english = await settledUiText(page, traffic, readFor);
+      english = await sample();
       expectPageText(english, visit, 'en');
       await page.getByTestId('language-select').click();
       await page.getByTestId(`lang-${language}`).click();
@@ -338,7 +370,7 @@ async function readPage(language: Language, visit: Visit, scene: Scene, readFor:
     }
     // Language-specific evidence that the translation file is applied, not only that the page has rendered.
     await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU[language]);
-    const texts = await settledUiText(page, traffic, readFor);
+    const texts = await sample();
     expectPageText(texts, visit, language);
     return { texts, english };
   } finally {

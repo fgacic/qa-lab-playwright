@@ -26,6 +26,7 @@ const SEVERITY: [RegExp, 'blocker' | 'critical' | 'normal' | 'minor' | 'trivial'
 /** Testing-pyramid vocabulary, so the pyramid and by-layer widgets render. */
 function layerOf(tags: string[], project: string): string {
   if (project === 'visual' || tags.includes('@visual')) return 'visual';
+  if (tags.includes('@api')) return 'api';
   if (tags.includes('@mocked')) return 'integration';
   return 'e2e';
 }

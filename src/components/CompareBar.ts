@@ -13,6 +13,11 @@ export class CompareBar {
     this.compareNowLink = root.getByRole('link', { name: 'Compare Now' });
   }
 
+  /** What the bar says for `count` picked products, word for word. */
+  selectedText(count: number): string {
+    return `${count} product(s) selected`;
+  }
+
   @step('Clear the comparison')
   async clearAll(): Promise<void> {
     await this.clearAllButton.click();

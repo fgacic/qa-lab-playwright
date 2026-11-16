@@ -24,10 +24,12 @@ runs:
       shell: bash
       run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
-    - name: Cache Playwright browsers
+    # Restore and save are separate steps (not the combined actions/cache): its automatic save runs only when the whole job
+    # succeeds, so a red run would throw away the browsers it had just downloaded and the next run would download them again.
+    - name: Restore Playwright browsers
       id: browser-cache
       if: inputs.browsers != 'none'
-      uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
@@ -41,3 +43,11 @@ runs:
       if: inputs.browsers != 'none' && steps.browser-cache.outputs.cache-hit == 'true'
       shell: bash
       run: npx playwright install-deps ${{ inputs.browsers }}
+
+    # Saved right after the install, before any test runs, whatever the job does later.
+    - name: Save Playwright browsers
+      if: ${{ always() && inputs.browsers != 'none' && steps.browser-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}

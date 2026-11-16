@@ -1,39 +1,17 @@
-// Waits until the self-hosted Toolshop answers like a seeded shop: the API lists products and
-// lets the seeded admin sign in, and the UI serves its index. Exits non-zero after the deadline.
+// Waits until the self-hosted Toolshop answers like a seeded shop: the API lists products and the UI serves its
+// index (polled with plain reads), then the seeded admin signs in once (never in the loop: the API throttles repeated
+// failed logins). Exits non-zero after the deadline. The check itself is scripts/lib/toolshop-health.mjs.
 import { readFileSync } from 'node:fs';
+import { waitForToolshop } from './lib/toolshop-health.mjs';
 
 // The seeded accounts live in one place, shared with src/support/env.ts.
 const { admin } = JSON.parse(readFileSync(new URL('../src/support/seeded-accounts.json', import.meta.url), 'utf8'));
-const API = process.env.API_URL ?? 'http://localhost:4200/api';
-const UI = process.env.BASE_URL ?? 'http://localhost:4200';
-const deadline = Date.now() + Number(process.env.WAIT_TIMEOUT_MS ?? 180_000);
+const api = process.env.API_URL ?? 'http://localhost:4200/api';
+const ui = process.env.BASE_URL ?? 'http://localhost:4200';
 
-// A hung socket must not stall the loop past its deadline: every call has its own limit.
-const get = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(5000) });
-
-async function healthy() {
-  const products = await get(`${API}/products`, { method: 'QUERY', headers: { 'content-type': 'application/json' }, body: '{"page":"1"}' });
-  if (!products.ok || (await products.json()).total < 1) return 'API has no products yet';
-  const login = await get(`${API}/users/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(admin),
-  });
-  if (!login.ok) return `seeded admin cannot sign in (${login.status})`;
-  const ui = await get(UI);
-  if (!ui.ok || !(await ui.text()).includes('<app-root')) return 'UI not serving the app';
-  return 'ok';
+const state = await waitForToolshop({ api, ui, admin, timeoutMs: Number(process.env.WAIT_TIMEOUT_MS ?? 180_000) });
+if (state !== 'ok') {
+  console.error(`Toolshop did not become healthy: ${state}`);
+  process.exit(1);
 }
-
-for (;;) {
-  const state = await healthy().catch((e) => e.cause?.code ?? e.message);
-  if (state === 'ok') {
-    console.log(`Toolshop is up: UI ${UI}, API ${API}`);
-    process.exit(0);
-  }
-  if (Date.now() > deadline) {
-    console.error(`Toolshop did not become healthy: ${state}`);
-    process.exit(1);
-  }
-  await new Promise((r) => setTimeout(r, 2000));
-}
+console.log(`Toolshop is up: UI ${ui}, API ${api}`);

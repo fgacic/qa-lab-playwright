@@ -1,6 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { COMPARE_STORAGE_KEY } from '@pages/ComparisonPage';
-import { knownBug } from '@support/known-bug';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Product comparison', () => {
   test('picking products shows the comparison bar with the count', { tag: ['@smoke'] }, async ({ homePage }) => {
@@ -9,7 +10,7 @@ test.describe('Product comparison', () => {
     await homePage.grid.compare(first);
     await homePage.grid.compare(second);
 
-    await expect(homePage.compareBar.selection).toHaveText('2 product(s) selected');
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(2));
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -20,7 +21,7 @@ test.describe('Product comparison', () => {
     // The link only carries the selection the app has stored: check that before leaving the page.
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
     await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(async () => (await homePage.comparison.selectedIds()).length, `${COMPARE_STORAGE_KEY} in the session`).toBe(2);
+    await expect.poll(() => homePage.comparison.selectedIds(), `${COMPARE_STORAGE_KEY} in the session`).toHaveLength(2);
 
     const comparison = await homePage.openComparison();
 
@@ -32,7 +33,7 @@ test.describe('Product comparison', () => {
     await homePage.grid.waitForLoaded();
     const first = homePage.grid.first();
     await first.compareButton.click();
-    await expect(homePage.compareBar.selection).toHaveText('1 product(s) selected');
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(1));
 
     await first.compareButton.click();
 
@@ -45,7 +46,7 @@ test.describe('Product comparison', () => {
     for (let i = 0; i < 5; i++) await homePage.grid.nth(i).compareButton.click();
 
     // The shop says nothing about the refused fifth click (no toast, no message): the only sign is that it stays out.
-    await expect(homePage.compareBar.selection).toHaveText('4 product(s) selected');
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(4));
     await expect(homePage.grid.nth(4).compareButton).toHaveAttribute('aria-pressed', 'false');
     await expect.poll(() => homePage.comparison.selectedIds(), 'the refused product is not stored either').toHaveLength(4);
   });
@@ -54,12 +55,12 @@ test.describe('Product comparison', () => {
     const [first, second] = await homePage.grid.productNames();
     await homePage.grid.compare(first);
     await homePage.grid.compare(second);
-    await expect(homePage.compareBar.selection).toHaveText('2 product(s) selected');
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(2));
 
     const productPage = await homePage.openProduct(first);
     await productPage.backToShop();
 
-    await expect(homePage.compareBar.selection).toHaveText('2 product(s) selected');
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(2));
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
     await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
   });
@@ -77,7 +78,9 @@ test.describe('Product comparison', () => {
   test('the product page adds the product to the comparison', async ({ productPage, product }) => {
     await productPage.compare();
 
-    // The product page gives no feedback of its own (no bar, no toast), so check where it went.
+    // The product page gives no feedback of its own (no bar, no toast), so check where it went: the
+    // selection the app has stored, before the next page load reads it.
+    await expect.poll(() => productPage.comparison.selectedIds(), `${COMPARE_STORAGE_KEY} in the session`).toEqual([product.id]);
     const comparison = await productPage.openComparison();
     await expect(comparison.productColumns).toContainText([product.name]);
   });
@@ -132,7 +135,7 @@ test.describe('Product comparison', () => {
 
       await comparisonPage.showDifferencesOnly.check();
 
-      await expect(comparisonPage.row('Brand'), 'BUG-12: "Show differences only" hides the rows where both products agree').toBeHidden({ timeout: 5_000 });
+      await expect(comparisonPage.row('Brand'), 'BUG-12: "Show differences only" hides the rows where both products agree').toBeHidden({ timeout: BUG_TIMEOUT });
       // And the filter must not overreach: a row where they differ stays.
       await expect(comparisonPage.row('Price'), 'BUG-12: "Show differences only" keeps the rows where the products differ').toBeVisible();
     });
@@ -153,6 +156,8 @@ test.describe('Product comparison', () => {
     });
 
     test('the empty state is shown', async ({ comparisonPage, apiMock }) => {
+      // Let the first load finish: a reload that cuts a lazy chunk off mid-import makes WebKit and Firefox log an error of their own.
+      await expect(comparisonPage.title).toBeVisible();
       // Reload with the mocked answer awaited: an empty state only means something once the data has arrived.
       await Promise.all([apiMock.waitForResponse('POST', '/graphql'), comparisonPage.page.reload({ waitUntil: 'domcontentloaded' })]);
 
@@ -170,7 +175,7 @@ test.describe('Product comparison', () => {
       knownBug('BUG-09', 'a failed comparison request says "No products selected", although one is.', { absence: true });
       await expect(comparisonPage.title).toBeVisible();
 
-      await expect(comparisonPage.shell.errorAlert, 'BUG-09: a failed comparison request is reported').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(comparisonPage.page).first(), 'BUG-09: a failed comparison request is reported').toBeVisible({ timeout: BUG_TIMEOUT });
       await expect(comparisonPage.emptyState, 'BUG-09: a failed comparison is not shown as an empty one').toBeHidden();
     });
   });

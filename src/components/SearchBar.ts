@@ -2,6 +2,12 @@ import type { Locator } from '@playwright/test';
 import { API_URL } from '@support/env';
 import { step } from '@support/step';
 
+/**
+ * The wording of a message that says why a term was not searched: it names the length rule ("at least 3 characters",
+ * "too long"). Deliberately both parts, a length word and "character(s)", so a toast about something else never counts.
+ */
+const LENGTH_RULE = /(?:at least|at most|no more than|too (?:short|long)|minimum|maximum)\b[^.]*\bcharacters?\b|\bcharacters?\b[^.]*(?:at least|at most|too (?:short|long)|minimum|maximum)/i;
+
 export class SearchBar {
   readonly query: Locator;
   readonly submitButton: Locator;
@@ -10,6 +16,11 @@ export class SearchBar {
   readonly caption: Locator;
   /** "<n> products found for '<term>'" */
   readonly resultCount: Locator;
+  /**
+   * The text that says why a term was not searched (too short or too long), wherever the shop draws it. Tight on purpose:
+   * the shop's other messages (a toast about the cart, an error banner) must not count as an explanation.
+   */
+  readonly termExplanation: Locator;
   /** The sidebar toggle on phones (see FilterPanel). */
   private readonly sidebarToggle: Locator;
 
@@ -20,6 +31,7 @@ export class SearchBar {
     this.resetButton = root.getByRole('button', { name: 'X', exact: true });
     this.caption = root.getByTestId('search-caption');
     this.resultCount = root.getByTestId('search-result-count');
+    this.termExplanation = root.getByText(LENGTH_RULE).first();
   }
 
   /** Submits the search and waits for its answer, so the grid shows the results, not the old list. */

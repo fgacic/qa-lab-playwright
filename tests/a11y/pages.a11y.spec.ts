@@ -16,20 +16,30 @@ import fs from 'node:fs';
 import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
-import { customer } from '@support/admin-payloads';
+import { postcodeLookupMock } from '@fixtures/pages';
+import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import { brand, customer } from '@support/admin-payloads';
 import { KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
 import { IS_SELF_HOSTED } from '@support/env';
+import { horizontalOverflow } from '@support/page-metrics';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
  * Fails the test on what a scan found that the baseline does not know, and on a known violation that changed
  * (spread, shrank, escalated or is gone from a page it was recorded on). `A11Y_RECORD` rebuilds the baseline instead.
  */
+let recordingWarned = false;
 async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<void> {
   // A11Y_RECORD=<file> appends every finding as JSON lines: how the baseline is (re)built.
   if (process.env.A11Y_RECORD) {
     // A recording is a deliberate local act: on CI it would turn every violation into "known".
     if (process.env.CI) throw new Error('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
+    // Loud, because every scan below asserts nothing in this mode: a green run of a recording says nothing about the shop.
+    test.info().annotations.push({ type: 'A11Y_RECORD', description: `recording ${scan.findings.length} finding(s) on "${page}" to ${process.env.A11Y_RECORD}: NOTHING WAS ASSERTED, this is not a test run` });
+    if (!recordingWarned) {
+      recordingWarned = true;
+      console.warn(`\n!! A11Y_RECORD is set: the accessibility scans RECORD to ${process.env.A11Y_RECORD} and assert nothing. Do not read this run as a pass.\n`);
+    }
     for (const finding of scan.findings) fs.appendFileSync(process.env.A11Y_RECORD, JSON.stringify({ page, ...finding }) + '\n');
     return;
   }
@@ -58,9 +68,12 @@ async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<vo
 // Before any navigation, on the context, so the page's own scripts and transitions see it from the first paint (the scan fixture checks it).
 test.use({ reducedMotion: 'reduce' });
 
+
 test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('home', async ({ homePage, a11y }) => {
-    await expectNoNewViolations(await a11y.scan('home', { ready: [homePage.grid.cards.first(), homePage.filters.categories, homePage.pagination.next] }), 'home');
+    // A subcategory's checkbox sits in a group nested in the filters: the last part of the sidebar to be drawn, and what AX-11 is about.
+    const subcategory = homePage.filters.categories.getByRole('group', { name: 'Categories' }).getByRole('checkbox').first();
+    await expectNoNewViolations(await a11y.scan('home', { ready: [homePage.grid.cards.first(), homePage.filters.categories, subcategory, homePage.pagination.next] }), 'home');
   });
 
   // The training aids are left out of every scan (EXCLUDED); an exclusion for something the shop no longer renders is a hole left open for nothing.
@@ -141,6 +154,16 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     await expectNoNewViolations(await a11y.scan('checkout payment', { ready: [payment.heading, payment.method, payment.field('Credit Card Number'), payment.checkPaymentButton] }), 'checkout payment');
   });
 
+  test.describe('order confirmation (mocked order)', { tag: ['@mocked'] }, () => {
+    // The check and the order are writes: answered by mocks, so no order is ever placed (the write guard refuses any other).
+    test.use(withMocks(postcodeLookupMock, mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.respond('POST', '/invoices/guest', { id: '01QALABFAKEINVOICE0000000', invoice_number: 'INV-2026999998' }, 201)));
+
+    test('order confirmation', async ({ checkout, a11y }) => {
+      await checkout.checkOutAsGuest(fakeGuest(), fakeAddress());
+      await expectNoNewViolations(await a11y.scan('order confirmation', { ready: [checkout.wizard.confirmation] }), 'order confirmation');
+    });
+  });
+
   test('login with errors', async ({ loginPage, a11y }) => {
     await loginPage.loginButton.click();
     await expectNoNewViolations(await a11y.scan('login with errors', { ready: [loginPage.email.error, loginPage.password.error] }), 'login with errors');
@@ -158,6 +181,22 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('contact with errors', async ({ contactPage, a11y }) => {
     await contactPage.submit();
     await expectNoNewViolations(await a11y.scan('contact with errors', { ready: [contactPage.firstName.error, contactPage.message.error] }), 'contact with errors');
+  });
+
+  test('language menu open', async ({ homePage, a11y }) => {
+    await homePage.header.language.button.click();
+    await expectNoNewViolations(await a11y.scan('language menu open', { ready: [homePage.header.language.menu, homePage.header.language.option('en')] }), 'language menu open');
+  });
+
+  test('add-to-cart toast', async ({ productPage, a11y }) => {
+    await productPage.addToCart();
+    await expectNoNewViolations(await a11y.scan('product with a toast', { ready: [productPage.toast.message('Product added to shopping cart.'), productPage.addToCartButton] }), 'product with a toast');
+  });
+
+  test('compare bar', async ({ homePage, a11y }) => {
+    await homePage.grid.nth(0).compareButton.click();
+    await expect(homePage.compareBar.selection).toHaveText('1 product(s) selected');
+    await expectNoNewViolations(await a11y.scan('compare bar', { ready: [homePage.compareBar.root, homePage.compareBar.selection, homePage.compareBar.clearAllButton] }), 'compare bar');
   });
 
   test('chat open', async ({ homePage, a11y }) => {
@@ -188,14 +227,21 @@ const REFLOW_WIDTH = 320;
 test.describe('Accessibility scan: phone width', { tag: ['@a11y', '@axe'] }, () => {
   test.use({ viewport: { width: REFLOW_WIDTH, height: 640 } });
 
+  // Polled, not read once: a late image or a font swap can widen the page a moment after the scan's own wait.
   const expectReflows = async (page: Page) => {
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect.soft(overflow, `the page is ${overflow}px wider than a ${REFLOW_WIDTH}px screen (WCAG 1.4.10 reflow)`).toBeLessThanOrEqual(0);
+    await expect
+      .soft.poll(() => horizontalOverflow(page), { message: `the page is wider than a ${REFLOW_WIDTH}px screen (WCAG 1.4.10 reflow)` })
+      .toBeLessThanOrEqual(0);
   };
 
   test('home on a phone', async ({ homePage, a11y, page }) => {
     await expectNoNewViolations(await a11y.scan('home on a phone', { ready: [homePage.grid.cards.first(), homePage.pagination.next] }), 'home on a phone');
     await expectReflows(page);
+  });
+
+  test('mobile menu open', async ({ homePage, a11y }) => {
+    await homePage.header.menuToggle.click();
+    await expectNoNewViolations(await a11y.scan('mobile menu open', { ready: [homePage.header.homeLink, homePage.header.contactLink, homePage.header.signInLink] }), 'mobile menu open');
   });
 
   test('product on a phone', async ({ productPage, a11y, page }) => {
@@ -256,6 +302,13 @@ test.describe('Accessibility scan: back office (mocked admin)', { tag: ['@a11y',
     const form = await adminBrands.add();
     await form.chrome.save();
     await expectNoNewViolations(await a11y.scan('admin brand form', { ready: [form.name.error] }), 'admin brand form');
+  });
+
+  test('a brand deleted (the delete confirmation)', async ({ adminBrands, apiMock, a11y }) => {
+    // The site asks nothing before deleting (ADM-02), so the state to scan is what it shows once the brand is gone: its confirmation alert, over the emptied list.
+    await apiMock.use(mock.respond('GET', '/brands', []));
+    await adminBrands.table.delete(brand.name);
+    await expectNoNewViolations(await a11y.scan('admin brand deleted', { ready: [adminBrands.alert(ADMIN_MESSAGES.brandDeleted)] }), 'admin brand deleted');
   });
 
   test('categories', async ({ adminCategories, a11y }) => {

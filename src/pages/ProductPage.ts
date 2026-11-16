@@ -7,6 +7,8 @@ import { ComparisonPage } from './ComparisonPage';
 
 export class ProductPage {
   readonly shell: AppShell;
+  /** The comparison page, not opened: for what the app keeps about the selection (`selectedIds`) and for `openComparison`. */
+  readonly comparison: ComparisonPage;
   readonly name: Locator;
   readonly price: Locator;
   readonly description: Locator;
@@ -25,6 +27,7 @@ export class ProductPage {
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
+    this.comparison = new ComparisonPage(page);
     this.name = page.getByRole('heading', { level: 1 });
     this.price = page.getByTestId('unit-price');
     this.description = page.getByTestId('product-description');
@@ -115,9 +118,8 @@ export class ProductPage {
 
   @step('Open the comparison')
   async openComparison(): Promise<ComparisonPage> {
-    const comparison = new ComparisonPage(this.page);
-    await comparison.open();
-    return comparison;
+    await this.comparison.open();
+    return this.comparison;
   }
 
   @step('Open the related product number {0}')

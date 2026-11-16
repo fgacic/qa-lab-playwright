@@ -1,8 +1,9 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { failureFeedback } from '@support/feedback';
 import { apiPath } from '@support/env';
 import { FAVORITE_ID, INVOICE_NUMBER, INVOICE_QUANTITY, fakeFavorite, fakeInvoice, fakeMessage, fakeReply, fakeUser, listOf } from '@support/payloads';
-import { TOKEN_KEY } from '@support/session';
+import { storedToken } from '@support/session';
 
 const PROFILE_PATH = /^\/users\/[^/]+$/;
 const [OLD_PASSWORD, NEW_PASSWORD, WRONG_PASSWORD] = ['Qa-lab-old-pass-1!', 'Qa-lab-new-pass-2!', 'Qa-lab-wrong-pass-1!'];
@@ -48,7 +49,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       await expect(page).toHaveURL('/auth/login');
       await expect(accountPage.header.userMenu).toHaveCount(0);
-      await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY), { message: 'the stored token is gone' }).toBeNull();
+      await expect.poll(() => storedToken(page), { message: 'the stored token is gone' }).toBeNull();
     });
 
     test('"Sign out" is a real link or button', { tag: ['@a11y', '@bug'] }, async ({ accountPage }) => {
@@ -57,7 +58,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       // The item is there as text whatever its role: what is asserted below is that it is also a link or a button.
       await expect(accountPage.header.userMenuItem('Sign out')).toBeVisible();
 
-      await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toHaveCount(1, { timeout: 2_000 });
+      await expect(accountPage.header.signOutControl, 'A11Y-04: "Sign out" is a link or a button').toHaveCount(1, { timeout: BUG_TIMEOUT });
     });
   });
 
@@ -97,11 +98,11 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   test.describe('when favorites fail to load', { tag: ['@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/favorites', 500)));
 
-    test('the customer is told they could not be loaded', async ({ favoritesPage }) => {
+    test('the customer is told they could not be loaded', async ({ favoritesPage, page }) => {
       knownBug('BUG-23', 'a failed favorites request says "There are no favorites yet", which is not true.', { absence: true });
       await expect(favoritesPage.title).toBeVisible();
 
-      await expect(favoritesPage.shell.errorAlert, 'BUG-23: the customer is told the favorites could not be loaded').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(page).first(), 'BUG-23: the customer is told the favorites could not be loaded').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -120,18 +121,18 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       const details = await invoicesPage.openDetails(INVOICE_NUMBER);
 
       await expect(details.downloadPdfButton).toBeVisible();
-      await expect(details.productLines.filter({ hasText: product.name }).getByRole('cell').first()).toHaveText(String(INVOICE_QUANTITY));
+      await expect(await details.quantityOf(product.name)).toHaveText(String(INVOICE_QUANTITY));
     });
   });
 
   test.describe('when invoices fail to load', { tag: ['@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/invoices', 500)));
 
-    test('the customer is told they could not be loaded', async ({ invoicesPage }) => {
+    test('the customer is told they could not be loaded', async ({ invoicesPage, page }) => {
       knownBug('BUG-24', 'a failed invoices request shows the bare page title, no table and no message.', { absence: true });
       await expect(invoicesPage.title).toBeVisible();
 
-      await expect(invoicesPage.shell.errorAlert, 'BUG-24: the customer is told the invoices could not be loaded').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(page).first(), 'BUG-24: the customer is told the invoices could not be loaded').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -186,6 +187,14 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect(profilePage.city.input).toHaveValue(fakeUser.address.city);
     });
 
+    test('the profile page raises no application error', { tag: ['@bug'] }, async ({ profilePage, consoleGuard }) => {
+      knownBug('BUG-37', 'the profile page draws its two-factor QR code from an empty secret and logs "[angularx-qrcode] Field `qrdata` is empty" as an error on every visit.');
+      // Precondition, true whether or not the bug is fixed: the page has drawn and is filled in, so its widgets have run.
+      await expect(profilePage.email.input).toHaveValue(fakeUser.email);
+
+      expect(await consoleGuard.logged(/angularx-qrcode/), 'BUG-37: the QR code widget logged an error').toEqual([]);
+    });
+
     test('saving sends the edited profile', async ({ profilePage, apiMock }) => {
       const saved = apiMock.waitForRequest('PUT', PROFILE_PATH);
       await profilePage.firstName.input.fill('Renamed');
@@ -194,6 +203,18 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       expect((await saved).postDataJSON()).toMatchObject({ first_name: 'Renamed', last_name: fakeUser.last_name });
       await expect(profilePage.alerts.filter({ hasText: 'Your profile is successfully updated!' })).toBeVisible();
+    });
+
+    test('answering a password change raises no application error', { tag: ['@bug'] }, async ({ profilePage, apiMock, consoleGuard }) => {
+      knownBug('BUG-47', 'the profile page throws "TypeError: Cannot read properties of undefined (reading \'value\')" every time its change-password request is answered, although the page then shows the answer.');
+      const answered = apiMock.waitForResponse('POST', '/users/change-password');
+
+      await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD);
+      await answered;
+      // Precondition, true whether or not the bug is fixed: the page took the answer in and shows it.
+      await expect(profilePage.alerts.filter({ hasText: 'Your password is successfully updated!' })).toBeVisible();
+
+      expect(await consoleGuard.logged(/TypeError:[^\n]*\bvalue\b/), 'BUG-47: the answer to a password change threw').toEqual([]);
     });
 
     test('changing the password sends the current and the new one', async ({ profilePage, apiMock }) => {
@@ -212,11 +233,29 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
       knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.', { absence: true });
       await expect(profilePage.changePasswordButton).toBeVisible();
+      const before = apiMock.mark();
 
       await profilePage.changePasswordButton.click();
 
-      await expect(profilePage.alerts.filter({ hasText: /required/i }).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: 2_000 });
-      await expect(apiMock.expectNoRequest('POST', '/users/change-password'), 'BUG-26: no request is sent').resolves.toBeUndefined();
+      // The defect itself: the request leaves. Checked first, so a form that validates and a form that merely words the refusal differ.
+      await expect(apiMock.expectNoRequest('POST', '/users/change-password', { since: before }), 'BUG-26: no request is sent').resolves.toBeUndefined();
+      // And, once nothing is sent, the form says what is missing (the wording is a separate matter from the request).
+      await expect(profilePage.alerts.filter({ hasText: /required/i }).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+
+    test('a confirmation that differs from the new password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      // The real API answers 422 with this body (the form does not compare the two fields itself).
+      await apiMock.use(mock.fail('POST', '/users/change-password', 422, {
+        message: 'The new password field confirmation does not match.',
+        errors: { new_password: ['The new password field confirmation does not match.'] },
+      }));
+      const sent = apiMock.waitForRequest('POST', '/users/change-password');
+
+      await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD, WRONG_PASSWORD);
+
+      expect((await sent).postDataJSON()).toMatchObject({ new_password: NEW_PASSWORD, new_password_confirmation: WRONG_PASSWORD });
+      await expect(profilePage.alerts.filter({ hasText: 'The new password field confirmation does not match.' })).toBeVisible();
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
     });
 
     test('an empty first name is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {

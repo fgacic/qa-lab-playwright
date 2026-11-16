@@ -57,8 +57,22 @@ export class Header {
   @step('Expand the navigation menu if collapsed')
   async expand(): Promise<void> {
     if ((await this.menuToggle.isVisible()) && !(await this.homeLink.isVisible())) {
-      await this.menuToggle.click();
+      await this.toggleMenu();
     }
+  }
+
+  /**
+   * Presses the toggle and waits for the menu's slide to finish: Bootstrap ignores a press made while the menu is still
+   * sliding, so a second press right after the first would silently do nothing.
+   */
+  @step('Press the menu toggle')
+  async toggleMenu(): Promise<void> {
+    await this.menuToggle.click();
+    await this.menuToggle.evaluate((toggle) => {
+      // Only slides that end: an animation that repeats forever (a spinner) never finishes.
+      const animations = (toggle.closest('nav')?.getAnimations({ subtree: true }) ?? []).filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity);
+      return Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+    });
   }
 
   @step('Go to the home page via the logo')

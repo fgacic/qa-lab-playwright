@@ -4,8 +4,10 @@
 // ApiMock, and the suite's `page` fixture would already have installed one on the same page.
 import { spawnSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
-import { ApiMock, mock } from '@support/api-mock';
-import { API_URL, BASE_URL } from '@support/env';
+import { ApiMock, isAllowedAnonymousWrite, mock } from '@support/api-mock';
+import { API_URL, BASE_URL, writeGuardDefault } from '@support/env';
+import { httpUrl, httpsUrl } from '@support/urls';
+import { deliveryOrder, elapsedMs, fetchOutcome, fetchStatus } from '@support/page-fetch';
 
 test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
   /** A blank same-origin document, so `fetch` to the API is not cross-origin and no real page loads. */
@@ -13,14 +15,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     await page.route(`${BASE_URL}/__framework`, (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>framework</title>' }));
     await page.goto(`${BASE_URL}/__framework`);
   }
-  const send = (page: Page, method: string, path: string, body?: unknown) =>
-    page.evaluate(
-      async ({ url, method, body }) => {
-        const response = await fetch(url, { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }) });
-        return response.status;
-      },
-      { url: `${API_URL}${path}`, method, body },
-    );
+  const send = (page: Page, method: string, path: string, body?: unknown) => fetchStatus(page, `${API_URL}${path}`, method, body);
 
   test('expectNoRequest fails on a request sent inside its window', async ({ page }) => {
     const apiMock = new ApiMock(page);
@@ -68,7 +63,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     const request = apiMock.waitForRequest('GET', '/brands', { timeout: 1_500 });
     const response = apiMock.waitForResponse('GET', '/brands', () => true, { timeout: 1_500 });
     const settled = Promise.allSettled([request, response]);
-    await page.evaluate((url) => fetch(url), `${BASE_URL}/brands`);
+    await fetchStatus(page, `${BASE_URL}/brands`);
     expect((await settled).map((r) => r.status), 'a request outside the API prefix must not satisfy either wait').toEqual(['rejected', 'rejected']);
 
     const real = apiMock.waitForRequest('GET', '/brands');
@@ -96,17 +91,89 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     expect(apiMock.blockedWrites).toEqual([]);
   });
 
+  test('mark() and since count only the requests after the mark, for expectNoRequest and requestsTo alike', async ({ page }) => {
+    const apiMock = new ApiMock(page);
+    await apiMock.use(mock.respond('GET', '/brands', []));
+    await openBlankPage(page);
+    await send(page, 'GET', '/brands'); // the page's own load
+
+    const before = apiMock.mark();
+
+    expect(apiMock.requestsTo('GET', '/brands'), 'without a mark the earlier request counts').toBe(1);
+    expect(apiMock.requestsTo('GET', '/brands', { since: before })).toBe(0);
+    await apiMock.expectNoRequest('GET', '/brands', { within: 100, since: before });
+    await send(page, 'GET', '/brands');
+    expect(apiMock.requestsTo('GET', '/brands', { since: before })).toBe(1);
+    await expect(apiMock.expectNoRequest('GET', '/brands', { within: 100, since: before })).rejects.toThrow(/already sent/);
+  });
+
+  test('a delay predicate that throws is recorded for the page fixture to fail on, and does not hold the request', async ({ page }) => {
+    const apiMock = new ApiMock(page);
+    await apiMock.use(mock.respond('QUERY', '/products', { data: [] }));
+    await apiMock.delay('QUERY', '/products', () => { throw new Error('broken predicate'); }, 5_000);
+    await openBlankPage(page);
+
+    const took = await elapsedMs(() => send(page, 'QUERY', '/products', { page: '1' }));
+
+    expect(took, 'the request was not held back').toBeLessThan(2_000);
+    expect(apiMock.handlerErrors).toEqual([expect.stringMatching(/delay\(QUERY \/products\) threw: broken predicate/)]);
+  });
+
+  test('a CORS preflight is answered by the mock for a mocked path, and goes to the real API for any other', async ({ page }) => {
+    const apiMock = new ApiMock(page);
+    await apiMock.use(mock.respond('GET', '/brands', [{ id: 'mocked' }]));
+    // Another origin than the API's (127.0.0.1 for localhost), so the browser really sends a preflight for the custom header.
+    const other = new URL(BASE_URL);
+    other.hostname = '127.0.0.1';
+    await page.route(`${other.origin}/__framework`, (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>framework</title>' }));
+    await page.goto(`${other.origin}/__framework`);
+
+    const mocked = await fetchOutcome(page, `${API_URL}/brands`, 'GET', { 'x-qa-lab': '1' });
+    const real = await fetchOutcome(page, `${API_URL}/categories/tree`, 'GET', { 'x-qa-lab': '1' });
+
+    expect(mocked, 'the preflight of a mocked path is answered, and then the mocked GET').toBe(200);
+    expect(apiMock.requestsTo('GET', '/brands')).toBe(1);
+    // No mock serves it, so the mock layer must not paper over the real API's own preflight answer: the self-hosted API does
+    // not allow another origin to send this header, and the browser refuses. A canned mock answer would have let it through.
+    expect(real, "the real API's refusal shows through").toBe('TypeError');
+  });
+
+  test('the live default of the write guard is on for the projects that must never write, and off for the real-write ones', async () => {
+    expect(writeGuardDefault(false, 'chromium'), 'live, a browser project').toBe(true);
+    expect(writeGuardDefault(false, 'mobile')).toBe(true);
+    expect(writeGuardDefault(false, 'account'), 'live, but the project opted in to real sign-ins').toBe(false);
+    expect(writeGuardDefault(false, 'admin-setup')).toBe(false);
+    expect(writeGuardDefault(true, 'chromium'), 'self-hosted: writes are the point').toBe(false);
+  });
+
+  test('a write the live guard lets through is an anonymous cart call, and nothing else', async () => {
+    const allowed: [string, string][] = [
+      ['POST', '/carts'], ['POST', '/carts/01ABC'], ['PUT', '/carts/01ABC/product/quantity'], ['DELETE', '/carts/01ABC/product/01P'],
+    ];
+    const refused: [string, string][] = [
+      ['POST', '/carts/01ABC/extra'], ['POST', '/carts/'], ['DELETE', '/carts/01ABC'], ['PUT', '/carts/01ABC'], ['GET', '/carts'],
+      ['POST', '/users/register'], ['POST', '/invoices'], ['POST', '/messages'], ['DELETE', '/products/01P'], ['POST', '/carts/a/b'],
+      ['PUT', '/carts/01ABC/product/quantity/x'], ['DELETE', '/carts/01ABC/product/'], ['POST', '/api/carts'], ['POST', '/favorites'],
+    ];
+    for (const [method, path] of allowed) expect(isAllowedAnonymousWrite(method, path), `${method} ${path} is allowed`).toBe(true);
+    for (const [method, path] of refused) expect(isAllowedAnonymousWrite(method, path), `${method} ${path} is refused`).toBe(false);
+  });
+
+  test('the write guard lets an anonymous cart write through even when it is on, and records nothing for it', async ({ page }) => {
+    const apiMock = new ApiMock(page, 0, true);
+    await openBlankPage(page);
+
+    expect(await send(page, 'POST', '/carts', {}), 'the guard did not answer it').not.toBe(418);
+    expect(apiMock.blockedWrites).toEqual([]);
+  });
+
   test('delay holds back only the requests its predicate selects', async ({ page }) => {
     const apiMock = new ApiMock(page);
     await apiMock.use(mock.respond('QUERY', '/products', { data: [] }));
     await apiMock.delay('QUERY', '/products', (body) => body.page === 'slow', 700);
     await openBlankPage(page);
 
-    const timed = async (body: unknown) => {
-      const started = Date.now();
-      await send(page, 'QUERY', '/products', body);
-      return Date.now() - started;
-    };
+    const timed = (body: unknown) => elapsedMs(() => send(page, 'QUERY', '/products', body));
     expect(await timed({ page: 'slow' }), 'the selected request is held back').toBeGreaterThanOrEqual(650);
     expect(await timed({ page: 'fast' }), 'another request is not').toBeLessThan(650);
   });
@@ -117,15 +184,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     await apiMock.delay('QUERY', '/products', (body) => body.page === '1', 600);
     await openBlankPage(page);
 
-    const order = await page.evaluate(async (url) => {
-      const delivered: string[] = [];
-      const ask = (pageNumber: string) =>
-        fetch(url, { method: 'QUERY', body: JSON.stringify({ page: pageNumber }), headers: { 'content-type': 'application/json' } }).then(() => delivered.push(pageNumber));
-      const first = ask('1'); // held back by the delay above
-      await new Promise((resolve) => setTimeout(resolve, 50)); // so the second is certainly asked later
-      await Promise.all([first, ask('2')]);
-      return delivered;
-    }, `${API_URL}/products`);
+    const order = await deliveryOrder(page, `${API_URL}/products`, ['1', '2']); // the first is held back by the delay above
     expect(order, 'the second answer was ready first, but waited for the first').toEqual(['1', '2']);
   });
 });
@@ -136,13 +195,52 @@ test.describe('the target configuration', { tag: ['@framework'] }, () => {
     spawnSync('npx', ['playwright', 'test', '--list', '--project=framework'], { encoding: 'utf8', env: { ...process.env, ...env } });
 
   test('a local target whose BASE_URL and API_URL are on different origins is refused', () => {
-    const run = loadConfig({ TARGET: 'local', BASE_URL: 'http://localhost:4200', API_URL: 'http://localhost:8091/api' });
+    const base = httpUrl('localhost');
+    const api = httpUrl('localhost', '/api', 8091);
+    const run = loadConfig({ TARGET: 'local', BASE_URL: base, API_URL: api });
     expect(run.status).not.toBe(0);
-    expect(`${run.stdout}${run.stderr}`).toMatch(/BASE_URL \(http:\/\/localhost:4200\) and API_URL \(http:\/\/localhost:8091\/api\) on the same origin/);
+    expect(`${run.stdout}${run.stderr}`).toContain(`BASE_URL (${base}) and API_URL (${api}) on the same origin`);
+  });
+
+  /** BASE_URL and API_URL of a shop at `host`: the self-hosted layout, the API under /api on the same origin. */
+  const urls = (host: string) => ({ BASE_URL: httpUrl(host), API_URL: httpUrl(host, '/api') });
+  const REFUSED_ENV: { name: string; env: Record<string, string>; message: RegExp }[] = [
+    { name: 'an unknown TARGET', env: { TARGET: 'prod' }, message: /Unknown TARGET "prod"/ },
+    { name: 'a host that merely starts with localhost', env: urls('localhost.evil.com'), message: /are not local/ },
+    { name: 'a userinfo that spells localhost before the real host', env: urls('localhost@evil.com'), message: /are not local/ },
+    { name: '0.0.0.0, which is not our loopback', env: urls('0.0.0.0'), message: /are not local/ },
+    { name: 'an IPv6 literal that is not ::1', env: urls('[::2]'), message: /are not local/ },
+    { name: 'a private LAN address', env: urls('192.168.1.5'), message: /are not local/ },
+    { name: 'a local BASE_URL with a live API_URL', env: { BASE_URL: httpUrl('localhost'), API_URL: httpsUrl('api.practicesoftwaretesting.com') }, message: /are not local/ },
+  ];
+  for (const { name, env, message } of REFUSED_ENV) {
+    test(`TARGET=local refuses ${name}`, () => {
+      const run = loadConfig({ TARGET: 'local', ...env });
+      expect(run.status, `${run.stdout}${run.stderr}`).not.toBe(0);
+      expect(`${run.stdout}${run.stderr}`).toMatch(message);
+    });
+  }
+
+  test('the loopback spellings of this machine are accepted', () => {
+    for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+      const run = loadConfig({ TARGET: 'local', ...urls(host) });
+      expect(run.status, `${host}: ${run.stdout}${run.stderr}`).toBe(0);
+    }
+  });
+
+  test('TARGET=live accepts the public addresses, and its write guard default is on', () => {
+    const run = loadConfig({ TARGET: 'live' });
+    expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+  });
+
+  test('a run that schedules perf next to another project is refused at load time when --reporter replaced the guard', () => {
+    const run = spawnSync('npx', ['playwright', 'test', '--project=perf', '--project=chromium', '--reporter=dot', '--grep=@nothing-has-this-tag'], { encoding: 'utf8', env: process.env });
+    expect(run.status).not.toBe(0);
+    expect(`${run.stdout}${run.stderr}`).toMatch(/perf budgets must run alone/);
   });
 
   test('a trailing slash on API_URL is dropped, so the API prefix still matches', () => {
-    const run = loadConfig({ TARGET: 'local', BASE_URL: 'http://localhost:4200', API_URL: 'http://localhost:4200/api/' });
+    const run = loadConfig({ TARGET: 'local', BASE_URL: httpUrl('localhost'), API_URL: httpUrl('localhost', '/api/') });
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
   });
 });

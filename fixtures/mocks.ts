@@ -1,6 +1,6 @@
 import { expect, test as base, type Page } from '@playwright/test';
 import { ApiMock, type MockSet } from '@support/api-mock';
-import { IS_SELF_HOSTED, REAL_WRITE_PROJECTS } from '@support/env';
+import { IS_SELF_HOSTED, writeGuardDefault } from '@support/env';
 
 export interface MockFixtures {
   /**
@@ -24,15 +24,17 @@ export const test = base.extend<MockFixtures>({
 
   // The mock layer is part of the `page` itself, not an auto fixture of its own: whatever opens a
   // page gets its mocks installed before the first navigation, in whatever order a spec lists its
-  // fixtures, and a spec that never opens a page (the header checks use only `request`) pays nothing.
+  // fixtures. The auto fixtures of the full `test` (the XSS sentinel, the console guard, ...) each ask for a
+  // page, so browserless specs use `apiOnlyTest` (fixtures/index.ts), which has none of them.
   page: async ({ page, apiMocks, apiLatencyMs }, use, testInfo) => {
-    const apiMock = new ApiMock(page, apiLatencyMs, !IS_SELF_HOSTED && !REAL_WRITE_PROJECTS.has(testInfo.project.name));
+    const apiMock = new ApiMock(page, apiLatencyMs, writeGuardDefault(IS_SELF_HOSTED, testInfo.project.name));
     mockOf.set(page, apiMock);
     if (apiMock.needsRoute) await apiMock.install();
     if (apiMocks.routes.length) await apiMock.use(...apiMocks.routes);
     await use(page);
     // Always checked, so a write that no mock answered fails the test that sent it rather than vanishing as a 418.
     expect(apiMock.blockedWrites, 'writes that reached no mock (refused, never sent)').toEqual([]);
+    expect(apiMock.handlerErrors, 'failures of the mock layer itself').toEqual([]);
   },
 
   apiMock: async ({ page }, use) => {

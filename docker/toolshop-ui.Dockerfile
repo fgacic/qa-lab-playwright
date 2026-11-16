@@ -16,7 +16,8 @@ WORKDIR /src/sprint5/UI
 # switch analytics off.
 RUN sed -i "s#apiUrl: '[^']*'#apiUrl: '${API_URL}'#; s#gaCode: '[^']*'#gaCode: ''#" src/environments/environment.prod.ts \
  && grep -q "${API_URL}" src/environments/environment.prod.ts
-RUN npm install --legacy-peer-deps --no-audit --no-fund
+# From the lockfile of the pinned commit (checked in sync with its package.json): the same dependency tree on every build.
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 RUN npx ng build --configuration production \
  && if [ -d dist/toolshop/browser ]; then mv dist/toolshop/browser /site; else mv dist/toolshop /site; fi
 

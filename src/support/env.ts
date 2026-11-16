@@ -57,6 +57,15 @@ const SEEDED = seeded;
 export const PROJECTS = { accountSetup: 'account-setup', account: 'account', adminSetup: 'admin-setup', admin: 'admin' } as const;
 export const REAL_WRITE_PROJECTS: ReadonlySet<string> = new Set(Object.values(PROJECTS));
 
+/**
+ * Whether the write guard (src/support/api-mock.ts) is on for a test of `project` by default: on every target that is not
+ * self-hosted, except in the projects that sign in and write for real on purpose (their writes are the point, and the
+ * opt-in that enables them is the safeguard).
+ */
+export function writeGuardDefault(selfHosted: boolean, project: string): boolean {
+  return !selfHosted && !REAL_WRITE_PROJECTS.has(project);
+}
+
 /** Real-account specs: always on the self-hosted target, opt-in (RUN_ACCOUNT_TESTS=1) on live. */
 export const RUN_ACCOUNT_TESTS = IS_SELF_HOSTED || process.env.RUN_ACCOUNT_TESTS === '1';
 export const CUSTOMER_STORAGE_STATE = '.auth/customer.json';

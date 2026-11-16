@@ -2,21 +2,24 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import type { AdminListName } from '@pages/admin/admin-lists';
 import { contactMessage, customer, order, paginated, product } from '@support/admin-payloads';
 import type { MockRoute } from '@support/api-mock';
-import { alertAppears } from '@pages/admin/alerts';
-import { knownBug } from '@support/known-bug';
+import { alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
-/** Every back-office list, against an empty answer and a failing one. */
-const lists: { name: AdminListName; feed: [MockRoute['method'], string]; empty: unknown; column: string }[] = [
-  { name: 'products', feed: ['QUERY', '/products'], empty: paginated([], 9), column: 'Price' },
-  { name: 'brands', feed: ['GET', '/brands'], empty: [], column: 'Slug' },
-  { name: 'categories', feed: ['GET', '/categories'], empty: [], column: 'Slug' },
-  { name: 'orders', feed: ['GET', '/invoices'], empty: paginated([]), column: 'Total' },
-  { name: 'users', feed: ['GET', '/users'], empty: paginated([]), column: 'Email' },
+/**
+ * Every back-office list, against an empty answer and a failing one. `search` is the endpoint of its search box
+ * (the messages list has none); it answers like the list does, so `empty` serves both.
+ */
+const lists: { name: AdminListName; feed: [MockRoute['method'], string]; search?: [MockRoute['method'], string]; empty: unknown; column: string }[] = [
+  { name: 'products', feed: ['QUERY', '/products'], search: ['QUERY', '/products/search'], empty: paginated([], 9), column: 'Price' },
+  { name: 'brands', feed: ['GET', '/brands'], search: ['QUERY', '/brands/search'], empty: [], column: 'Slug' },
+  { name: 'categories', feed: ['GET', '/categories'], search: ['QUERY', '/categories/search'], empty: [], column: 'Slug' },
+  { name: 'orders', feed: ['GET', '/invoices'], search: ['QUERY', '/invoices/search'], empty: paginated([]), column: 'Total' },
+  { name: 'users', feed: ['GET', '/users'], search: ['QUERY', '/users/search'], empty: paginated([]), column: 'Email' },
   { name: 'messages', feed: ['GET', '/messages'], empty: paginated([]), column: 'Subject' },
 ];
 
 test.describe('Admin lists on empty and failing APIs (mocked back office)', { tag: ['@mocked'] }, () => {
-  for (const { name, feed: [method, path], empty, column } of lists) {
+  for (const { name, feed: [method, path], search, empty, column } of lists) {
     test.describe(`${name}, empty`, () => {
       test.use({ adminListName: name, ...withMocks(mock.respond(method, path, empty)) });
 
@@ -28,19 +31,54 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
         await expect(list.table.columnHeader(column)).toBeVisible();
         await expect(list.table.rows).toHaveCount(0);
 
-        expect(await alertAppears(list.feedback), `no alert appears on an empty ${name} list`).toBe(false);
+        expect(await alertAppears(list.failure), `no failure message appears on an empty ${name} list`).toBe(false);
       });
     });
 
     test.describe(`${name}, failing`, { tag: ['@negative', '@bug'] }, () => {
       test.use({ adminListName: name, ...withMocks(mock.fail(method, path, 500)) });
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
       test(`a failed ${name} list tells the admin`, async ({ adminList: list }) => {
         knownBug('ADM-07', 'a failed back-office list shows an empty table and no message, in every section.', { absence: true });
         await expect(list.heading).toBeVisible();
 
-        // Any alert will do: the pin does not prescribe the wording. A healthy list shows none.
-        await expect(list.feedback.first(), 'ADM-07: a failed list tells the admin').toBeVisible({ timeout: 5_000 });
+        // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording. A healthy list shows none.
+        await expect(list.failure, 'ADM-07: a failed list tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
+      });
+    });
+
+    if (!search) continue;
+    const [searchMethod, searchPath] = search;
+
+    // A search whose answer is empty is not a failure: the table is drawn without rows, with its column titles, and says nothing.
+    test.describe(`${name}, search finds nothing`, () => {
+      test.use({ adminListName: name, ...withMocks(mock.respond(searchMethod, searchPath, empty)) });
+
+      test(`a ${name} search with no match empties the table and raises no alert`, async ({ adminList: list }) => {
+        await expect(list.table.rows.first(), 'the full list is shown before the search').toBeVisible();
+
+        await list.search.searchFor('no such record');
+
+        await expect(list.table.rows).toHaveCount(0);
+        await expect(list.table.columnHeader(column)).toBeVisible();
+        expect(await alertAppears(list.failure), `no failure message appears when a ${name} search finds nothing`).toBe(false);
+      });
+    });
+
+    test.describe(`${name}, search failing`, { tag: ['@negative', '@bug'] }, () => {
+      test.use({ adminListName: name, ...withMocks(mock.fail(searchMethod, searchPath, 500)) });
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+      test(`a failed ${name} search tells the admin`, async ({ adminList: list, apiMock }) => {
+        knownBug('ADM-18', 'a failed search in a back-office list (500) leaves the previous table on screen and says nothing, so the admin takes it for the result.', { absence: true });
+        await expect(list.table.rows.first(), 'the full list is shown before the search').toBeVisible();
+        const refused = apiMock.waitForResponse(searchMethod, searchPath);
+
+        await list.search.searchFor('anything');
+        await refused;
+
+        await expect(list.failure, 'ADM-18: a failed list search tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
       });
     });
   }

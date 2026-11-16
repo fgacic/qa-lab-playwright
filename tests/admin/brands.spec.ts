@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import { SEARCH_HIT, brand } from '@support/admin-payloads';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
 const BRAND = /^\/brands\/[^/]+$/;
@@ -70,17 +70,18 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
 
   test.describe('when the brand cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', BRAND, 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the admin is told the brand could not be loaded', async ({ adminBrands, apiMock }) => {
-      knownBug('ADM-14', 'an edit form whose record fails to load (500) opens empty, with no message: saving it would write blanks.', { absence: true });
+      knownBug('ADM-14', ADM_14, { absence: true });
       const failed = apiMock.waitForResponse('GET', BRAND);
 
       const form = await adminBrands.edit(brand.name);
       await failed;
       await expect(form.chrome.heading).toBeVisible();
 
-      // Any alert will do: the pin does not prescribe the wording.
-      await expect(form.chrome.alerts.first(), 'ADM-14: a failed brand load tells the admin').toBeVisible({ timeout: 2_000 });
+      // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording.
+      await expect(form.chrome.failure, 'ADM-14: a failed brand load tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -88,6 +89,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     // The real API answers a taken slug with 409 and the reason keyed by field (POST /brands, probed on the self-hosted shop;
     // back-office.e2e.spec.ts asks the real backend the same).
     test.use(withMocks(mock.fail('POST', '/brands', 409, { slug: ['A brand already exists with this slug.'] })));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the reason is shown', async ({ adminBrands, apiMock }) => {
       knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
@@ -98,12 +100,13 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
       await form.chrome.save();
       await sent;
 
-      await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: 2_000 });
+      await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
   test.describe('when a brand is still in use', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('DELETE', BRAND, 409, { message: 'Seems like this brand is used elsewhere.' })));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the reason is shown and the brand stays', async ({ adminBrands, apiMock }) => {
       // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
@@ -113,6 +116,23 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
       await adminBrands.table.delete(brand.name);
 
       await expect(adminBrands.alert('used elsewhere')).toBeVisible();
+      await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeHidden();
+      await expect(adminBrands.table.row(brand.name)).toBeVisible();
+    });
+  });
+
+  test.describe('when deleting a brand fails on the server', { tag: ['@negative'] }, () => {
+    test.use(withMocks(mock.fail('DELETE', BRAND, 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+    test('the failure is shown and the brand stays', async ({ adminBrands, apiMock }) => {
+      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
+      await apiMock.use(mock.respond('GET', '/brands', []));
+      await expect(adminBrands.table.row(brand.name)).toBeVisible();
+
+      await adminBrands.table.delete(brand.name);
+
+      await expect(adminBrands.failure).toBeVisible();
       await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeHidden();
       await expect(adminBrands.table.row(brand.name)).toBeVisible();
     });

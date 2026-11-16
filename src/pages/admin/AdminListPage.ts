@@ -5,6 +5,7 @@ import { Pagination } from '@components/Pagination';
 import type { HttpMethod } from '@support/api-mock';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
+import { reportedFailure } from './alerts';
 
 export interface AdminListConfig<Detail> {
   path: string;
@@ -29,7 +30,10 @@ export class AdminListPage<Detail> {
   readonly table: AdminTable;
   /** Only drawn when the list has more than one page. */
   readonly pagination: Pagination;
+  /** Every alert of the list: confirmations ("Brand deleted."), the API's reason for a refusal. */
   readonly feedback: Locator;
+  /** What the list says when a request fails, in whatever form (an alert, or the site's plain error text): a healthy list shows none. */
+  readonly failure: Locator;
 
   constructor(readonly page: Page, private readonly config: AdminListConfig<Detail>) {
     this.shell = new AppShell(page);
@@ -37,6 +41,7 @@ export class AdminListPage<Detail> {
     this.table = new AdminTable(page.getByRole('table'));
     this.pagination = new Pagination(page.getByRole('navigation').filter({ has: page.getByRole('button', { name: 'Previous' }) }));
     this.feedback = page.getByRole('alert');
+    this.failure = reportedFailure(page);
   }
 
   /** The search box above the table. Lists without one (messages) refuse the question, instead of timing out on a made-up label. */

@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { failureFeedback } from '@support/feedback';
 import { contactSubjectSlug, emptyProductPage, listOf } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
@@ -68,6 +69,31 @@ test.describe('Chat assistant', () => {
     // The assistant answers with the greeting and the menu again, below the first ones.
     await expect(chat.greeting).toHaveCount(2);
     await expect(chat.action('Find a product')).toBeVisible();
+  });
+
+  test('Enter in the message box sends it as the button does', async ({ homePage, apiMock }) => {
+    const { chat } = homePage.shell;
+    await chat.open();
+    await chat.choose('Find a product');
+    const searched = apiMock.waitForRequest('QUERY', '/products/search');
+
+    await chat.sendWithEnter(SEARCH_TERM);
+
+    expect((await searched).postDataJSON()).toMatchObject({ q: SEARCH_TERM });
+    await expect(chat.said(SEARCH_TERM)).toBeVisible();
+  });
+
+  test('Escape closes the chat', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {
+    knownBug('BUG-45', 'the chat window does not close on Escape, as a dialog is expected to: only its close button does.', { absence: true });
+    const { chat } = homePage.shell;
+    await chat.open();
+    // With the message box in use, where a visitor's hands are: it only exists once an action has been picked.
+    await chat.choose('Find a product');
+    await expect(chat.input).toBeVisible();
+
+    await chat.closeWithEscape();
+
+    await expect(chat.window, 'BUG-45: Escape closes the chat').toBeHidden({ timeout: BUG_TIMEOUT });
   });
 
   test.describe('a support ticket', { tag: ['@mocked'] }, () => {
@@ -141,8 +167,9 @@ test.describe('Chat assistant', () => {
       await chat.send('not-an-email');
 
       await expect(chat.reply('Please enter a valid email address.')).toBeVisible();
-      await expect(chat.reply(SUBJECT_PROMPT)).toBeHidden();
       await apiMock.expectNoRequest('POST', '/messages');
+      // After the window above, so "hidden" means the next question was not asked, not that it has not arrived yet.
+      await expect(chat.reply(SUBJECT_PROMPT)).toBeHidden();
     });
 
     test('a description under 50 characters is asked for again', async ({ homePage, apiMock }) => {
@@ -157,8 +184,9 @@ test.describe('Chat assistant', () => {
       await chat.send('too short');
 
       await expect(chat.reply('Your message must be at least 50 characters long.')).toBeVisible();
-      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeHidden();
       await apiMock.expectNoRequest('POST', '/messages');
+      // After the window above, so "hidden" means the next question was not asked, not that it has not arrived yet.
+      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeHidden();
     });
   });
 
@@ -178,7 +206,7 @@ test.describe('Chat assistant', () => {
   test.describe('when the search fails', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('QUERY', '/products/search', 500)));
 
-    test('the assistant says it could not search', async ({ homePage, apiMock }) => {
+    test('the assistant says it could not search', async ({ homePage, apiMock, page }) => {
       knownBug('BUG-25', 'a failed chat search answers "No products found", as if nothing matched.', { absence: true });
       const { chat } = homePage.shell;
       await chat.open();
@@ -190,7 +218,8 @@ test.describe('Chat assistant', () => {
       expect((await searched).response.status()).toBe(500);
       await expect(chat.said(SEARCH_TERM)).toBeVisible();
 
-      await expect(chat.reply(/could not|went wrong|error|try again later/i), 'BUG-25: the assistant says the search failed').toBeVisible({ timeout: 5_000 });
+      // In the transcript, or in an alert: either tells the visitor the search failed.
+      await expect(chat.reply(/could not|went wrong|error|try again later/i).or(failureFeedback(page)).first(), 'BUG-25: the assistant says the search failed').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

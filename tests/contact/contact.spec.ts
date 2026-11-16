@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { failureFeedback } from '@support/feedback';
 import type { ContactMessage, ContactPage } from '@pages/ContactPage';
 import type { ApiMock } from '@support/api-mock';
 import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug } from '@support/payloads';
@@ -11,6 +12,9 @@ const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
   message: CONTACT_MESSAGE,
   ...overrides,
 });
+/** A message of exactly `length` characters, for the boundary around the form's 50-character minimum. */
+const messageOfLength = (length: number) => 'a'.repeat(length);
+const MIN_MESSAGE_LENGTH = 50;
 const textFile = (name: string, content: string) => ({ name, mimeType: 'text/plain', buffer: Buffer.from(content) });
 
 test.describe('Contact form', () => {
@@ -44,8 +48,8 @@ test.describe('Contact form', () => {
       await apiMock.expectNoRequest('POST', '/messages');
     });
 
-    test('a message under 50 characters is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
-      await contactPage.send(message({ message: 'Too short to be a useful message.' }));
+    test(`a message of ${MIN_MESSAGE_LENGTH - 1} characters is rejected`, { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
+      await contactPage.send(message({ message: messageOfLength(MIN_MESSAGE_LENGTH - 1) }));
 
       await expect(contactPage.message.error).toHaveText('Message must be minimal 50 characters');
       await apiMock.expectNoRequest('POST', '/messages');
@@ -93,6 +97,16 @@ test.describe('Contact form', () => {
 
     test('a complete message is sent and acknowledged (mocked)', { tag: ['@smoke', '@flow'] }, sendsAndAcknowledges);
 
+    test(`a message of exactly ${MIN_MESSAGE_LENGTH} characters is accepted`, async ({ contactPage, apiMock }) => {
+      const contact = message({ message: messageOfLength(MIN_MESSAGE_LENGTH) });
+      const sent = apiMock.waitForRequest('POST', '/messages');
+
+      await contactPage.send(contact);
+
+      expect((await sent).postDataJSON()).toMatchObject({ message: contact.message });
+      await expect(contactPage.successMessage).toBeVisible();
+    });
+
     test('Enter in the email field sends the message as the button does', async ({ contactPage, apiMock }) => {
       const contact = message();
       const sent = apiMock.waitForRequest('POST', '/messages');
@@ -124,7 +138,7 @@ test.describe('Contact form', () => {
       await contactPage.send(message());
       expect((await answered).response.status()).toBe(422);
 
-      await expect(contactPage.statusMessage(/valid email address/), 'BUG-21: the validation detail is readable').toBeVisible({ timeout: 2_000 });
+      await expect(contactPage.statusMessage(/valid email address/), 'BUG-21: the validation detail is readable').toBeVisible({ timeout: BUG_TIMEOUT });
       await expect(contactPage.statusMessage('[object Object]'), 'BUG-21: no unrendered object in the message').toHaveCount(0);
     });
   });
@@ -132,14 +146,16 @@ test.describe('Contact form', () => {
   test.describe('when the API cannot be reached', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.abort('POST', '/messages')));
 
-    test('the shopper is told the message was not sent', async ({ contactPage, apiMock }) => {
+    test('the shopper is told the message was not sent', async ({ contactPage, apiMock, page }) => {
       knownBug('BUG-22', 'a network failure on POST /messages shows the literal text "true" as the error.', { absence: true });
       const attempted = apiMock.waitForRequest('POST', '/messages');
       await contactPage.send(message());
       await attempted;
 
-      // Any wording that says the message was not sent will do; a bare "error" or "failed" would also match unrelated text.
-      await expect(contactPage.statusMessage(/(?:not|could ?n.?t|unable to|failed to) (?:be )?sen[dt]|went wrong|try again/i), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: 5_000 });
+      // Any wording that says the message was not sent will do, in the form's status line or in an alert (the two ways the shop
+      // reports a failure); a bare "error" or "failed" would also match unrelated text.
+      const notSent = contactPage.statusMessage(/(?:not|could ?n.?t|unable to|failed to) (?:be )?sen[dt]|went wrong|try again/i).or(failureFeedback(page));
+      await expect(notSent.first(), 'BUG-22: the shopper is told the message was not sent').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

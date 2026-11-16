@@ -19,12 +19,11 @@ test.describe('Admin delete (mocked back office)', { tag: ['@mocked'] }, () => {
       test(`Delete asks for confirmation first (${name})`, async ({ adminList, backOffice, apiMock }) => {
         knownBug('ADM-02', 'Delete (products, brands, categories, users) acts on the first click, with no confirmation.');
 
-        // `delete` answers a confirm() if one opens (dismissing it here) and returns its text, or undefined when the site deleted unasked.
-        const question = await adminList.table.delete(rowText(backOffice.product), 'dismiss');
+        // Nothing confirms the click: a native confirm() is dismissed, an in-page dialog is left unanswered.
+        await adminList.table.deleteWithoutConfirming(rowText(backOffice.product));
 
-        expect(question, `ADM-02: Delete asks for confirmation before it deletes a ${name} record`).toBeDefined();
-        // Dismissed means refused: nothing may have been deleted.
-        await expect(apiMock.expectNoRequest('DELETE', endpoint), `ADM-02: dismissing the question deletes no ${name} record`).resolves.toBeUndefined();
+        // Whatever form the question takes (or none), an unconfirmed click may not have deleted the record.
+        await expect(apiMock.expectNoRequest('DELETE', endpoint), `ADM-02: Delete sends no DELETE for a ${name} record before it is confirmed`).resolves.toBeUndefined();
       });
     });
   }

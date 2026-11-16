@@ -1,9 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { UNKNOWN_EMAIL, fakeUser } from '@support/payloads';
 
 /** Some text, and none of it a translation key such as "page.forgot-password.confirm". */
 const READABLE = /^(?!.*\bpage\.[\w-]+\.[\w-]+)\s*\S/s;
+/** The confirmation alert fades out after 3 s: a pin on it must give up before that, so it fails on its text and not on a missing element. */
+const ALERT_FADE_WINDOW = 2_000;
 
 test.describe('Forgot password', () => {
   // The form's own validation must stop the first two: nothing answers POST /users/forgot-password in them,
@@ -24,7 +26,7 @@ test.describe('Forgot password', () => {
     await expect(forgotPasswordPage.email.error).toBeAttached();
     await apiMock.expectNoRequest('POST', '/users/forgot-password');
 
-    await expect(forgotPasswordPage.email.error, 'BUG-19: the email error names the problem').toHaveText('Email format is invalid', { timeout: 5_000 });
+    await expect(forgotPasswordPage.email.error, 'BUG-19: the email error names the problem').toHaveText('Email format is invalid', { timeout: BUG_TIMEOUT });
   });
 
   // The real refusal is a failed request on the shop's own log, so it runs on the self-hosted shop only;
@@ -56,8 +58,9 @@ test.describe('Forgot password', () => {
       await expect(forgotPasswordPage.alert).toBeVisible();
 
       // One assertion on the same alert: it is not a raw key and it says something. The alert fades out after
-      // three seconds, so the timeout stays short; a fixed site passes on the first look, whatever the wording.
-      await expect(forgotPasswordPage.alert, 'BUG-20: the confirmation is readable text, not a raw translation key').toHaveText(READABLE, { timeout: 2_000 });
+      // three seconds, so the window stays under that (BUG_TIMEOUT would outlive it and end on "element not found"); a fixed site
+      // passes on the first look, whatever the wording.
+      await expect(forgotPasswordPage.alert, 'BUG-20: the confirmation is readable text, not a raw translation key').toHaveText(READABLE, { timeout: ALERT_FADE_WINDOW });
     });
   });
 
@@ -70,6 +73,8 @@ test.describe('Forgot password', () => {
       await forgotPasswordPage.requestResetWithEnter(fakeUser.email);
 
       expect((await sent).postDataJSON()).toEqual({ email: fakeUser.email });
+      // The same answer as the button's: the form acknowledges the request. (Its wording is BUG-20's business.)
+      await expect(forgotPasswordPage.alert).toBeVisible();
     });
   });
 

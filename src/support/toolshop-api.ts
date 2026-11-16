@@ -44,6 +44,9 @@ export interface CategoryNode {
 /** The product list and search use the HTTP method QUERY with a JSON body. */
 export type ProductQuery = Partial<Record<'page' | 'sort' | 'between' | 'by_category' | 'by_brand' | 'eco_friendly' | 'is_rental' | 'by_category_slug', string>>;
 
+/** A ceiling on the catalogue walk: far above any real catalogue, so only a broken pager ever reaches it. */
+const MAX_CATALOGUE_PAGES = 100;
+
 /** Writes that leave a persistent, user-visible record (an account, an order, a message) belong on our own shop. */
 function assertSelfHosted(what: string, hint = ''): void {
   if (!IS_SELF_HOSTED) throw new Error(`Refusing to ${what} on ${API_URL}: it leaves a real record on a shop that is not self-hosted.${hint ? ` ${hint}` : ''}`);
@@ -66,12 +69,15 @@ export class ToolshopApi {
 
   /** Walks the catalogue page by page until a product matches. Stops early, so usually 1-2 calls. */
   async findProduct(description: string, matches: (p: Product) => boolean, query: ProductQuery = {}): Promise<Product> {
-    for (let pageNo = 1; ; pageNo++) {
+    for (let pageNo = 1; pageNo <= MAX_CATALOGUE_PAGES; pageNo++) {
       const result = await this.listProducts({ ...query, page: String(pageNo) });
       const product = result.data.find(matches);
       if (product) return product;
+      // An answer with no usable last_page cannot say when to stop: say so, instead of asking for pages forever.
+      if (!Number.isInteger(result.last_page)) throw new Error(`The product list answered without a last_page (page ${pageNo}), so the search for a ${description} product cannot tell where the catalogue ends`);
       if (pageNo >= result.last_page) throw new Error(`No ${description} product in the catalogue right now`);
     }
+    throw new Error(`No ${description} product in the first ${MAX_CATALOGUE_PAGES} pages of the catalogue`);
   }
 
   inStockProduct(exclude: string[] = []) {
@@ -162,7 +168,15 @@ export class ToolshopApi {
 
   @step('API: add product {1} to favourites')
   async addFavorite(token: string, productId: string): Promise<void> {
+    assertSelfHosted('add a favourite');
     await this.send(() => this.request.post(`${API_URL}/favorites`, { data: { product_id: productId }, headers: { authorization: `Bearer ${token}` } }));
+  }
+
+  /** The ids of the products on the account's favourites list, read from the API (the UI could hide one the account still holds). */
+  @step('API: list favourites')
+  async favoriteProductIds(token: string): Promise<string[]> {
+    const response = await this.read(() => this.request.get(`${API_URL}/favorites`, { headers: { authorization: `Bearer ${token}` } }));
+    return ((await response.json()) as { product_id: string }[]).map((favourite) => favourite.product_id);
   }
 
   @step('API: list invoices')
@@ -173,7 +187,28 @@ export class ToolshopApi {
 
   @step('API (admin): delete product {1}')
   async deleteProduct(token: string, productId: string): Promise<void> {
+    assertSelfHosted('delete a product');
     await this.send(() => this.request.delete(`${API_URL}/products/${productId}`, { headers: { authorization: `Bearer ${token}` } }));
+  }
+
+  @step('API (admin): create the brand {1}')
+  async createBrand(token: string, brand: { name: string; slug: string }): Promise<{ id: string; name: string; slug: string }> {
+    assertSelfHosted('create a brand');
+    const response = await this.send(() => this.request.post(`${API_URL}/brands`, { data: brand, headers: { authorization: `Bearer ${token}` } }));
+    return { ...brand, id: ((await response.json()) as { id: string }).id };
+  }
+
+  /** Every brand the shop lists (its brand list has no search and is not paged). */
+  @step('API: list brands')
+  async listBrands(): Promise<{ id: string; name: string; slug: string }[]> {
+    const response = await this.read(() => this.request.get(`${API_URL}/brands`));
+    return (await response.json()) as { id: string; name: string; slug: string }[];
+  }
+
+  @step('API (admin): delete brand {1}')
+  async deleteBrand(token: string, brandId: string): Promise<void> {
+    assertSelfHosted('delete a brand');
+    await this.send(() => this.request.delete(`${API_URL}/brands/${brandId}`, { headers: { authorization: `Bearer ${token}` } }));
   }
 
   @step('API (admin): find the product named "{1}"')
@@ -216,22 +251,36 @@ export class ToolshopApi {
 
   /**
    * The shared backend fails now and then (POST /carts returned 500 once in three tries while this
-   * suite was written), so reads (and the anonymous cart creation) are attempted up to three times (two retries) on a 5xx,
-   * and a 429 once the server's Retry-After has passed. Other writes are never retried: a repeated
+   * suite was written), so reads (and the anonymous cart creation) are attempted up to three times (two retries) on a 5xx
+   * or a dropped connection, and a 429 once the server's Retry-After has passed. Other writes are never retried: a repeated
    * order or registration could duplicate, so they fail at once, with the response body in the message.
    */
   private async send(call: () => Promise<APIResponse>, { idempotent = false }: { idempotent?: boolean } = {}): Promise<APIResponse> {
-    let response = await call();
-    for (let attempt = 1; idempotent && attempt < 3 && (response.status() >= 500 || response.status() === 429); attempt++) {
+    const attempts = idempotent ? 3 : 1;
+    let response: APIResponse | undefined;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        response = await call();
+      } catch (error) {
+        // A network error (a reset socket, a refused connection) on a read is as transient as a 5xx; the last attempt rethrows it.
+        if (attempt === attempts || !isNetworkError(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        continue;
+      }
+      if (attempt === attempts || !(response.status() >= 500 || response.status() === 429)) break;
       const retryAfter = Number(response.headers()['retry-after']);
       const waitMs = response.status() === 429 && retryAfter > 0 ? Math.min(retryAfter, 30) * 1000 : 500 * attempt;
       await new Promise((resolve) => setTimeout(resolve, waitMs));
-      response = await call();
     }
-    if (!response.ok()) {
-      const body = (await response.text().catch(() => '')).slice(0, 500);
-      throw new Error(`${response.url()} answered ${response.status()}${body ? `: ${body}` : ''}`);
+    if (!response!.ok()) {
+      const body = (await response!.text().catch(() => '')).slice(0, 500);
+      throw new Error(`${response!.url()} answered ${response!.status()}${body ? `: ${body}` : ''}`);
     }
-    return response;
+    return response!;
   }
+}
+
+/** A failure of the connection itself (not a closed context or a test timeout, which must stay failures). */
+function isNetworkError(error: unknown): boolean {
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|network/i.test(String((error as Error)?.message ?? error));
 }

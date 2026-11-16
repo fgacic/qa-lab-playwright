@@ -33,14 +33,24 @@ export const ROUTE_XSS_PAYLOADS = {
 } as const;
 
 /**
+ * A payload for a value that lands inside a quoted HTML attribute (an `alt`, a `title`, an input's `value`): it closes the
+ * quote and adds an attribute of its own, with no angle bracket, which is what a filter that only strips tags lets through.
+ * `autofocus` makes the event handler run without a click. The same under 40 characters as the rest.
+ */
+export const ATTRIBUTE_XSS_PAYLOAD = '" autofocus onfocus=__qaLabXssHit(7) x="';
+
+/**
  * How long a negative result is observed before it is believed. "Nothing ran" cannot be polled
  * for like a visible element: it is true the instant the page is quiet, and also true a moment
  * before a handler fires. So `expectNotExecuted` first waits for what a payload hangs on to
  * settle (every image has loaded or failed, two timer turns have passed) and then watches
  * for this long, racing the window against the sentinel's hit signal. It is only ever paid on a
- * passing test; a hit ends the wait at once and fails it.
+ * passing test; a hit ends the wait at once and fails it. The settle step covers every page of every watched context
+ * (the test's own, a visitor's, a popup, a second tab); the DOM snapshots (`injectedCount`) read the page the test drives.
+ * The window is 1 s because what a payload can still do after the page settled is a timer or a handler on a load
+ * that has already finished, which fire within a task or two; a handler that waits longer than the window is not covered.
  */
-const OBSERVATION_WINDOW_MS = 1_000;
+export const OBSERVATION_WINDOW_MS = 1_000;
 
 /** How many times `settle` starts over on a page that was navigated away from while it waited. */
 const SETTLE_ATTEMPTS = 3;
@@ -102,6 +112,58 @@ export class XssSentinel {
     this.signalHit();
   }
 
+  /** Puts the HTML into a frame's `srcdoc`, which the browser parses as a document: what makes `<script>` and `<svg onload>` run. */
+  async parseInFrame(html: string): Promise<void> {
+    await this.page.evaluate((markup) => {
+      const frame = document.createElement('iframe');
+      frame.srcdoc = markup;
+      document.body.append(frame);
+    }, html);
+  }
+
+  /** Inserts the HTML into the page's body the way a vulnerable sink (`innerHTML`) would. */
+  async insertHtml(html: string): Promise<void> {
+    await this.page.evaluate((markup) => document.body.insertAdjacentHTML('beforeend', markup), html);
+  }
+
+  /** Builds `<input value="...">` from a string, the way a sink that puts a value into a quoted attribute would. */
+  async insertAsAttributeValue(value: string): Promise<void> {
+    await this.page.evaluate((text) => {
+      const holder = document.createElement('div');
+      holder.innerHTML = `<input value="${text}">`;
+      document.body.append(holder);
+    }, value);
+  }
+
+  /** Leaves one payload in an iframe's document and another in an open shadow root, the two places a plain query does not look. */
+  async insertInFrameAndShadowRoot(framed: string, shadowed: string): Promise<void> {
+    await this.page.evaluate(
+      ([inFrame, inShadow]) => {
+        const frame = document.createElement('iframe');
+        document.body.append(frame);
+        frame.contentDocument!.body.insertAdjacentHTML('beforeend', inFrame);
+        const host = document.createElement('div');
+        document.body.append(host);
+        host.attachShadow({ mode: 'open' }).innerHTML = inShadow;
+      },
+      [framed, shadowed],
+    );
+  }
+
+  /** Calls `window.alert` as page script would, on this page or on another one of the context (a popup, a tab). */
+  async raiseAlert(message: string, page: Page = this.page): Promise<void> {
+    await page.evaluate((text) => window.alert(text), message);
+  }
+
+  /** Has the page open a popup to `path` (as page script would) and returns it once it has loaded. */
+  async openPopup(path: string): Promise<Page> {
+    const opened = this.page.waitForEvent('popup');
+    await this.page.evaluate((target) => window.open(target, '_blank'), path);
+    const popup = await opened;
+    await popup.waitForLoadState('domcontentloaded');
+    return popup;
+  }
+
   /** What ran so far, in order. */
   executions(): readonly string[] {
     return this.hits;
@@ -112,11 +174,16 @@ export class XssSentinel {
    * at once, and a navigation that destroys the page mid-wait is not an error: the wait starts over on the new document
    * (a few times at most), since a payload's handler may be what redirected it.
    */
-  private async settle(): Promise<void> {
+  private async settleAll(): Promise<void> {
+    const pages = [...this.watched].flatMap((context) => context.pages());
+    await Promise.all((pages.includes(this.page) ? pages : [this.page, ...pages]).map((page) => this.settle(page)));
+  }
+
+  private async settle(page: Page): Promise<void> {
     for (let attempt = 0; ; attempt++) {
-      if (this.hits.length) return;
+      if (this.hits.length || page.isClosed()) return;
       try {
-        await this.page.evaluate(async () => {
+        await page.evaluate(async () => {
           // Lazy images below the fold may never load, so they are not waited for. The listeners are added, not assigned:
           // an `onerror` property is what an `<img onerror=...>` payload runs through, and replacing it would stop the very
           // handler this check exists to wait for.
@@ -130,7 +197,7 @@ export class XssSentinel {
         });
         return;
       } catch (error) {
-        if (this.hits.length) return; // the page went away because something ran: the expectation reports what
+        if (this.hits.length || page.isClosed()) return; // the page went away because something ran (or the test closed it): the expectation reports what
         if (!/execution context was destroyed/i.test(String(error)) || attempt >= SETTLE_ATTEMPTS - 1) throw error;
       }
     }
@@ -144,7 +211,7 @@ export class XssSentinel {
    */
   async expectNotExecuted(): Promise<void> {
     expect(this.watching, 'the sentinel is not installed: add test.use({ xssWatch: true }) to the spec').toBe(true);
-    await this.settle();
+    await this.settleAll();
     let timer: NodeJS.Timeout | undefined;
     // The window is a plain timer on purpose: this is the one place where the point is to let time pass, and the hit
     // signal ends it early. It never waits for a state to appear.
@@ -166,14 +233,18 @@ export class XssSentinel {
    */
   async injectedCount(): Promise<number> {
     return this.page.evaluate(() => {
+      // Elements, not matches, so an `<img src=x onerror=hook>` that two of the rules recognise is one payload.
       const count = (root: Document | ShadowRoot): number => {
-        let found = root.querySelectorAll('img[src="x"], svg[onload*="__qaLabXssHit"]').length;
-        found += [...root.querySelectorAll('script')].filter((script) => script.textContent?.includes('__qaLabXssHit')).length;
+        const found = new Set<Element>(root.querySelectorAll('img[src="x"]'));
+        for (const script of root.querySelectorAll('script')) if (script.textContent?.includes('__qaLabXssHit')) found.add(script);
+        let nested = 0;
         for (const element of root.querySelectorAll('*')) {
-          if (element.shadowRoot) found += count(element.shadowRoot);
-          if (element instanceof HTMLIFrameElement && element.contentDocument) found += count(element.contentDocument);
+          // Any event-handler attribute that calls the hook: `onload` of an svg, `onfocus` of an element a quote was broken out of.
+          if ([...element.attributes].some((attribute) => /^on/i.test(attribute.name) && attribute.value.includes('__qaLabXssHit'))) found.add(element);
+          if (element.shadowRoot) nested += count(element.shadowRoot);
+          if (element instanceof HTMLIFrameElement && element.contentDocument) nested += count(element.contentDocument);
         }
-        return found;
+        return found.size + nested;
       };
       return count(document);
     });

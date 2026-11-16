@@ -1,6 +1,6 @@
 import { expect, test as setup } from '@fixtures';
 import { CUSTOMER_CREDENTIALS, CUSTOMER_STORAGE_STATE } from '@support/env';
-import { TOKEN_KEY } from '@support/session';
+import { storedToken } from '@support/session';
 import { fakeCustomer } from '@support/test-data';
 
 /**
@@ -24,6 +24,6 @@ setup('sign in a customer and save the session', async ({ api, loginPage, page }
 
   await expect(account.title).toHaveText('My account');
   // The saved state is only worth keeping if it holds the session: a file with no token would send every account spec to the login page.
-  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY), { message: 'the sign-in stored a token' }).toBeTruthy();
+  await expect.poll(() => storedToken(page), { message: 'the sign-in stored a token' }).toBeTruthy();
   await page.context().storageState({ path: CUSTOMER_STORAGE_STATE });
 });

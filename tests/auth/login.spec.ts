@@ -1,18 +1,22 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { MOCKED_PASSWORD, UNKNOWN_EMAIL, UNKNOWN_PASSWORD, fakeJwt, fakeUser } from '@support/payloads';
-import { TOKEN_KEY } from '@support/session';
+import { storedToken } from '@support/session';
 
 /**
  * Real requests in this file use only obviously fake credentials (UNKNOWN_EMAIL, UNKNOWN_PASSWORD).
  * Successful sign-ins are mocked end to end: no real account is touched.
  */
 test.describe('Login', () => {
-  test('an empty form shows both required labels', { tag: ['@negative'] }, async ({ loginPage }) => {
+  test('an empty form shows both required labels', { tag: ['@negative'] }, async ({ loginPage, apiMock }) => {
+    // Nothing answers POST /users/login here, so the guard refuses a request that should never leave.
+    await apiMock.blockUnmockedWrites();
+
     await loginPage.loginButton.click();
 
     await expect(loginPage.email.error).toHaveText('Email is required');
     await expect(loginPage.password.error).toHaveText('Password is required');
+    await apiMock.expectNoRequest('POST', '/users/login');
   });
 
   test('a malformed email and a too-short password are rejected before sending', { tag: ['@negative'] }, async ({ loginPage, apiMock }) => {
@@ -87,7 +91,7 @@ test.describe('Login', () => {
       await expect(page).toHaveURL('/account');
       await expect(loginPage.shell.header.userMenu).toHaveText(`${fakeUser.first_name} ${fakeUser.last_name}`);
       await expect(loginPage.shell.header.signInLink).toHaveCount(0);
-      await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY), { message: 'the SPA keeps the token it was given' }).toBe(token);
+      await expect.poll(() => storedToken(page), { message: 'the SPA keeps the token it was given' }).toBe(token);
     });
 
     test('Enter in the password field signs in as the button does', async ({ loginPage, apiMock, page }) => {
@@ -154,7 +158,7 @@ test.describe('Login', () => {
     knownBug('A11Y-02', 'the eye button that shows the password has no accessible name (login, register, profile).');
     await expect(loginPage.showPasswordButton).toBeVisible();
 
-    await expect(loginPage.showPasswordButton, 'A11Y-02: the eye button has an accessible name').toHaveAccessibleName(/show|hide|password/i, { timeout: 2_000 });
+    await expect(loginPage.showPasswordButton, 'A11Y-02: the eye button has an accessible name').toHaveAccessibleName(/show|hide|password/i, { timeout: BUG_TIMEOUT });
   });
 
   test.describe('when the account is locked', { tag: ['@mocked'] }, () => {

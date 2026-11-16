@@ -39,6 +39,8 @@ export interface AuthFixtures {
    * other real session uses `worker-account`, so no spec depends on how long ago the setup ran.
    */
   signedIn: { firstName: string; lastName: string; email: string };
+  /** Registers a brand-new customer for this test through the API and returns it with a fresh token: state it changes is nobody else's. Self-hosted only. */
+  newAccount: () => Promise<NewAccount>;
   accountPage: AccountPage;
   favoritesPage: FavoritesPage;
   invoicesPage: InvoicesPage;
@@ -46,12 +48,22 @@ export interface AuthFixtures {
   profilePage: ProfilePage;
 }
 
+export interface NewAccount {
+  customer: Customer;
+  token: string;
+}
+
 export interface AuthWorkerFixtures {
   /**
    * A real customer per worker, so parallel workers never share (and fight over) one account.
-   * Registered through the API on first use only, so mocked specs never trigger it. The accounts are
-   * never deleted: the API has no customer delete, and the self-hosted database is created per CI job
-   * and reset locally by `npm run toolshop:reseed`, so they disappear with it. It registers on the self-hosted shop only.
+   * Registered through the API on first use only, so mocked specs never trigger it, and a registration that failed is
+   * not remembered: the next call registers again. The accounts are never deleted: the API has no customer delete,
+   * and the self-hosted database is created per CI job and reset locally by `npm run toolshop:reseed`, so they
+   * disappear with it. It registers on the self-hosted shop only.
+   *
+   * The tests of one worker run one after another on the SAME account, so it is for tests that only read it or that
+   * add something they find again by a unique key (an invoice number). A test that changes what the next one would
+   * see (favourites, the profile, a password) takes `newAccount` instead.
    */
   workerAccount: { get: () => Promise<{ customer: Customer; token: string }> };
 }
@@ -67,17 +79,31 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
         await api.registerCustomer(customer);
         return customer;
       };
+      // A rejected registration is dropped, not cached: one failed call must not fail every later test of the worker.
+      const registeredOnce = () =>
+        (registered ??= register().catch((error: unknown) => {
+          registered = undefined;
+          throw error;
+        }));
       // Registered once per worker; the token is issued fresh on every call, because
       // Toolshop's JWT lives 300 s and /users/refresh cannot renew it.
       await use({
         get: async () => {
-          const customer = await (registered ??= register());
+          const customer = await registeredOnce();
           return { customer, token: await api.login(customer.email, customer.password) };
         },
       });
     },
     { scope: 'worker' },
   ],
+
+  newAccount: async ({ api }, use) => {
+    await use(async () => {
+      const customer = fakeCustomer();
+      await api.registerCustomer(customer);
+      return { customer, token: await api.login(customer.email, customer.password) };
+    });
+  },
 
   signedIn: async ({ page, session, apiMock, workerAccount, api }, use) => {
     if (session === 'mocked') {

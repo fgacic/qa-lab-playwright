@@ -4,9 +4,11 @@
 // (the "forbidden patterns" in the README) are errors here, so they cannot come back.
 import js from '@eslint/js';
 import playwright from 'eslint-plugin-playwright';
+import { ASSERTION_HELPERS } from './scripts/lib/assertion-helpers.mjs';
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
-const base = tseslint.config(
+const base = defineConfig(
   { ignores: ['node_modules/', 'playwright-report/', 'test-results/', 'blob-report/', 'allure-results/', 'allure-report/', '.auth/'] },
 
   js.configs.recommended,
@@ -50,17 +52,8 @@ const base = tseslint.config(
 );
 
 // A test with no assertion passes whatever the shop does. The house's own assertion helpers count as
-// assertions (they throw), so every one of them is listed: add a new `expect*` helper here when one is written.
-const ASSERTION_HELPERS = [
-  'expectFixed',
-  'expectNoInjectedElements',
-  'expectNoNewViolations',
-  'expectNoRequest',
-  'expectNotExecuted',
-  'expectNoWorseShift',
-  'expectPageText',
-  'expectResponsive',
-];
+// assertions (they throw), so every one of them is listed in scripts/lib/assertion-helpers.mjs, and
+// tests/framework/lint-config.spec.ts checks the list against the code in both directions.
 const specRules = {
   files: ['tests/**/*.spec.ts'],
   rules: {
@@ -78,4 +71,50 @@ const noBranches = {
   rules: { 'playwright/no-conditional-in-test': 'error', 'playwright/no-conditional-expect': 'error' },
 };
 
-export default [...base, specRules, noBranches];
+// Things a spec may not write inline, each with the named helper that is the one place allowed to (the helpers live in
+// src/support and fixtures, which this block does not cover, so there is never a disable comment to hunt for):
+// - page.evaluate: code run inside the page is untyped, unretried and invisible to the report. A spec states what the user
+//   sees; what the app stored or sent is read through `storedToken` (src/support/session.ts), the mock layer, or a helper
+//   such as `fetchStatus` (src/support/page-fetch.ts), which names what it does.
+// - a hard-coded http(s):// URL: addresses come from env.ts (BASE_URL, API_URL), so a spec cannot quietly aim at another
+//   server. A case table that needs a made-up host builds it with `httpUrl` (src/support/urls.ts).
+// - Math.random / Date.now: a spec's data is derived from `test-data.ts` (seeded and unique) and its timing from the
+//   framework, so a failure can be replayed. Timing under test goes through `elapsedMs` (src/support/page-fetch.ts).
+// - serial describes: tests that depend on each other's order hide which one broke and cannot be sharded or retried alone;
+//   arrange the state each test needs through the API instead.
+// `page.evaluate(...)`, and `somePageObject.page.evaluate(...)`.
+const PAGE_EVALUATE = "CallExpression[callee.property.name=/^(evaluate|evaluateHandle)$/][callee.object.name=/^page$/i], CallExpression[callee.property.name=/^(evaluate|evaluateHandle)$/][callee.object.property.name='page']";
+const noInlineHazards = {
+  files: ['tests/**/*.spec.ts'],
+  rules: {
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: PAGE_EVALUATE,
+        message: 'No page.evaluate in a spec: read what the app stored through a named helper (storedToken in @support/session, fetchStatus in @support/page-fetch) or assert what the user sees.',
+      },
+      {
+        selector: "Literal[value=/^https?:\\/\\//], TemplateElement[value.raw=/https?:\\/\\//]",
+        message: 'No hard-coded http(s):// URL in a spec: use BASE_URL / API_URL from @support/env, or httpUrl() from @support/urls for a made-up host.',
+      },
+      {
+        selector: "MemberExpression[object.name='Math'][property.name='random']",
+        message: 'No Math.random in a spec: unique data comes from @support/test-data (uniqueEmail, fakeCustomer, ...).',
+      },
+      {
+        selector: "MemberExpression[object.name='Date'][property.name='now']",
+        message: 'No Date.now in a spec: time what you must with elapsedMs (@support/page-fetch); unique data comes from @support/test-data.',
+      },
+      {
+        selector: "MemberExpression[object.property.name='describe'][property.name='serial']",
+        message: 'No serial describe: tests that need each other\'s order cannot be retried or sharded alone. Arrange each test\'s state through the API.',
+      },
+      {
+        selector: "CallExpression[callee.property.name='configure'] Property[key.name='mode'][value.value='serial']",
+        message: "No configure({ mode: 'serial' }): tests that need each other's order cannot be retried or sharded alone. Arrange each test's state through the API.",
+      },
+    ],
+  },
+};
+
+export default [...base, specRules, noBranches, noInlineHazards];

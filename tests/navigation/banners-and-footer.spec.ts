@@ -1,11 +1,12 @@
 import { expect, test } from '@fixtures';
+import { httpsUrl } from '@support/urls';
 
 const EXTERNAL_LINKS = {
-  documentation: 'https://testsmith-io.github.io/practice-software-testing/#/',
-  courses: 'https://onlinecourses.testsmith.io',
-  coursePromo: 'https://onlinecourses.testsmith.io/?utm_source=pst&utm_medium=homepage&utm_campaign=app_promo',
-  apiSpector: 'https://api-spector.dev',
-  github: 'https://github.com/testsmith-io/practice-software-testing',
+  documentation: httpsUrl('testsmith-io.github.io', '/practice-software-testing/#/'),
+  courses: httpsUrl('onlinecourses.testsmith.io'),
+  coursePromo: httpsUrl('onlinecourses.testsmith.io', '/?utm_source=pst&utm_medium=homepage&utm_campaign=app_promo'),
+  apiSpector: httpsUrl('api-spector.dev'),
+  github: httpsUrl('github.com', '/testsmith-io/practice-software-testing'),
 } as const;
 
 /**
@@ -57,13 +58,27 @@ test.describe('Banners and footer', () => {
     const { banners } = homePage.shell;
     await banners.openTestingGuide();
     await expect(banners.guide).toBeVisible();
-    await expect(banners.guideProgress).toHaveText(/^Step 1 of \d+$/);
+    await expect(banners.guideStep(1)).toBeVisible();
     await expect(banners.guidePrevious).toBeDisabled();
 
     await banners.guideNext.click();
-    await expect(banners.guideProgress).toHaveText(/^Step 2 of \d+$/);
+    await expect(banners.guideStep(2)).toBeVisible();
     await banners.guidePrevious.click();
-    await expect(banners.guideProgress).toHaveText(/^Step 1 of \d+$/);
+    await expect(banners.guideStep(1)).toBeVisible();
+  });
+
+  test('on the last step of the testing guide there is no way forward', { tag: ['@negative'] }, async ({ homePage }) => {
+    const { banners } = homePage.shell;
+    await banners.openTestingGuide();
+    await expect(banners.guideStep(1)).toBeVisible();
+    const last = await banners.guideStepCount();
+    for (let step = 2; step <= last; step++) {
+      await banners.guideNext.click();
+      await expect(banners.guideStep(step)).toBeVisible();
+    }
+
+    await expect(banners.guideNext).toBeDisabled();
+    await expect(banners.guideStep(last)).toBeVisible();
   });
 
   test('the testing guide closes on Escape', async ({ homePage, page }) => {

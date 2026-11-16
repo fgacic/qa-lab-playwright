@@ -1,5 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { allowLoggedFailure } from '@pages/admin/alerts';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { FAVORITE_ID } from '@support/payloads';
 import { escapeRegExp } from '@support/regexp';
 
@@ -100,6 +102,8 @@ test.describe('Product detail', () => {
   // smoke test runs there for real instead of behind a mock that would prove nothing.
   test('Add to cart puts the chosen quantity in the cart', { tag: ['@smoke'] }, async ({ productPage, product, apiMock }) => {
     const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
+    // Observed from the start: if the click throws, the wait is not left rejecting unhandled.
+    added.catch(() => undefined);
 
     await productPage.addToCart(ADDED_QUANTITY);
 
@@ -112,8 +116,9 @@ test.describe('Product detail', () => {
   test.describe('while signed out', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.fail('POST', '/favorites', 401, { message: 'Unauthorized' })));
 
-    test('adding to favourites is refused', { tag: ['@negative'] }, async ({ productPage, product, page, apiMock }) => {
+    test('a 401 on adding to favourites shows the unauthorized message and keeps the shopper on the product', { tag: ['@negative'] }, async ({ productPage, product, page, apiMock }) => {
       const asked = apiMock.waitForRequest('POST', '/favorites');
+      asked.catch(() => undefined);
 
       await productPage.addToFavourites();
 
@@ -196,7 +201,7 @@ test.describe('Product detail', () => {
       knownBug('BUG-10', 'when the cart request fails at network level, Add to cart does nothing at all: no toast, no error.', { absence: true });
       await productPage.addToCart();
 
-      await expect(productPage.shell.errorAlert, 'BUG-10: a failed add to cart is reported').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(productPage.page).first(), 'BUG-10: a failed add to cart is reported').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -216,6 +221,7 @@ test.describe('Product detail', () => {
 
   test.describe('when the related products fail to load', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', RELATED, 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the shopper is told, and the product itself is unaffected', async ({ productPage, product, apiMock }) => {
       knownBug('BUG-43', 'a failed related-products request leaves the "Related products" heading over nothing, with no message.', { absence: true });
@@ -223,18 +229,19 @@ test.describe('Product detail', () => {
       await expect(productPage.addToCartButton).toBeEnabled();
       await expect.poll(() => apiMock.requestsTo('GET', RELATED), 'the related products were asked for').toBeGreaterThan(0);
 
-      await expect(productPage.shell.errorAlert, 'BUG-43: a failed related-products request is reported').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(productPage.page).first(), 'BUG-43: a failed related-products request is reported').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
   for (const status of [404, 500] as const) {
     test.describe(`when the product request answers ${status}`, { tag: ['@mocked', '@bug'] }, () => {
       test.use(withMocks(mock.fail('GET', /^\/products\/[^/]+$/, status, PRODUCT_FAILURES[status])));
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
       test('the page says the product is unavailable', async ({ productPage }) => {
         knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".', { absence: true });
 
-        await expect(productPage.shell.errorAlert.or(productPage.unavailableMessage), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: 5_000 });
+        await expect(failureFeedback(productPage.page).or(productPage.unavailableMessage).first(), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: BUG_TIMEOUT });
       });
     });
   }

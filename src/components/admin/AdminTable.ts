@@ -36,28 +36,39 @@ export class AdminTable {
   }
 
   /**
-   * Clicks Delete on the row and answers the confirmation the site may ask for (ADM-02: today it
-   * asks nothing; once fixed it opens a `confirm()`, which Playwright dismisses on its own when no
-   * handler is attached, so a plain click would cancel the delete and the test would wait forever).
-   * Returns the question that was asked, or `undefined` when the site deleted without asking.
-   * `answer` defaults to accepting, because most callers want the record gone.
+   * Clicks Delete on the row and accepts the native `confirm()` the site may ask for (ADM-02: today it asks nothing;
+   * once fixed it may open a `confirm()`, which Playwright dismisses on its own when no handler is attached, so a plain
+   * click would cancel the delete and the test would wait forever). An in-page confirmation dialog is not answered here:
+   * the day the site draws one, the specs that need the record gone say so by failing, and learn its buttons then.
    */
   @step('Delete "{0}"')
-  async delete(text: string, answer: 'accept' | 'dismiss' = 'accept'): Promise<string | undefined> {
+  async delete(text: string): Promise<void> {
     const page = this.root.page();
-    let asked: string | undefined;
-    const onDialog = async (dialog: Dialog) => {
-      asked = dialog.message();
-      await dialog[answer]();
-    };
+    const onDialog = (dialog: Dialog) => dialog.accept();
     page.on('dialog', onDialog);
     try {
-      // A confirm() blocks the click handler, so the click returns once the dialog has been answered and `asked` is final.
+      // A confirm() blocks the click handler, so the click returns once the dialog has been answered.
       await this.row(text).getByRole('button', { name: 'Delete' }).click();
     } finally {
       page.off('dialog', onDialog);
     }
-    return asked;
+  }
+
+  /**
+   * Clicks Delete and confirms nothing: a native `confirm()` is dismissed, and an in-page dialog is left unanswered,
+   * which refuses it just the same. What the caller then checks is that no DELETE was sent (ADM-02), whichever
+   * form the question takes.
+   */
+  @step('Click Delete on "{0}" without confirming')
+  async deleteWithoutConfirming(text: string): Promise<void> {
+    const page = this.root.page();
+    const onDialog = (dialog: Dialog) => dialog.dismiss();
+    page.on('dialog', onDialog);
+    try {
+      await this.row(text).getByRole('button', { name: 'Delete' }).click();
+    } finally {
+      page.off('dialog', onDialog);
+    }
   }
 
   @step('Open the details of "{0}"')

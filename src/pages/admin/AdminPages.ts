@@ -2,9 +2,9 @@ import type { Locator, Page, Request } from '@playwright/test';
 import { AdminTable } from '@components/admin/AdminTable';
 import type { AdminSection } from '@components/Header';
 import { apiPath } from '@support/env';
-import { TOKEN_KEY } from '@support/session';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
+import { reportedFailure } from './alerts';
 
 /** The heading each back-office section opens on (the dashboard has none of its own; the orders list says "Order"). */
 const SECTION_HEADINGS: Record<AdminSection, string> = {
@@ -25,12 +25,12 @@ export class AdminDashboardPage {
   readonly latestOrders: AdminTable;
   /** Shown instead of the table when there is nothing to list. */
   readonly noOrders: Locator;
-  /** Any alert: a healthy dashboard shows none. */
-  readonly alerts: Locator;
+  /** What the dashboard says when a request fails (an alert, or the site's plain error text): a healthy dashboard shows none. */
+  readonly failure: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
-    this.alerts = page.getByRole('alert');
+    this.failure = reportedFailure(page);
     this.noOrders = page.getByText('No recent invoices.');
     this.salesHeading = page.getByRole('heading', { name: 'Sales over the years' });
     // A <canvas> chart: no role or name to reach it by, and nothing inside it to read.
@@ -46,6 +46,12 @@ export class AdminDashboardPage {
   @step('Open the admin dashboard')
   async open(): Promise<void> {
     await this.shell.gotoAndSettle('/admin/dashboard', 'GET', /^\/invoices$/);
+  }
+
+  /** Goes to the dashboard's address without waiting for its data: for a visitor who may be turned away before it asks for any. */
+  @step('Try to open the admin dashboard')
+  async tryToOpen(): Promise<void> {
+    await this.shell.goto('/admin/dashboard');
   }
 }
 
@@ -66,6 +72,10 @@ export class AdminOrderPage {
   readonly feedback: Locator;
   /** The page's answer to an invoice that could not be loaded. */
   readonly notFoundNotice: Locator;
+  /** Drawn in every state of the page, whatever the invoice request answered: what a test anchors on before it looks for an absence. */
+  readonly backLink: Locator;
+  /** What the page says when a request fails, in whatever form (an alert, or the site's plain error text). */
+  readonly failure: Locator;
 
   constructor(readonly page: Page) {
     // exact: the date field's accessible name is "Invoice Number Invoice Date" (two labels).
@@ -80,6 +90,8 @@ export class AdminOrderPage {
     this.lines = page.getByRole('table').getByRole('row').filter({ has: page.getByRole('cell') });
     this.feedback = page.getByRole('alert').or(page.getByText('Status updated!'));
     this.notFoundNotice = page.getByText("This invoice doesn't exist.");
+    this.backLink = page.getByRole('link', { name: 'Back' });
+    this.failure = reportedFailure(page);
   }
 
   /** The cells of an order line, in column order: quantity, product, unit price, line total. */
@@ -102,11 +114,14 @@ export class AdminMessagePage {
   readonly replyBox: Locator;
   readonly replyButton: Locator;
   readonly backLink: Locator;
-  /** Any alert of the message page (a failed reply or status change would show here). */
+  /** Any alert of the message page: validation ("... is required"), a failed reply or status change. */
   readonly feedback: Locator;
+  /** What the page says when a request fails, in whatever form (an alert, or the site's plain error text). */
+  readonly failure: Locator;
 
   constructor(readonly page: Page) {
     this.feedback = page.getByRole('alert');
+    this.failure = reportedFailure(page);
     this.status = page.getByRole('combobox', { name: 'Status' });
     this.replyBox = page.getByRole('textbox', { name: 'Reply message' });
     this.replyButton = page.getByRole('button', { name: 'Reply' });
@@ -144,13 +159,13 @@ export const reportColumns = (title: ReportTitle): readonly string[] => REPORTS[
 export class AdminStatisticsPage {
   readonly shell: AppShell;
   readonly heading: Locator;
-  /** Any alert: a healthy statistics page shows none. */
-  readonly alerts: Locator;
+  /** What the statistics page says when a request fails (an alert, or the site's plain error text): a healthy page shows none. */
+  readonly failure: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
     this.heading = page.getByRole('heading', { name: 'Statistics', level: 1 });
-    this.alerts = page.getByRole('alert');
+    this.failure = reportedFailure(page);
   }
 
   /** The table under a report's heading: the smallest block that holds both (the heading has no relation to its table in the accessibility tree). */
@@ -184,6 +199,7 @@ export class AdminSalesReportPage {
   readonly shell: AppShell;
   readonly heading: Locator;
   readonly year: Locator;
+  readonly yearOptions: Locator;
   readonly chart: Locator;
   private readonly feed: string;
 
@@ -192,6 +208,7 @@ export class AdminSalesReportPage {
     this.shell = new AppShell(page);
     this.heading = page.getByRole('heading', { name: `Average sales per ${period}` });
     this.year = page.getByRole('combobox', { name: 'Select year' });
+    this.yearOptions = this.year.getByRole('option');
     this.chart = page.locator('canvas');
   }
 
@@ -202,6 +219,18 @@ export class AdminSalesReportPage {
     answered.catch(() => undefined); // a failed navigation is reported by goto; this only keeps the rejection from going unhandled
     await this.shell.goto(`/admin/reports/average-sales-per-${this.period}`);
     await answered;
+  }
+
+  /**
+   * The first year in the picker that is not the one selected, so a test that changes the year really changes it,
+   * whatever year the picker opens on or stops at (ADM-08). Call it once the options are drawn.
+   */
+  async anotherYear(): Promise<string> {
+    const selected = await this.year.inputValue();
+    const years = await this.yearOptions.allTextContents();
+    const other = years.map((year) => year.trim()).find((year) => year !== selected);
+    if (!other) throw new Error(`The year picker offers only the selected year (${selected}): there is no other year to pick.`);
+    return other;
   }
 
   /** Picks a year and returns the next report request that carries a `?year=`; the spec asserts which year it asked for. */
@@ -248,11 +277,6 @@ export class AdminSettingsPage {
   @step('Clear the stored settings')
   async clearStorage(): Promise<void> {
     await this.clearStorageButton.click();
-  }
-
-  /** The admin's session token: what "Clear storage" must leave alone. */
-  storedToken(): Promise<string | null> {
-    return this.page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY);
   }
 
   /** The settings live in localStorage; reading them back is how a save is verified. */

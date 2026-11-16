@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import { SEARCH_HIT, category } from '@support/admin-payloads';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const CATEGORY = /^\/categories\/[^/]+$/;
 
@@ -69,6 +69,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
 
   test.describe('when a category is still in use', { tag: ['@negative'] }, () => {
     test.use(withMocks(mock.fail('DELETE', CATEGORY, 409, { message: 'Seems like this category is used elsewhere.' })));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the reason is shown and the category stays', async ({ adminCategories, apiMock }) => {
       // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
@@ -85,6 +86,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
 
   test.describe('when saving a category is refused', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(mock.fail('POST', '/categories', 409, { slug: ['A category already exists with this slug.'] })));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the reason is shown', async ({ adminCategories, apiMock }) => {
       knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
@@ -95,7 +97,42 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
       await form.chrome.save();
       await sent;
 
-      await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the category was refused').toBeVisible({ timeout: 2_000 });
+      await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the category was refused').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+  });
+
+  test.describe('when deleting a category fails on the server', { tag: ['@negative'] }, () => {
+    test.use(withMocks(mock.fail('DELETE', CATEGORY, 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+    test('the failure is shown and the category stays', async ({ adminCategories, apiMock }) => {
+      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
+      await apiMock.use(mock.respond('GET', '/categories', []));
+      await expect(adminCategories.table.row(category.name)).toBeVisible();
+
+      await adminCategories.table.delete(category.name);
+
+      await expect(adminCategories.failure).toBeVisible();
+      await expect(adminCategories.alert(ADMIN_MESSAGES.categoryDeleted)).toBeHidden();
+      await expect(adminCategories.table.row(category.name)).toBeVisible();
+    });
+  });
+
+  test.describe('when the category cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
+    // The edit form loads the category from its tree endpoint.
+    test.use(withMocks(mock.fail('GET', /^\/categories\/tree\/[^/]+$/, 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+
+    test('the admin is told the category could not be loaded', async ({ adminCategories, apiMock }) => {
+      knownBug('ADM-14', ADM_14, { absence: true });
+      const failed = apiMock.waitForResponse('GET', /^\/categories\/tree\/[^/]+$/);
+
+      const form = await adminCategories.edit(category.name);
+      await failed;
+      await expect(form.chrome.heading).toBeVisible();
+
+      // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording.
+      await expect(form.chrome.failure, 'ADM-14: a failed category load tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

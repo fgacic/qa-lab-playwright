@@ -1,5 +1,6 @@
 import type { FullConfig, FullResult, Reporter, Suite, TestCase } from '@playwright/test/reporter';
-import { BOT_CHALLENGE_REASON, MAX_BOT_CHALLENGE_SKIP_RATIO } from './bot-challenge';
+import { BOT_CHALLENGE_REASON } from './bot-challenge';
+import { perfAloneViolation, skipRatioViolation } from './run-guard';
 
 /**
  * Two guards that need to see the whole run, so they live in a reporter rather than in a spec:
@@ -8,6 +9,10 @@ import { BOT_CHALLENGE_REASON, MAX_BOT_CHALLENGE_SKIP_RATIO } from './bot-challe
  * - A test that lands on the Cloudflare bot challenge is skipped, never failed (src/support/bot-challenge.ts),
  *   so a fully challenged live run would end green with everything skipped. The run fails when more
  *   than MAX_BOT_CHALLENGE_SKIP_RATIO of the tests were skipped for that reason.
+ *
+ * A command-line `--reporter` replaces the configured reporters, this one included: the skip-ratio check is then off
+ * (a local, ad-hoc run; CI and `npm test` never pass one). The perf rule does not depend on this reporter: the config
+ * enforces it at load time too (playwright.config.ts).
  */
 export default class RunGuardReporter implements Reporter {
   private suite?: Suite;
@@ -19,15 +24,12 @@ export default class RunGuardReporter implements Reporter {
   onBegin(_config: FullConfig, suite: Suite): void {
     this.suite = suite;
     if (process.argv.includes('--list')) return;
-    const projects = new Set(suite.allTests().map((t) => t.parent.project()?.name));
-    if (projects.has('perf') && projects.size > 1) {
+    const violation = perfAloneViolation(suite.allTests().map((t) => t.parent.project()?.name));
+    if (violation) {
       // An error thrown from a reporter is only logged and the run goes on, so this one stops the process itself,
       // before the first test starts: nothing has been measured next to anything else. The process ends here,
       // so the other reporters (HTML, blob, Allure) write nothing for this run: its output is partial by design.
-      console.error(
-        `\nThe perf budgets must run alone, but this run also schedules ${[...projects].filter((p) => p !== 'perf').join(', ')}. ` +
-          'Run `npm run test:perf` (--project=perf) in its own pass.',
-      );
+      console.error(`\n${violation}`);
       process.exit(1);
     }
   }
@@ -42,11 +44,9 @@ export default class RunGuardReporter implements Reporter {
     const challenged = tests.filter(
       (t) => t.outcome() === 'skipped' && t.annotations.some((a) => a.type === 'skip' && a.description === BOT_CHALLENGE_REASON),
     ).length;
-    if (!tests.length || challenged / tests.length <= MAX_BOT_CHALLENGE_SKIP_RATIO) return undefined;
-    console.error(
-      `\n${challenged} of ${tests.length} tests were skipped because Cloudflare challenged the run (more than ${MAX_BOT_CHALLENGE_SKIP_RATIO * 100}%): ` +
-        'the run proves nothing about the shop, so it fails.',
-    );
+    const violation = skipRatioViolation(challenged, tests.length);
+    if (!violation) return undefined;
+    console.error(`\n${violation}`);
     return Promise.resolve({ status: 'failed' });
   }
 }

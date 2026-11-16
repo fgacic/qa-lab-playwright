@@ -1,7 +1,8 @@
 import { PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/pages';
-import { knownBug } from '@support/known-bug';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
@@ -20,6 +21,11 @@ const junkOf = (length: number) => '!'.repeat(length);
 /** What the payment check answers when it passes, and the mock of it. */
 const PAYMENT_PASSED = { message: 'Payment was successful' };
 const paymentPasses = mock.respond('POST', '/payment/check', PAYMENT_PASSED);
+
+/** What the shop answers an accepted guest order with (201), as far as the page reads it. */
+/** The cart itself: once an order is placed the page deletes it (answered here, so the real cart is untouched). */
+const CART = /^\/carts\/[^/]+$/;
+const ORDER_ACCEPTED = { id: '01QALABFAKEINVOICE0000000', invoice_number: 'INV-2026999998' };
 
 test.describe('Checkout: payment step', () => {
   // None of these is about the postcode lookup, so it is answered by a mock: an outage of the real
@@ -93,9 +99,10 @@ test.describe('Checkout: payment step', () => {
 
       await payment.checkPayment();
 
-      const { payment_method: method, payment_details: details } = (await asked).postDataJSON();
-      expect(method).toBe('buy-now-pay-later');
-      expect(JSON.stringify(details), 'the chosen plan travels with the check').toContain(INSTALMENT_PLAN);
+      expect((await asked).postDataJSON(), 'the chosen plan travels with the check').toMatchObject({
+        payment_method: 'buy-now-pay-later',
+        payment_details: { monthly_installments: INSTALMENT_PLAN },
+      });
       await expect(payment.successMessage).toHaveText(PAYMENT_PASSED.message);
       await expect(payment.confirmButton).toBeEnabled();
     });
@@ -108,7 +115,7 @@ test.describe('Checkout: payment step', () => {
     await checkout.payment.choose('buy-now-pay-later');
     await expect(checkout.payment.field(FIELD.instalments)).toHaveValue('');
 
-    await expect(checkout.payment.checkPaymentButton, 'BUG-29: Check payment stays disabled until a plan is chosen').toBeDisabled({ timeout: 5_000 });
+    await expect(checkout.payment.checkPaymentButton, 'BUG-29: Check payment stays disabled until a plan is chosen').toBeDisabled({ timeout: BUG_TIMEOUT });
   });
 
   // Each junk value is as long as its field wants, so it is the characters that are refused, not the length.
@@ -153,9 +160,9 @@ test.describe('Checkout: payment step', () => {
   test('Credit Card cannot be checked while its fields are empty', { tag: ['@negative', '@bug'] }, async ({ checkout }) => {
     knownBug('BUG-16', 'with Credit Card chosen and every field empty, "Check payment" is enabled.');
     await checkout.payment.choose('credit-card');
-    await expect(checkout.payment.field('Credit Card Number')).toBeEmpty();
+    await expect(checkout.payment.field(FIELD.cardNumber)).toBeEmpty();
 
-    await expect(checkout.payment.checkPaymentButton, 'BUG-16: Check payment stays disabled while every card field is empty').toBeDisabled({ timeout: 5_000 });
+    await expect(checkout.payment.checkPaymentButton, 'BUG-16: Check payment stays disabled while every card field is empty').toBeDisabled({ timeout: BUG_TIMEOUT });
   });
 
   test.describe('when the payment check is declined', { tag: ['@mocked'] }, () => {
@@ -182,6 +189,22 @@ test.describe('Checkout: payment step', () => {
     });
   });
 
+  test.describe('when the order is accepted', { tag: ['@mocked'] }, () => {
+    // The twin of the self-hosted order in purchase-flow: the same page behaviour on every target, with no order placed.
+    test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', ORDER_ACCEPTED, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
+
+    test('the confirmation names the invoice number the shop issued', async ({ checkout, apiMock }) => {
+      const placed = apiMock.waitForRequest('POST', '/invoices/guest');
+      const cartDropped = apiMock.waitForRequest('DELETE', CART);
+
+      await checkout.payment.payOnDelivery();
+
+      expect((await placed).postDataJSON(), 'the order is placed for the chosen payment method').toMatchObject({ payment_method: 'cash-on-delivery' });
+      await expect(checkout.wizard.confirmation).toHaveText(`Thanks for your order! Your invoice number is ${ORDER_ACCEPTED.invoice_number}.`);
+      await cartDropped;
+    });
+  });
+
   const orderFailures = [
     { status: 500, json: { message: 'Server Error' } },
     { status: 422, json: { message: 'The billing_country does not match the entered address. The city does not belong to the selected country.' } },
@@ -197,7 +220,7 @@ test.describe('Checkout: payment step', () => {
         await checkout.payment.payOnDelivery();
 
         await expect(checkout.wizard.confirmation, 'BUG-17: a rejected order is not confirmed').toBeHidden();
-        await expect(checkout.shell.errorAlert.or(checkout.payment.errorMessage), 'BUG-17: the shopper is told the order failed').toBeVisible({ timeout: 5_000 });
+        await expect(failureFeedback(checkout.page).or(checkout.payment.errorMessage), 'BUG-17: the shopper is told the order failed').toBeVisible({ timeout: BUG_TIMEOUT });
       });
     });
   }

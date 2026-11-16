@@ -16,6 +16,19 @@ const ANONYMOUS_CART_WRITES: { method: HttpMethod; path: RegExp }[] = [
   { method: 'DELETE', path: /^\/carts\/[^/]+\/product\/[^/]+$/ },
 ];
 
+/** Whether the write guard lets a request through unmocked even on a target that is not self-hosted: the anonymous cart calls only. */
+export function isAllowedAnonymousWrite(method: string, pathname: string): boolean {
+  return ANONYMOUS_CART_WRITES.some((w) => w.method === method && w.path.test(pathname));
+}
+
+/** Whether `method` changes something on the server, so the write guard has a say. */
+export function isWrite(method: string): boolean {
+  return WRITES.has(method);
+}
+
+/** A position in the stream of requests a page has sent: `ApiMock.mark()`, `expectNoRequest(..., { since })`. */
+export type RequestMark = number & { readonly __requestMark: unique symbol };
+
 /** Options of `waitForRequest` / `waitForResponse`: give up after `timeout` ms (Playwright's own 30 s when unset). */
 export interface WaitOptions {
   timeout?: number;
@@ -105,6 +118,8 @@ export class ApiMock {
   private guardWrites: boolean;
   /** Writes the guard refused (see `blockUnmockedWrites`). */
   readonly blockedWrites: string[] = [];
+  /** Failures of the mock layer's own code (a `when` predicate that threw), which the test must not ignore: the `page` fixture asserts there are none. */
+  readonly handlerErrors: string[] = [];
   /** Every API request the page has sent since this mock was created, mocked or real, for `requestsTo`. */
   private readonly sent: { method: string; pathname: string }[] = [];
 
@@ -178,12 +193,20 @@ export class ApiMock {
   }
 
   /**
-   * How many requests to an endpoint the page has sent since this mock was created, mocked or
+   * A position in the page's requests, taken right before the action under test. `expectNoRequest(..., { since: mark })`
+   * and `requestsTo(..., { since: mark })` then count only what the action caused, not the page's own load.
+   */
+  mark(): RequestMark {
+    return this.sent.length as RequestMark;
+  }
+
+  /**
+   * How many requests to an endpoint the page has sent since this mock was created (or since `since`), mocked or
    * real. A snapshot, so it proves that something WAS sent (`expect.poll(...).toBeGreaterThan(0)`),
    * never that something was not: use `expectNoRequest` for that.
    */
-  requestsTo(method: HttpMethod, path: MockRoute['path']): number {
-    return this.sent.filter((r) => r.method === method && matches(path, r.pathname)).length;
+  requestsTo(method: HttpMethod, path: MockRoute['path'], { since = 0 as RequestMark }: { since?: RequestMark } = {}): number {
+    return this.sent.slice(since).filter((r) => r.method === method && matches(path, r.pathname)).length;
   }
 
   /**
@@ -196,12 +219,15 @@ export class ApiMock {
    * submit handlers in this app (the slowest is the 300 ms search debounce); pass a longer window for
    * a slower trigger. The cost is exactly `within` on a passing test, which is why a spec should call
    * this once, at the end of the scenario, not between steps.
+   *
+   * Without `since` every request since the mock was created counts, the page's own load included: a negative about
+   * an action takes `const before = apiMock.mark()` first and passes `{ since: before }`.
    */
-  async expectNoRequest(method: HttpMethod, path: MockRoute['path'], { within = 750 }: { within?: number } = {}): Promise<void> {
+  async expectNoRequest(method: HttpMethod, path: MockRoute['path'], { within = 750, since = 0 as RequestMark }: { within?: number; since?: RequestMark } = {}): Promise<void> {
     // Up front: a /g regex would otherwise throw from inside the listener, as an unhandled error, instead of from this call.
     assertPath(path);
     const label = (pathname: string) => `${method} ${pathname}`;
-    const early = this.sent.find((r) => r.method === method && matches(path, r.pathname));
+    const early = this.sent.slice(since).find((r) => r.method === method && matches(path, r.pathname));
     if (early) throw new Error(`Expected no ${label(early.pathname)}, but one was already sent`);
     const context = this.page.context();
     let onRequest!: (request: Request) => void;
@@ -254,6 +280,16 @@ export class ApiMock {
     return { response, body, json };
   }
 
+  /** Whether a delay rule applies to this request. A `when` that throws is a broken spec: it is recorded (the `page` fixture fails the test) and the request is not delayed. */
+  private holds(rule: DelayRule, request: Request): boolean {
+    try {
+      return rule.when(jsonBody(request));
+    } catch (error) {
+      this.handlerErrors.push(`the "when" of delay(${rule.method} ${rule.path}) threw: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
   private async handle(route: Route): Promise<void> {
     const request = route.request();
     const method = request.method();
@@ -265,15 +301,17 @@ export class ApiMock {
       return all.some((r) => matches(r.path, pathname)) ? route.fulfill({ status: 204, headers: CORS }) : route.fallback();
     }
     const match = all.find((r) => r.method === method && matches(r.path, pathname));
-    // Only the real answers of an endpoint are put in order, and the place is taken now, when the request
-    // arrives, not after a delay: the order is the order of asking.
+    // The answer this request gets is fixed now, when it arrives, not after a delay: the order is the order of asking,
+    // for a sequence of answers as well as for the real answers of a serialised endpoint.
+    const index = match ? (this.served.get(match) ?? 0) : 0;
+    if (match) this.served.set(match, index + 1);
     const serial = match ? undefined : this.serials.find((r) => r.method === method && matches(r.path, pathname));
     const turn = serial && takeTurn(serial);
     try {
       if (this.latencyMs) await sleep(this.latencyMs);
-      for (const { ms } of this.delays.filter((d) => d.method === method && matches(d.path, pathname) && d.when(jsonBody(request)))) await sleep(ms);
+      for (const { ms } of this.delays.filter((d) => d.method === method && matches(d.path, pathname) && this.holds(d, request))) await sleep(ms);
       if (!match) {
-        if (this.guardWrites && WRITES.has(method) && !ANONYMOUS_CART_WRITES.some((w) => w.method === method && w.path.test(pathname))) {
+        if (this.guardWrites && isWrite(method) && !isAllowedAnonymousWrite(method, pathname)) {
           this.blockedWrites.push(`${method} ${pathname}`);
           return await route.fulfill({ status: 418, headers: { ...CORS, 'content-type': 'application/json' }, body: '{"message":"Blocked by qa-lab: unmocked write"}' });
         }
@@ -283,10 +321,13 @@ export class ApiMock {
         const fetched = route.fetch();
         fetched.catch(() => undefined); // awaited only after the earlier turns: a rejection before that must not be unhandled
         await turn.earlier;
-        return await route.fulfill({ response: await fetched }).catch(() => route.abort('failed').catch(() => undefined));
+        // Only a page that went away mid-answer is tolerated (the request is aborted, as it would have been unrouted);
+        // any other failure to deliver the answer is a bug in the mock layer and must surface.
+        return await route.fulfill({ response: await fetched }).catch(async (error: unknown) => {
+          if (!isClosedPage(error)) throw error;
+          await route.abort('failed').catch(() => undefined);
+        });
       }
-      const index = this.served.get(match) ?? 0;
-      this.served.set(match, index + 1);
       const response = match.responses[Math.min(index, match.responses.length - 1)];
       if ('abort' in response) return await route.abort(response.abort);
       return await route.fulfill({
@@ -298,6 +339,11 @@ export class ApiMock {
       turn?.done();
     }
   }
+}
+
+/** An error Playwright raises when the page, context or browser is gone, or the route was already settled by that. */
+function isClosedPage(error: unknown): boolean {
+  return /has been closed|Target (?:page|closed)|Route is already handled|Browser closed/i.test(String((error as Error)?.message ?? error));
 }
 
 /** Takes the next place in an endpoint's order: `earlier` settles when everyone ahead is done, `done` frees the place. */

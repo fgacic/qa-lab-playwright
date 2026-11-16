@@ -27,16 +27,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// eslint-disable-next-line no-control-regex -- the escape character is what an ANSI colour sequence starts with
-const ANSI = /\u001b\[[0-9;]*m/g;
-const strip = (text) => (text ?? '').replace(ANSI, '');
+import { afterRerun, escapeRegExp, judge, strip } from './lib/pin-verdict.mjs';
+
 // When a pin is scheduled in several projects, it is verified in the first of these that has it.
 // A pin scheduled only in firefox or webkit is verified there, after installing that browser (see below).
 const PREFERRED = ['chromium', 'admin', 'account', 'firefox', 'webkit', 'mobile', 'perf'];
 const rank = (project) => (PREFERRED.includes(project) ? PREFERRED.indexOf(project) : PREFERRED.length);
 
-/** The id as a whole word: "BUG-1" must not be found in "BUG-12: ...". */
-const mentions = (message, id) => new RegExp(`(?<![A-Za-z0-9_-])${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_-])`).test(message);
 const BROWSER_OF = { firefox: 'firefox', webkit: 'webkit' };
 
 // Playwright empties test-results/ at the start of every run, so each pass writes its report here instead.
@@ -146,20 +143,10 @@ for (const { projects, out } of passes) {
 }
 
 // 4. Judge each pin.
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const reproduces = [];
 const fixed = [];
 const other = [];
 const notVerified = [];
-/** The verdict for one result: 'reproduces', 'fixed', or a problem line. */
-function judge(r) {
-  if (r.status === 'skipped' || r.last === 'skipped') return { notVerified: 'skipped' };
-  if (r.status === 'flaky') return { notVerified: 'flaky (passed on a retry), so it cannot be trusted either way' };
-  if (r.last === 'passed') return { fixed: true };
-  if (!r.id) return { other: 'no known-bug annotation, so no id to look for' };
-  const problem = whyNotThePin(r);
-  return problem ? { other: problem } : { reproduces: true };
-}
 let rerun = 0;
 for (const key of verifyIn.keys()) {
   const r = results.find((x) => x.key === key);
@@ -177,44 +164,12 @@ for (const key of verifyIn.keys()) {
       { VERIFY_BUGS: '1' },
     )).find((x) => x.key === key);
     const second = again ? judge(again) : undefined;
-    if (second?.reproduces) verdict = { notVerified: `failed for another reason, then reproduced on a rerun (${verdict.other}): flaky` };
-    else if (second?.fixed) verdict = { notVerified: `failed for another reason, then passed on a rerun (${verdict.other}): flaky` };
-    else if (second?.other) verdict = { other: `${verdict.other} (the same on a rerun)` };
+    verdict = afterRerun(verdict, second);
   }
   if (verdict.notVerified) notVerified.push(`${r.label}: ${verdict.notVerified}`);
   else if (verdict.fixed) fixed.push(r.label);
   else if (verdict.other) other.push(`${r.label}: ${verdict.other}`);
   else reproduces.push(r.label);
-}
-
-/**
- * Whether a failed locator expectation never found its element. Playwright's message says so in two ways: the
- * received value is `<element(s) not found>`, or the call log shows it waiting for the locator and never
- * "resolved to" anything. (A count or a hidden element still resolves, so a bug about those is not caught here.)
- */
-function matchedNoElement(message) {
-  if (!/expect\(locator\)/.test(message)) return false;
-  if (/Received[^\n]*<element\(s\) not found>/.test(message)) return true;
-  return /^\s*- waiting for /m.test(message) && !/resolved to/.test(message);
-}
-
-/** Why a failed pin is not the pinned bug, or undefined when it is. */
-function whyNotThePin({ id, errors, specFile, last, absence }) {
-  if (last === 'timedOut') return 'the test timed out';
-  if (!errors.length) return `failed with no error message`;
-  for (const [i, { message, file }] of errors.entries()) {
-    const where = i === 0 ? 'the test body' : `error ${i + 1}`;
-    if (!mentions(message, id)) return `${where} does not name "${id}": ${firstLine(message)}`;
-    if (!/expect\(/.test(message) || /Test timeout of|Target (page, context or browser|closed)|has been closed/.test(message)) {
-      return `${where} names "${id}" but is not an assertion failure: ${firstLine(message)}`;
-    }
-    if (!absence && matchedNoElement(message)) return `${where} names "${id}" but its locator matched no element, which proves nothing about the bug: add a precondition that the element exists (or pin an absence with { absence: true })`;
-    if (file && !file.endsWith(specFile)) return `${where} came from ${file.split('/').slice(-2).join('/')} (a fixture or teardown), not from the spec`;
-  }
-  return undefined;
-}
-function firstLine(message) {
-  return message.split('\n').find((line) => line.trim()) ?? '';
 }
 
 mkdirSync('test-results', { recursive: true });

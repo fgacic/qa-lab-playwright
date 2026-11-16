@@ -77,9 +77,13 @@ test.describe('Header navigation', () => {
     const { header } = homePage;
     await expect(header.homeLink).toBeHidden();
 
-    await header.menuToggle.click();
+    await header.toggleMenu();
 
     await expect(header.homeLink).toBeVisible();
     await expect(header.contactLink).toBeVisible();
+
+    await header.toggleMenu();
+
+    await expect(header.homeLink).toBeHidden();
   });
 });

@@ -23,7 +23,7 @@ import type { Measurement, Vitals } from '@fixtures/performance';
  * a second limit, the median recorded in tests/performance/baseline.json for the environment (ci, or this
  * machine) plus a margin sized by the spread seen when it was recorded (see fixtures/performance.ts), which
  * catches a slide that stays inside the good range. A test never rests on that ratchet alone: the budgets (and,
- * for the cart, a fixed CLS ceiling) hold everywhere, and an environment with no recorded baseline is held to
+ * for the cart, a fixed ceiling per metric) hold everywhere, and an environment with no recorded baseline is held to
  * them only and says so, as a test annotation and, on CI, a workflow warning.
  * Record the baseline anew after a deliberate change with `UPDATE_PERF_BASELINE=1 npm run test:perf`
  * (refused on a busy machine or from a failing run); the `ci` set comes from the record-perf-baseline workflow run.
@@ -54,23 +54,48 @@ const CART_INPUTS = 1; // Proceed to checkout
 const CONTACT_INPUTS = 1; // Send
 
 /**
- * The cart's fixed layout-shift ceiling, which holds with or without a baseline. The cart shifts by 0.107 in every sample
- * (the same footer bug as PERF-01, sitting a hair over the 0.1 budget), so 0.13 is that value plus about 20%: room for a font or a
- * pixel of rendering, but well under the 0.17 the same bug costs where it is unmistakable, so a cart that
- * gets visibly worse fails even on a runner whose baseline has not been committed yet.
+ * Fixed ceilings, one per measurement, that hold on every machine with or without a recorded baseline. The CI baseline cannot be
+ * recorded without a push, so on a runner these are what makes a perf test mean more than "inside Google's good limits".
+ * Each is derived from the values recorded on an idle machine (tests/performance/baseline.json) with the margin stated here:
+ * - LCP: the recorded median times 1.5, rounded up to 50 ms. A shared runner is slower than a laptop, but not by half again, and
+ *   the result stays well under the 2 500 ms budget (recorded 1 252, 1 248, 1 288, 1 068, 1 064 ms).
+ * - TBT: 100 ms, half the 200 ms budget and twice the 50 ms noise floor. Recorded 0 on every page: the shop does not block the
+ *   main thread under 4x throttling, and a 100 ms block is a real regression, not noise.
+ * - INP proxy: 80 ms, the recorded median (16 to 24 ms) plus the widest margin the baseline allows (twice the 32 ms noise
+ *   floor), rounded up. A slide to 80 ms is a quarter of the way to the 200 ms budget and already visible.
+ * - CLS, on the slow API: the recorded median plus about 20%, rounded up to 0.01 (the cart's ceiling, below, is built the same way).
+ *   The product page shifts 0.316 with a spread of 0.082 (the race between first paint and the API), so its ceiling allows the
+ *   0.38 the same bug reaches in a bad sample.
  */
-const CART_CLS_CEILING = 0.13;
+const CEILING: Record<string, Partial<Vitals>> = {
+  home: { lcp: 1_900, tbt: 100, inp: 80 },
+  search: { lcp: 1_900, tbt: 100, inp: 80 },
+  product: { lcp: 1_950, tbt: 100, inp: 80 },
+  cart: { lcp: 1_650, tbt: 100, inp: 80 },
+  contact: { lcp: 1_600, tbt: 100, inp: 80 },
+  'home-slow-api': { cls: 0.31 },
+  'product-slow-api': { cls: 0.4 },
+  'contact-slow-api': { cls: 0.21 },
+  // The cart shifts by 0.107 in every sample (the same footer bug as PERF-01, a hair over the 0.1 budget): 0.13 is that plus about 20%,
+  // room for a font or a pixel of rendering, well under the 0.17 the bug costs where it is unmistakable.
+  'cart-slow-api': { cls: 0.13 },
+};
 
-/** The ratchet on layout shift, where a baseline exists: the page may not shift more than it was recorded to. */
-function expectNoWorseShift(median: Vitals, limit: Partial<Vitals> | undefined, page: string) {
-  if (limit) expect.soft(median.cls, `CLS of ${page} against its baseline`).toBeLessThanOrEqual(limit.cls!);
+/**
+ * The layout-shift limits of a pinned page: the fixed ceiling holds everywhere, and the baseline, where one is recorded and not
+ * noisy, is the tighter ratchet under it, so a footer that jumps further cannot pass unseen.
+ */
+function expectNoWorseShift({ name, median }: Measurement, limit: Partial<Vitals> | undefined, page: string) {
+  expect.soft(median.cls, `CLS of ${page} against its fixed ceiling (CEILING['${name}'])`).toBeLessThanOrEqual(CEILING[name].cls!);
+  if (limit?.cls !== undefined) expect.soft(median.cls, `CLS of ${page} against its baseline`).toBeLessThanOrEqual(limit.cls);
 }
 
 /**
  * Speed and responsiveness: the page is loaded, used once, and judged by what that cost. The budgets are the
  * assertion that holds everywhere; the baseline limits below them are a ratchet, applied where one is recorded.
  */
-function expectResponsive({ median, observed, expectedInputs }: Measurement, limit: Partial<Vitals> | undefined) {
+function expectResponsive({ name, median, observed, expectedInputs }: Measurement, limit: Partial<Vitals> | undefined) {
+  expect.soft(observed.fcpObserved, 'First Contentful Paint was observed, which opens the TBT window').toBe(true);
   expect.soft(observed.lcpEntries, 'an LCP entry was observed').toBeGreaterThan(0);
   // What the scenario declared it does is what the page received, and the browser timed an interaction out of it: a click that
   // stopped landing would leave a load that is judged as if it had been used.
@@ -81,10 +106,14 @@ function expectResponsive({ median, observed, expectedInputs }: Measurement, lim
   expect.soft(median.lcp, 'LCP (ms)').toBeLessThanOrEqual(BUDGET.lcp);
   expect.soft(median.tbt, 'TBT (ms)').toBeLessThanOrEqual(BUDGET.tbt);
   expect.soft(median.inp, 'INP proxy (ms)').toBeLessThanOrEqual(BUDGET.inp);
-  if (!limit) return; // no baseline for this environment: vitals.baseline annotated (and, on CI, warned); the budgets above still hold
-  expect.soft(median.lcp, 'LCP (ms) against its baseline').toBeLessThanOrEqual(limit.lcp!);
-  expect.soft(median.tbt, 'TBT (ms) against its baseline').toBeLessThanOrEqual(limit.tbt!);
-  expect.soft(median.inp, 'INP proxy (ms) against its baseline').toBeLessThanOrEqual(limit.inp!);
+  // The fixed ceilings hold on every machine, with or without a baseline.
+  expect.soft(median.lcp, `LCP (ms) against its fixed ceiling (CEILING['${name}'])`).toBeLessThanOrEqual(CEILING[name].lcp!);
+  expect.soft(median.tbt, `TBT (ms) against its fixed ceiling (CEILING['${name}'])`).toBeLessThanOrEqual(CEILING[name].tbt!);
+  expect.soft(median.inp, `INP proxy (ms) against its fixed ceiling (CEILING['${name}'])`).toBeLessThanOrEqual(CEILING[name].inp!);
+  // The baseline ratchet, tighter, where one is recorded for this environment and a metric's recording was not too noisy to trust.
+  if (limit?.lcp !== undefined) expect.soft(median.lcp, 'LCP (ms) against its baseline').toBeLessThanOrEqual(limit.lcp);
+  if (limit?.tbt !== undefined) expect.soft(median.tbt, 'TBT (ms) against its baseline').toBeLessThanOrEqual(limit.tbt);
+  if (limit?.inp !== undefined) expect.soft(median.inp, 'INP proxy (ms) against its baseline').toBeLessThanOrEqual(limit.inp);
 }
 
 /**
@@ -205,21 +234,21 @@ test.describe('Layout shift of the pinned pages against their baseline, on a 500
     const measurement = await vitals.measure('home-slow-api', () => expect(homePage.grid.cards.first()).toBeVisible(), { inputs: 0 });
 
     expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
-    expectNoWorseShift(measurement.median, vitals.baseline(measurement, ['cls']), 'home');
+    expectNoWorseShift(measurement, vitals.baseline(measurement, ['cls']), 'home');
   });
 
   test('product page shifts no more than its recorded baseline', async ({ productPage, vitals }) => {
     const measurement = await vitals.measure('product-slow-api', () => expect(productPage.addToCartButton).toBeVisible(), { inputs: 0 });
 
     expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
-    expectNoWorseShift(measurement.median, vitals.baseline(measurement, ['cls']), 'the product page');
+    expectNoWorseShift(measurement, vitals.baseline(measurement, ['cls']), 'the product page');
   });
 
   test('contact page shifts no more than its recorded baseline', async ({ contactPage, vitals }) => {
     const measurement = await vitals.measure('contact-slow-api', () => expect(contactPage.sendButton).toBeVisible(), { inputs: 0 });
 
     expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
-    expectNoWorseShift(measurement.median, vitals.baseline(measurement, ['cls']), 'the contact page');
+    expectNoWorseShift(measurement, vitals.baseline(measurement, ['cls']), 'the contact page');
   });
 });
 
@@ -233,12 +262,10 @@ test.describe('Layout stability of the cart on a 500 ms API (self-hosted)', { ta
 
   test('cart shows no worse a layout shift than its ceiling and its recorded baseline', async ({ checkout, vitals }) => {
     const measurement = await vitals.measure('cart-slow-api', () => expect(checkout.cart.table.rows.first()).toBeVisible(), { inputs: 0 });
-    const limit = vitals.baseline(measurement, ['cls']);
 
     expect.soft(measurement.observed.lcpEntries, 'the page painted').toBeGreaterThan(0);
     // The ceiling holds on every environment; the baseline, where recorded, is the tighter ratchet under it.
-    expect.soft(measurement.median.cls, `CLS of the cart against its fixed ceiling (see CART_CLS_CEILING)`).toBeLessThanOrEqual(CART_CLS_CEILING);
-    expectNoWorseShift(measurement.median, limit, 'the cart');
+    expectNoWorseShift(measurement, vitals.baseline(measurement, ['cls']), 'the cart');
   });
 });
 
@@ -253,22 +280,13 @@ test.describe('Performance collector (control)', { tag: ['@perf', '@self-hosted'
   const EXPECTED_TBT = BLOCKING_MS - 50;
 
   test('counts a known long task as blocking time', async ({ homePage, vitals }) => {
-    // Run from a timer, i.e. as a task of the page's own event loop: a script evaluated over the debugging protocol is not
-    // reported as a long task, so blocking inside evaluate() itself would leave the observer with nothing to count.
-    const block = (ms: number) =>
-      homePage.page.evaluate(
-        (duration) =>
-          new Promise<void>((resolve) =>
-            setTimeout(() => {
-              const end = performance.now() + duration;
-              while (performance.now() < end);
-              resolve();
-            }, 0),
-          ),
-        ms,
-      );
+    // After the first paint: blocking time is counted from First Contentful Paint on, so the task must start once the page has drawn.
+    const block = async () => {
+      await expect(homePage.grid.cards.first()).toBeVisible();
+      await vitals.blockMainThread(BLOCKING_MS);
+    };
 
-    const { median, observed } = await vitals.measure('long-task-control', () => block(BLOCKING_MS), { inputs: 0, samples: 3 });
+    const { median, observed } = await vitals.measure('long-task-control', block, { inputs: 0, samples: 3 });
 
     expect(observed.longTaskObserver, 'the browser reports long tasks').toBe(true);
     expect(median.tbt, `a ${BLOCKING_MS} ms task counted as blocking time (ms)`).toBeGreaterThanOrEqual(EXPECTED_TBT);

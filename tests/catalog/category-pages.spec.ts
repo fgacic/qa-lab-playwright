@@ -1,16 +1,22 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { allowLoggedFailure } from '@pages/admin/alerts';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
-test.describe('Category pages', () => {
-  const categories = [
-    { slug: 'hand-tools', title: 'Category: Hand Tools' },
-    { slug: 'power-tools', title: 'Category: Power Tools' },
-    { slug: 'other', title: 'Category: Other' },
-  ];
+/** The parent categories of the catalogue, by slug, with the title their page carries. */
+const HAND_TOOLS = { slug: 'hand-tools', title: 'Category: Hand Tools' };
+const POWER_TOOLS = { slug: 'power-tools', title: 'Category: Power Tools' };
+const OTHER = { slug: 'other', title: 'Category: Other' };
+const CATEGORIES = [HAND_TOOLS, POWER_TOOLS, OTHER];
+/** A subcategory the seed leaves without products. */
+const SPECIAL_TOOLS = { slug: 'special-tools', title: 'Category: Special Tools' };
+/** A slug no category has. */
+const UNKNOWN_SLUG = 'qa-lab-unknown';
 
-  for (const { slug, title } of categories) {
+test.describe('Category pages', () => {
+  for (const { slug, title } of CATEGORIES) {
     test(`/category/${slug} lists that category's products`, async ({ categoryPage, apiMock, api }) => {
       const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
 
@@ -37,44 +43,48 @@ test.describe('Category pages', () => {
     });
   }
 
-  test('every card shows a picture with the product name as alt text', async ({ categoryPage, apiMock }) => {
-    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === 'hand-tools');
-    await categoryPage.open('hand-tools');
-    const { json: found } = await results;
-    await expect(categoryPage.grid.cards).toHaveCount(found.data.length);
+  for (const { slug } of CATEGORIES) {
+    test(`every card of /category/${slug} shows a picture with the product name as alt text`, async ({ categoryPage, apiMock }) => {
+      const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
+      await categoryPage.open(slug);
+      const { json: found } = await results;
+      expect(found.data, `"${slug}" should list products`).not.toHaveLength(0);
+      await expect(categoryPage.grid.cards).toHaveCount(found.data.length);
 
-    for (const [index, product] of found.data.entries()) {
-      await expect(categoryPage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
-    }
-  });
+      for (const [index, product] of found.data.entries()) {
+        await expect(categoryPage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
+      }
+    });
+  }
 
   test.describe('when a category has no products', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));
 
     test('the page shows the empty state', async ({ categoryPage }) => {
-      await categoryPage.open('special-tools');
+      await categoryPage.open(SPECIAL_TOOLS.slug);
 
-      await expect(categoryPage.title).toHaveText('Category: Special Tools');
+      await expect(categoryPage.title).toHaveText(SPECIAL_TOOLS.title);
       await expect(categoryPage.grid.emptyState).toBeVisible();
     });
   });
 
   test('an unknown category says it does not exist', { tag: ['@negative', '@bug'] }, async ({ categoryPage }) => {
     knownBug('BUG-06', '/category/<anything> invents a page titled after the slug, with an empty grid and no "not found".', { absence: true });
-    await categoryPage.open('qa-lab-unknown');
+    await categoryPage.open(UNKNOWN_SLUG);
 
-    await expect(categoryPage.notFoundMessage, 'BUG-06: an unknown category says it does not exist').toBeVisible({ timeout: 5_000 });
+    await expect(categoryPage.notFoundMessage, 'BUG-06: an unknown category says it does not exist').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
   test.describe('when the category products fail to load', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('QUERY', '/products', 500)));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the shopper is told the products could not be loaded', async ({ categoryPage }) => {
       knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.', { absence: true });
-      await categoryPage.open('hand-tools');
-      await expect(categoryPage.title).toHaveText('Category: Hand Tools');
+      await categoryPage.open(HAND_TOOLS.slug);
+      await expect(categoryPage.title).toHaveText(HAND_TOOLS.title);
 
-      await expect(categoryPage.shell.errorAlert, 'BUG-04: a failed product list is reported').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(categoryPage.page).first(), 'BUG-04: a failed product list is reported').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

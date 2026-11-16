@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { perfAloneViolation, overridesReporter, selectedProjects } from './src/support/run-guard';
 import { ADMIN_STORAGE_STATE, BASE_URL, CUSTOMER_STORAGE_STATE, IS_SELF_HOSTED, PROJECTS, RUN_ACCOUNT_TESTS, RUN_ADMIN_TESTS, TARGET } from './src/support/env';
 
 const isCI = !!process.env.CI;
@@ -13,7 +14,7 @@ const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
 const tagged = (...names: string[]) => new RegExp(`@(?:${names.join('|')})(?![\\w-])`);
 const ownProject = tagged('account', 'admin', 'visual', 'perf', 'framework'); // these have projects of their own
 const phoneOnly = tagged('mobile');
-// @api: no browser is involved, so running it once per browser would only repeat the same requests.
+// @api: no browser is involved (those specs use `apiOnlyTest`, which opens no context), so running it once per browser would only repeat the same requests.
 const chromiumOnly = tagged('axe', 'i18n', 'api');
 const perfOnly = tagged('perf'); // measured alone, in the perf project
 const notOnThisTarget = IS_SELF_HOSTED ? tagged('live-only') : tagged('self-hosted');
@@ -34,7 +35,7 @@ const notOnThisTarget = IS_SELF_HOSTED ? tagged('live-only') : tagged('self-host
  * - visual: screenshot comparisons, inside the Playwright Docker image only.
  * @self-hosted specs never run against the live site, @live-only specs only there.
  */
-export default defineConfig({
+const config = defineConfig({
   testDir: './tests',
   // Our own container answers fast, so a hung test fails early there; the shared live site gets the long budget.
   timeout: IS_SELF_HOSTED ? 45_000 : 90_000,
@@ -48,6 +49,10 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
   fullyParallel: true,
   forbidOnly: isCI,
+  // A target that went down fails every test the same way: stop a CI shard after this many failures instead of burning its 30 minutes.
+  maxFailures: isCI ? 30 : 0,
+  // Refuses to start against a target that is not answering (src/support/preflight.ts).
+  globalSetup: './src/support/preflight.ts',
   retries: IS_SELF_HOSTED ? 1 : 2,
   // On our own container a test that needed its retry is a flake to fix, not a green run.
   failOnFlakyTests: isCI && IS_SELF_HOSTED,
@@ -60,6 +65,7 @@ export default defineConfig({
       : ['html', { open: 'never' }],
     ['allure-playwright', { resultsDir: 'allure-results', detail: true, suiteTitle: false, environmentInfo: { target: TARGET, baseURL: BASE_URL } }],
     // Refuses perf next to other projects, and fails a live run that a bot challenge skipped too much of.
+    // A command-line `--reporter` replaces this list: the perf rule is also enforced below, at load time; the skip-ratio check is not.
     ['./src/support/run-guard-reporter.ts'],
   ],
   use: {
@@ -135,3 +141,12 @@ export default defineConfig({
       : []),
   ],
 });
+
+// The perf budgets are measured alone. The reporter above refuses a mixed run, but a `--reporter` flag replaces it, so
+// the command line is checked here as well. `--list` schedules nothing.
+if (!process.argv.includes('--list') && overridesReporter(process.argv)) {
+  const violation = perfAloneViolation(selectedProjects(process.argv, config.projects?.map((p) => p.name ?? '') ?? []));
+  if (violation) throw new Error(violation);
+}
+
+export default config;

@@ -76,6 +76,18 @@ export class ChatWidget {
     await this.sendButton.click();
   }
 
+  /** The same, with the keyboard: Enter in the message box instead of a click on the send button. */
+  @step('Send "{0}" in the chat with Enter')
+  async sendWithEnter(text: string): Promise<void> {
+    await this.input.fill(text);
+    await this.input.press('Enter');
+  }
+
+  @step('Close the chat with Escape')
+  async closeWithEscape(): Promise<void> {
+    await this.input.press('Escape');
+  }
+
   @step('Go back to the chat menu')
   async backToMenu(): Promise<void> {
     await this.window.getByRole('button', { name: 'Back to menu' }).last().click();

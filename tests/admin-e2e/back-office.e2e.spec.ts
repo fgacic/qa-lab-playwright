@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import type { APIRequestContext } from '@playwright/test';
 import { expect, test } from '@fixtures';
-import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import type { AdminProductForm } from '@pages/admin/AdminForms';
+import type { AdminListPage } from '@pages/admin/AdminListPage';
+import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import type { HomePage } from '@pages/HomePage';
 import { API_URL } from '@support/env';
-import { knownBug } from '@support/known-bug';
-import { fakeGuest, uniqueEmail } from '@support/test-data';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 
 /**
  * Real back-office journeys against the real admin API, signed in from the `admin` project's
@@ -13,9 +17,9 @@ import { fakeGuest, uniqueEmail } from '@support/test-data';
  * shop's default list, categories, filters, sorting and pagination leave rentals out, so no catalogue spec
  * running at the same time (the `mobile` smoke set shares this project's pass) can see it or have its
  * totals shift. The shop's search still finds a rental, which is all these journeys need. (The rentals
- * page is the one list that shows it; no spec of the `admin` pass reads that page.) `createdProducts`
- * is automatic here: it takes the id from the create response as it arrives and deletes it in
- * teardown, pass or fail, so even a test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
+ * page is the one list that shows it; no spec of the `admin` pass reads that page.) A test that creates
+ * a product asks for `createdProducts`: it takes the id from the create response as it arrives and deletes
+ * it in teardown, pass or fail, so even a test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
  * message (DELETE /invoices/{id} and /messages/{id} answer 405), so those two tests leave one
  * uniquely named record each behind: they are tagged @self-hosted, never run on the live site,
  * and are harmless on the throwaway database of the self-hosted target, which is rebuilt for
@@ -26,44 +30,66 @@ test.use({ adminSession: 'storage-state' });
 /** Unique per test and per repeat, so parallel workers and retries never find each other's data. */
 const unique = () => randomUUID().slice(0, 8);
 
+const PRODUCT_DESCRIPTION = 'Created by the qa-lab suite; removed when the test ends.';
+
+/** Creates a rental product through the back office's form and waits for the confirmation. */
+async function createProduct(adminProducts: AdminListPage<AdminProductForm>, input: { name: string; stock: string; price: string }): Promise<void> {
+  const form = await adminProducts.add();
+  await form.fillIn({ ...input, description: PRODUCT_DESCRIPTION, rental: true });
+  await form.chrome.save();
+  await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
+}
+
+/** Finds the product in the back office's list by its name and sets a new price on its edit form. */
+async function repriceProduct(adminProducts: AdminListPage<AdminProductForm>, name: string, price: string): Promise<void> {
+  await adminProducts.open();
+  await adminProducts.search.searchFor(name);
+  const edit = await adminProducts.edit(name);
+  // Wait for the form to load the product, or the load overwrites what is typed.
+  await expect(edit.name).toHaveValue(name);
+  // The edit form loads neither the stock (ADM-05) nor brand, category and image (ADM-09);
+  // choosing waits for their options to arrive. It does load the rental flag, which keeps the product out of the catalogue.
+  await expect(edit.rental).toBeChecked();
+  await edit.stock.fill('3');
+  await edit.chooseRelations();
+  await edit.price.fill(price);
+  await edit.chrome.save();
+  await expect(edit.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
+}
+
+/** Removes a user the API accepted, if there is one: once ADM-20 is fixed the form creates it, and the shop's user list must not grow. */
+async function removeUser(request: APIRequestContext, token: string, id: string | undefined): Promise<void> {
+  if (!id) return;
+  const response = await request.delete(`${API_URL}/users/${id}`, { headers: { authorization: `Bearer ${token}` } });
+  if (!response.ok()) throw new Error(`Could not remove the user ${id}: DELETE answered ${response.status()}`);
+}
+
+/** The shop's own search for a product name: the way a shopper would look for it. */
+async function searchShopFor(home: HomePage, name: string): Promise<void> {
+  await home.open();
+  await home.search.searchFor(name);
+}
+
 test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   // No word under three letters in this name: search requires every word, and MariaDB's full-text
   // index ignores short ones (BUG-28, pinned below).
   test('a product created in the back office is listed in the shop, repriced, then deleted', { tag: ['@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
     const name = `QaLab Product ${unique()}`;
+
     await test.step('Create the product in the back office', async () => {
-      const form = await adminProducts.add();
-      await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '3', price: '12.34', rental: true });
-      await form.chrome.save();
-      await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
+      await createProduct(adminProducts, { name, stock: '3', price: '12.34' });
       await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
     });
 
     await test.step('The shop lists it at the entered price', async () => {
-      await shop.home.open();
-      await shop.home.search.searchFor(name);
+      await searchShopFor(shop.home, name);
       await expect(shop.home.grid.card(name).price).toHaveText('$12.34');
     });
 
-    await test.step('Reprice it in the back office', async () => {
-      await adminProducts.open();
-      await adminProducts.search.searchFor(name);
-      const edit = await adminProducts.edit(name);
-      // Wait for the form to load the product, or the load overwrites what is typed.
-      await expect(edit.name).toHaveValue(name);
-      // The edit form loads neither the stock (ADM-05) nor brand, category and image (ADM-09);
-      // choosing waits for their options to arrive. It does load the rental flag, which keeps the product out of the catalogue.
-      await expect(edit.rental).toBeChecked();
-      await edit.stock.fill('3');
-      await edit.chooseRelations();
-      await edit.price.fill('23.45');
-      await edit.chrome.save();
-      await expect(edit.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
-    });
+    await test.step('Reprice it in the back office', () => repriceProduct(adminProducts, name, '23.45'));
 
     await test.step('The shop shows the new price', async () => {
-      await shop.home.open();
-      await shop.home.search.searchFor(name);
+      await searchShopFor(shop.home, name);
       await expect(shop.home.grid.card(name).price).toHaveText('$23.45');
     });
 
@@ -73,8 +99,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
       await adminProducts.table.delete(name);
       await expect(adminProducts.feedback.filter({ hasText: ADMIN_MESSAGES.productDeleted })).toBeVisible();
       await expect.poll(() => createdProducts.pending(), 'the UI delete really removed the product').toHaveLength(0);
-      await shop.home.open();
-      await shop.home.search.searchFor(name);
+      await searchShopFor(shop.home, name);
       await expect(shop.home.grid.emptyState).toBeVisible();
     });
   });
@@ -82,10 +107,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   test('a product with a short word in its name is found by its full name', { tag: ['@bug'] }, async ({ adminProducts, shop, createdProducts, apiMock }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
     const name = `Set of QaLab Pliers ${unique()}`;
-    const form = await adminProducts.add();
-    await form.fillIn({ name, description: 'Created by the qa-lab suite; removed when the test ends.', stock: '1', price: '5.00', rental: true });
-    await form.chrome.save();
-    await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
+    await createProduct(adminProducts, { name, stock: '1', price: '5.00' });
     await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
     await shop.home.open();
@@ -99,8 +121,9 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(shop.home.grid.card(name).root, 'BUG-28: a full-name search finds the product').toBeVisible();
   });
 
-  test('a brand whose slug is taken is refused by the real API', { tag: ['@negative', '@bug'] }, async ({ adminBrands, brandFactory, apiMock }) => {
+  test('a brand whose slug is taken is refused by the real API', { tag: ['@negative', '@bug'] }, async ({ adminBrands, brandFactory, apiMock, consoleGuard }) => {
     knownBug('ADM-12', 'a brand or category the API refuses to save (409, slug taken) leaves the form as it was: no message, no "saved", nothing.', { absence: true });
+    allowLoggedFailure(consoleGuard); // the SPA logs the 409 it is about to say nothing about
     const taken = await brandFactory.create();
     const form = await adminBrands.add();
     const answered = apiMock.waitForResponse<{ slug?: string[] }>('POST', '/brands');
@@ -112,7 +135,29 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     // What the real backend says holds whether or not the form shows it: the refusal, with its reason, keyed by field.
     expect(response.status(), 'the real API refuses a second brand with the same slug').toBe(409);
     expect(json.slug?.[0], 'the reason the real API gives').toMatch(/already exists/);
-    await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: 2_000 });
+    await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: BUG_TIMEOUT });
+  });
+
+  // The API does accept this user when it is registered with the fields it names (probed on the self-hosted shop); what it refuses is what the form sends.
+  test('a user added in the back office is created by the real API', { tag: ['@self-hosted', '@negative', '@bug'] }, async ({ adminUsers, apiMock, request, adminToken }) => {
+    knownBug('ADM-20', 'the back office cannot create a user: the add form sends empty `enabled` and `failed_login_attempts` values, and the real API answers 500 "Something went wrong".');
+    const customer = fakeCustomer();
+    const form = await adminUsers.add();
+    const answered = apiMock.waitForResponse<{ id?: string }>('POST', '/users/register');
+
+    await form.fillIn({
+      firstName: customer.firstName, lastName: customer.lastName, dateOfBirth: customer.dateOfBirth, email: customer.email, phone: customer.phone, password: customer.password,
+      street: customer.address.street, city: customer.address.city, state: customer.address.state, postalCode: customer.address.postalCode, country: customer.address.country,
+    });
+    await form.chrome.save();
+    const { response, json } = await answered;
+
+    try {
+      expect(response.status(), 'ADM-20: the real API accepts the user the add form sends').toBe(201);
+      await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved), 'ADM-20: the form confirms the new user').toBeVisible({ timeout: BUG_TIMEOUT });
+    } finally {
+      await removeUser(request, await adminToken(), json?.id);
+    }
   });
 
   test('an order placed by a guest can be marked as shipped', { tag: ['@self-hosted'] }, async ({ api, catalog, adminOrders }) => {
@@ -160,7 +205,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(adminStatistics.report('Top 10 Most Purchased Products').first()).toContainText(purchased[0].name);
   });
 
-  test('the monthly sales report is fed twelve months and has a chart area', async ({ adminMonthlySales, apiMock }) => {
+  test('the real monthly sales answer has twelve months and the report draws its chart area', async ({ adminMonthlySales, apiMock }) => {
     // A <canvas> has nothing to read, so the data is checked on the answer that feeds it.
     const answered = apiMock.waitForResponse<unknown[]>('GET', '/reports/average-sales-per-month');
     await adminMonthlySales.open();

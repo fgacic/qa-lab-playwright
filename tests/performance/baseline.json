@@ -2,7 +2,7 @@
   "local-aca6f12f06": {
     "home": {
       "lcp": {
-        "median": 1252,
+        "median": 1236,
         "spread": 20
       },
       "tbt": {
@@ -11,27 +11,13 @@
       },
       "inp": {
         "median": 16,
-        "spread": 40
+        "spread": 48
       }
     },
     "search": {
       "lcp": {
-        "median": 1248,
-        "spread": 20
-      },
-      "tbt": {
-        "median": 0,
-        "spread": 0
-      },
-      "inp": {
-        "median": 24,
-        "spread": 56
-      }
-    },
-    "product": {
-      "lcp": {
-        "median": 1288,
-        "spread": 20
+        "median": 1236,
+        "spread": 28
       },
       "tbt": {
         "median": 0,
@@ -42,32 +28,46 @@
         "spread": 40
       }
     },
-    "cart": {
+    "product": {
       "lcp": {
-        "median": 1068,
-        "spread": 16
-      },
-      "tbt": {
-        "median": 0,
-        "spread": 20
-      },
-      "inp": {
-        "median": 24,
-        "spread": 48
-      }
-    },
-    "contact": {
-      "lcp": {
-        "median": 1064,
-        "spread": 8
+        "median": 1268,
+        "spread": 96
       },
       "tbt": {
         "median": 0,
         "spread": 0
       },
       "inp": {
-        "median": 16,
+        "median": 24,
         "spread": 48
+      }
+    },
+    "cart": {
+      "lcp": {
+        "median": 1044,
+        "spread": 8
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 14
+      },
+      "inp": {
+        "median": 16,
+        "spread": 32
+      }
+    },
+    "contact": {
+      "lcp": {
+        "median": 1048,
+        "spread": 12
+      },
+      "tbt": {
+        "median": 0,
+        "spread": 24
+      },
+      "inp": {
+        "median": 16,
+        "spread": 64
       }
     },
     "home-slow-api": {

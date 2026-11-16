@@ -8,8 +8,9 @@ import { expect, test as base, type Page, type TestInfo } from '@playwright/test
  * Web-vitals-style measurements from the browser's own PerformanceObserver entries:
  * - LCP: the last largest-contentful-paint entry before the first interaction;
  * - CLS: the sum of layout shifts not caused by recent input (one session, for simplicity);
- * - TBT: the sum of long-task time above 50 ms before the first interaction, a lab proxy for
- *   responsiveness during load (what the interaction itself costs is the INP proxy's business);
+ * - TBT: the sum of long-task time above 50 ms in tasks that start at or after First Contentful Paint and before the
+ *   first interaction, a lab proxy for responsiveness during load (Lighthouse's window starts at FCP too; what the
+ *   interaction itself costs is the INP proxy's business, and a task that began before FCP is the page's blank start, not blocking);
  * - INP proxy: the longest duration (input to next paint) of the interactions a test makes.
  * The entry types used are Chromium's (WebKit has no LCP, layout-shift or longtask entries).
  *
@@ -36,6 +37,8 @@ export interface Vitals {
 
 /** How much evidence stands behind a measurement: a 0 for "nothing observed" must not read as "fast". */
 export interface Observed {
+  /** Whether First Contentful Paint was reported, which opens the TBT window: without it a TBT of 0 means "no window", not "no blocking". */
+  fcpObserved: boolean;
   /** largest-contentful-paint entries seen. */
   lcpEntries: number;
   /** Discrete interactions (clicks, key presses) the browser reported to the event-timing API: only those that took 16 ms or more, plus the first input. */
@@ -76,7 +79,9 @@ export interface Measurement {
  * long before the 200 ms budget. The cap is what keeps a noisy recording from blessing its own noise: the INP proxy of a
  * page recorded with a spread of 24 ms would otherwise be allowed 72 ms on top of a median of 16, four times its value, and a
  * slide to 80 ms would pass. With the cap the same page may reach 16 + 64 = 80 ms at most, and a recording that needs more than
- * that is too noisy to be a baseline (record it again on an idle machine) rather than one that deserves a wider margin. It does not try to absorb a busy machine: a floor widened after a failure under a load
+ * that is too noisy to be a baseline (record it again on an idle machine) rather than one that deserves a wider margin: the rule
+ * is `MARGIN_SPREADS x spread > cap` (see isNoisy), and a metric that breaks it keeps its median in the file but has no baseline
+ * ratchet (it is annotated as noisy, and only the spec's fixed limits hold it, which is what they are for). It does not try to absorb a busy machine: a floor widened after a failure under a load
  * average of 11 to 34 (the proxy reached 72 ms) only hides what is wrong with that measurement. Budgets are measured
  * alone on an idle machine, and the baseline is recorded on one (see refusing to record, below).
  */
@@ -87,6 +92,13 @@ const MARGIN_CAP_FLOORS = 2;
 const NOISE_FLOOR: Vitals = { lcp: 100, cls: 0.02, tbt: 50, inp: 32 };
 /** A baseline is recorded only on an idle machine: the one-minute load average must not exceed this. */
 const MAX_LOAD_TO_RECORD = 4;
+/**
+ * The one-minute load average as the run began, before its first measurement. What a recording must not compete with is
+ * the rest of the machine, not the throttled loads the run itself makes: those raise the average past the limit a few
+ * measurements in, and judging by the later reading would refuse every run for its own load. One worker runs the perf
+ * project, so the first `measure` of the process is the first work of the run.
+ */
+let loadAtRunStart: number | undefined;
 
 /**
  * Where the medians recorded on the self-hosted shop live, committed with the specs, one set per
@@ -136,8 +148,9 @@ export interface PerformanceFixtures {
   vitalsCollector: void;
   vitals: {
     /**
-     * Runs `scenario` (the visit being budgeted) on the page as it is now, then again after
-     * reloading its address for every further sample, and returns the median.
+     * Runs `scenario` (the visit being budgeted) once per sample, each time on a fresh navigation to the address the fixtures
+     * opened (the first sample too, so no sample is a page the others are not), and returns the median. Every run annotates the
+     * host's one-minute load average, so a number can be read against how busy the machine was.
      *
      * `inputs` is how many clicks and key presses the scenario makes (0 for a page that is only loaded); the collector counts
      * the trusted ones the page really received and `Measurement.observed.inputs` is held to it, so a scenario that stops
@@ -156,6 +169,12 @@ export interface PerformanceFixtures {
      * so the spec's fixed limits are all that apply and the run says so.
      */
     baseline: (measurement: Measurement, metrics: (keyof Vitals)[]) => Partial<Vitals> | undefined;
+    /**
+     * Blocks the page's main thread for `ms`, from a timer, as a task of the page's own event loop: a script evaluated over the
+     * debugging protocol is not reported as a long task, so blocking inside `evaluate` itself would leave the observer with nothing to count.
+     * For the collector's control.
+     */
+    blockMainThread: (ms: number) => Promise<void>;
   };
 }
 
@@ -188,6 +207,7 @@ export const test = base.extend<PerformanceFixtures>({
       measure: async (name, scenario, { inputs, samples = 5, freshCart = false }) => {
         if (!measureVitals) throw new Error('vitals.measure needs test.use({ measureVitals: true }): the collector and the throttling were never installed.');
         const start = page.url();
+        loadAtRunStart ??= loadavg()[0];
         const taken: { vitals: Vitals; entries: Observed; lcpElement: string }[] = [];
         for (let i = 0; i < samples; i++) {
           if (freshCart && i > 0) await page.evaluate((keys) => keys.forEach((key) => sessionStorage.removeItem(key)), CART_STORAGE_KEYS);
@@ -197,6 +217,8 @@ export const test = base.extend<PerformanceFixtures>({
           await scenario();
           taken.push(await read(page, name, inputs > 0));
         }
+        const load = loadavg()[0];
+        testInfo.annotations.push({ type: 'host-load', description: `${name}: one-minute load average ${load.toFixed(2)} on ${cpus().length} CPUs, ${loadAtRunStart.toFixed(2)} when the run began (a recording needs the latter under ${MAX_LOAD_TO_RECORD}; the run's own work raises the former)` });
         const all = taken.map((t) => t.vitals);
         const column = (metric: keyof Vitals) => all.map((v) => v[metric]);
         const median: Vitals = {
@@ -208,6 +230,7 @@ export const test = base.extend<PerformanceFixtures>({
         const range = (metric: keyof Vitals) => Math.max(...column(metric)) - Math.min(...column(metric));
         const spread: Vitals = { lcp: Math.round(range('lcp')), cls: Number(range('cls').toFixed(3)), tbt: Math.round(range('tbt')), inp: Math.round(range('inp')) };
         const observed: Observed = {
+          fcpObserved: taken.every((t) => t.entries.fcpObserved),
           lcpEntries: Math.min(...taken.map((t) => t.entries.lcpEntries)),
           interactions: Math.min(...taken.map((t) => t.entries.interactions)),
           // The most any sample saw, not the fewest: a sample that got an extra input is as wrong as one that got too few.
@@ -220,18 +243,33 @@ export const test = base.extend<PerformanceFixtures>({
         testInfo.annotations.push({ type: 'vitals', description: `${name} (median of ${samples}): LCP ${median.lcp} ms, CLS ${median.cls}, TBT ${median.tbt} ms, INP-proxy ${median.inp} ms; LCP element ${[...new Set(lcpElements)].join(' | ')}` });
         return { name, median, spread, samples: all, observed, expectedInputs: inputs, lcpElements };
       },
+      blockMainThread: (ms) =>
+        page.evaluate(
+          (duration) =>
+            new Promise<void>((resolve) =>
+              setTimeout(() => {
+                const end = performance.now() + duration;
+                while (performance.now() < end);
+                resolve();
+              }, 0),
+            ),
+          ms,
+        ),
       baseline: (measurement, metrics) => {
         if (process.env.UPDATE_PERF_BASELINE === '1') {
-          // Refused at once, before anything is judged, so a busy machine cannot produce a baseline by accident.
-          const load = loadavg()[0];
+          // Refused at once, before anything is judged, so a busy machine, or a second worker, cannot produce a baseline by accident.
+          if (testInfo.parallelIndex !== 0) {
+            throw new Error(`Refusing to record the performance baseline from worker ${testInfo.parallelIndex}: recording rewrites one shared file and needs the perf project's single worker (run with --workers=1).`);
+          }
+          const load = loadAtRunStart ?? loadavg()[0];
           if (load > MAX_LOAD_TO_RECORD) {
-            throw new Error(`Refusing to record the performance baseline: the one-minute load average is ${load.toFixed(2)} (limit ${MAX_LOAD_TO_RECORD}). Record on an idle machine.`);
+            throw new Error(`Refusing to record the performance baseline: the one-minute load average was ${load.toFixed(2)} when the run began (limit ${MAX_LOAD_TO_RECORD}). Record on an idle machine.`);
           }
           recordings.push({ measurement, metrics });
           testInfo.annotations.push({ type: 'baseline', description: `recording ${measurement.name} for ${baselineEnvironment()} once the test has passed` });
           return undefined;
         }
-        const limits = baselineLimits(measurement, metrics);
+        const limits = baselineLimits(measurement, metrics, testInfo);
         if (!limits) missingBaseline(testInfo, measurement);
         return limits;
       },
@@ -264,14 +302,18 @@ function record(testInfo: TestInfo, recordings: { measurement: Measurement; metr
       testInfo.annotations.push({ type: 'baseline', description: `NOT recorded for "${measurement.name}": the test failed (${testInfo.errors.length} error(s)), and a baseline is only taken from a run inside its budgets` });
       continue;
     }
-    const load = loadavg()[0];
+    const load = loadAtRunStart ?? loadavg()[0];
     if (load > MAX_LOAD_TO_RECORD) {
-      testInfo.annotations.push({ type: 'baseline', description: `NOT recorded for "${measurement.name}": the load average rose to ${load.toFixed(2)} during the run` });
+      testInfo.annotations.push({ type: 'baseline', description: `NOT recorded for "${measurement.name}": the load average was ${load.toFixed(2)} when the run began` });
       continue;
     }
     const recorded: Baseline = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
     const env = baselineEnvironment();
     const entry = Object.fromEntries(metrics.map((metric) => [metric, { median: measurement.median[metric], spread: measurement.spread[metric] }]));
+    const noisy = metrics.filter((metric) => isNoisy(metric, measurement.spread[metric]));
+    if (noisy.length) {
+      testInfo.annotations.push({ type: 'baseline', description: `NOISY for "${measurement.name}": ${noisy.join(', ')} (${MARGIN_SPREADS} x spread is over the cap), recorded but not enforced as a ratchet; record again on an idle machine` });
+    }
     recorded[env] = { ...recorded[env], [measurement.name]: entry };
     writeFileSync(BASELINE_FILE, `${JSON.stringify(recorded, null, 2)}\n`);
   }
@@ -312,20 +354,27 @@ async function read(page: Page, name: string, interactive: boolean): Promise<{ v
 }
 
 /** The recorded median of each metric plus its margin, or undefined when this environment has no entry for the measurement. */
-function baselineLimits({ name }: Measurement, metrics: (keyof Vitals)[]): Partial<Vitals> | undefined {
+function baselineLimits({ name }: Measurement, metrics: (keyof Vitals)[], testInfo: TestInfo): Partial<Vitals> | undefined {
   const env = baselineEnvironment();
   const recorded: Baseline = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
   const base = recorded[env]?.[name];
   if (!base) return undefined;
-  return Object.fromEntries(
-    metrics.map((metric) => {
-      const value = base[metric];
-      if (value === undefined) throw new Error(`The ${env} baseline of "${name}" has no ${metric}: record it with UPDATE_PERF_BASELINE=1 npm run test:perf.`);
-      const margin = Math.min(Math.max(MARGIN_SPREADS * value.spread, MARGIN_SHARE * value.median, NOISE_FLOOR[metric]), MARGIN_CAP_FLOORS * NOISE_FLOOR[metric]);
-      const limit = value.median + margin;
-      return [metric, metric === 'cls' ? Number(limit.toFixed(3)) : Math.round(limit)];
-    }),
-  );
+  const limits = metrics.map((metric) => {
+    const value = base[metric];
+    if (value === undefined) throw new Error(`The ${env} baseline of "${name}" has no ${metric}: record it with UPDATE_PERF_BASELINE=1 npm run test:perf.`);
+    const margin = Math.min(Math.max(MARGIN_SPREADS * value.spread, MARGIN_SHARE * value.median, NOISE_FLOOR[metric]), MARGIN_CAP_FLOORS * NOISE_FLOOR[metric]);
+    const limit = value.median + margin;
+    return [metric, metric === 'cls' ? Number(limit.toFixed(3)) : Math.round(limit)] as const;
+  });
+  const trusted = Object.fromEntries(limits.filter(([metric]) => !isNoisy(metric, base[metric]!.spread)));
+  const noisy = limits.map(([metric]) => metric).filter((metric) => !(metric in trusted));
+  if (noisy.length) testInfo.annotations.push({ type: 'baseline', description: `the ${env} baseline of "${name}" is too noisy to ratchet ${noisy.join(', ')}: only the fixed limits hold them until it is recorded again on an idle machine` });
+  return trusted;
+}
+
+/** The recorded spread is too wide for a margin that stays meaningful: the cap would clip it, so the metric has no ratchet (see MARGIN_CAP_FLOORS). */
+function isNoisy(metric: keyof Vitals, spread: number): boolean {
+  return MARGIN_SPREADS * spread > MARGIN_CAP_FLOORS * NOISE_FLOOR[metric];
 }
 
 function middle(values: number[]): number {
@@ -337,12 +386,13 @@ function middle(values: number[]): number {
 /** Runs in the page before any of its scripts. */
 function collect() {
   const values = { lcp: 0, cls: 0, tbt: 0, inp: 0 };
-  const entries = { lcpEntries: 0, interactions: 0, inputs: 0, longTaskObserver: !!PerformanceObserver.supportedEntryTypes?.includes('longtask') };
+  const entries = { fcpObserved: false, lcpEntries: 0, interactions: 0, inputs: 0, longTaskObserver: !!PerformanceObserver.supportedEntryTypes?.includes('longtask') };
   // An interaction is several events (pointerdown, pointerup and click share one interactionId), so they are counted by id.
   const seen = { interactionIds: new Set<number>(), firstInputs: 0 };
-  // Blocking time counts only what happened before the first input, so it is the cost of loading, not of the interaction.
+  // Blocking time counts only tasks between First Contentful Paint and the first input, so it is the cost of loading, not of the interaction.
   const longTasks: { start: number; duration: number }[] = [];
   let firstInputAt = Infinity;
+  let fcp = Infinity; // until it is reported no task is inside the TBT window, and `fcpObserved` says so
   const observers: { observer: PerformanceObserver; handle: (e: Entry) => void }[] = [];
   type Entry = PerformanceEntry & { value: number; hadRecentInput: boolean; interactionId?: number; element?: Element | null };
   let lcpElement: Element | null | undefined;
@@ -355,6 +405,11 @@ function collect() {
     values.lcp = e.startTime;
     lcpElement = e.element;
     entries.lcpEntries++;
+  });
+  observe('paint', (e) => {
+    if (e.name !== 'first-contentful-paint') return;
+    fcp = e.startTime;
+    entries.fcpObserved = true;
   });
   observe('layout-shift', (e) => {
     if (!e.hadRecentInput) values.cls += e.value;
@@ -397,7 +452,7 @@ function collect() {
     flush: () => {
       observers.forEach(({ observer, handle }) => observer.takeRecords().forEach((e) => handle(e as Entry)));
       entries.interactions = Math.max(seen.interactionIds.size, seen.firstInputs);
-      values.tbt = longTasks.filter((task) => task.start < firstInputAt).reduce((sum, task) => sum + Math.max(0, task.duration - 50), 0);
+      values.tbt = longTasks.filter((task) => task.start >= fcp && task.start < firstInputAt).reduce((sum, task) => sum + Math.max(0, task.duration - 50), 0);
     },
   };
 }

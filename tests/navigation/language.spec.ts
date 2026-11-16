@@ -1,7 +1,6 @@
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
 import type { NavKey } from '@components/Header';
 import { expect, test } from '@fixtures';
-import { skipIfBotChallenge } from '@support/bot-challenge';
 
 /**
  * What the header says in each language (as shipped on the site, typos included). Dutch "Home" and
@@ -51,11 +50,13 @@ test.describe('Language switcher', () => {
     await expect(header.navItem('home')).toHaveText('Start');
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await skipIfBotChallenge(page);
+    await homePage.shell.reload();
+    await expect(header.navItem('home')).toHaveText('Start');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     await header.navItem('contact').click();
 
     await expect(page).toHaveURL('/contact');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     await expect(header.navItem('home')).toHaveText('Start');
     await expect(page.getByRole('heading', { name: 'Kontakt', exact: true })).toBeVisible();
   });

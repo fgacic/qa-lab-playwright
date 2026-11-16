@@ -1,8 +1,13 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { reportColumns, type ReportTitle } from '@pages/admin/AdminPages';
-import { ADMIN_MESSAGES } from '@pages/admin/alerts';
-import { reports } from '@support/admin-payloads';
-import { knownBug } from '@support/known-bug';
+import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { category, paginated, product, reports } from '@support/admin-payloads';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { storedToken } from '@support/session';
+import { httpsUrl } from '@support/urls';
+
+/** A payment endpoint the settings accept: made up, on example.com. */
+const PAYMENT_ENDPOINT = httpsUrl('payments.example.com', '/check');
 
 const REPORT_TITLES: ReportTitle[] = ['Top 10 Best Selling Categories', 'Top 10 Most Purchased Products', 'Customers By Country', 'Total Sales Per Country'];
 
@@ -38,13 +43,14 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     test.use(withMocks(...[
       '/reports/top10-best-selling-categories', '/reports/top10-purchased-products', '/reports/customers-by-country', '/reports/total-sales-per-country',
     ].map((feed) => mock.fail('GET', feed, 500))));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the admin is told the statistics could not be loaded', async ({ adminStatistics }) => {
       knownBug('ADM-15', 'failed statistics requests leave empty tables with no message.', { absence: true });
       await expect(adminStatistics.heading).toBeVisible();
 
-      // Any alert will do: the pin does not prescribe the wording. A healthy page shows none.
-      await expect(adminStatistics.alerts.first(), 'ADM-15: failed statistics tell the admin').toBeVisible({ timeout: 5_000 });
+      // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording. A healthy page shows none.
+      await expect(adminStatistics.failure, 'ADM-15: failed statistics tell the admin').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -60,10 +66,14 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
       });
 
       test(`picking a year asks the API for that year's ${period} report`, async ({ adminSalesReport }) => {
-        const reloaded = await adminSalesReport.showYear('2020');
+        // Any year but the one the picker opens on, so the pick really changes something.
+        await expect(adminSalesReport.yearOptions).not.toHaveCount(0);
+        const year = await adminSalesReport.anotherYear();
 
-        expect(new URL(reloaded.url()).searchParams.get('year'), 'the year the page asked for').toBe('2020');
-        await expect(adminSalesReport.year).toHaveValue('2020');
+        const reloaded = await adminSalesReport.showYear(year);
+
+        expect(new URL(reloaded.url()).searchParams.get('year'), 'the year the page asked for').toBe(year);
+        await expect(adminSalesReport.year).toHaveValue(year);
       });
     });
   }
@@ -73,20 +83,20 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     const thisYear = String(new Date().getFullYear());
     await expect(adminMonthlySales.year.getByRole('option').first()).toBeAttached();
 
-    await expect(adminMonthlySales.year.getByRole('option', { name: thisYear }), `ADM-08: ${thisYear} can be chosen`).toHaveCount(1, { timeout: 2_000 });
+    await expect(adminMonthlySales.year.getByRole('option', { name: thisYear }), `ADM-08: ${thisYear} can be chosen`).toHaveCount(1, { timeout: BUG_TIMEOUT });
   });
 });
 
 test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () => {
   test('saving stores the settings in the browser and confirms', async ({ adminSettings }) => {
     await expect(adminSettings.ecoBadge, 'the badge starts switched on').toBeChecked();
-    await adminSettings.paymentEndpoint.fill('https://payments.example.com/check');
+    await adminSettings.paymentEndpoint.fill(PAYMENT_ENDPOINT);
     await adminSettings.ecoBadge.uncheck();
 
     await adminSettings.save();
 
     await expect(adminSettings.feedback.filter({ hasText: ADMIN_MESSAGES.settingsSaved })).toBeVisible();
-    await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT')).toBe('https://payments.example.com/check');
+    await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT')).toBe(PAYMENT_ENDPOINT);
     await expect.poll(() => adminSettings.storedSetting('ECO_BADGE_ENABLED')).toBe('false');
   });
 
@@ -109,21 +119,27 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await adminSettings.save();
 
     // Any alert that names the endpoint will do: the pin does not prescribe the wording.
-    await expect(adminSettings.feedback.filter({ hasText: /endpoint|url|invalid/i }), 'ADM-16: the settings say the endpoint is not valid').toBeVisible({ timeout: 2_000 });
+    await expect(adminSettings.feedback.filter({ hasText: /endpoint|url|invalid/i }), 'ADM-16: the settings say the endpoint is not valid').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
   test('Clear storage forgets the settings but keeps the admin signed in', async ({ adminSettings }) => {
-    await adminSettings.paymentEndpoint.fill('https://payments.example.com/check');
+    await adminSettings.paymentEndpoint.fill(PAYMENT_ENDPOINT);
     await adminSettings.save();
-    await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT'), 'the setting was saved before it is cleared').toBe('https://payments.example.com/check');
+    await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT'), 'the setting was saved before it is cleared').toBe(PAYMENT_ENDPOINT);
 
     await adminSettings.clearStorage();
 
     await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT')).toBeNull();
-    await expect.poll(() => adminSettings.storedToken()).not.toBeNull();
+    await expect.poll(() => storedToken(adminSettings.page)).not.toBeNull();
   });
 
-  test('switching the CO₂ features off hides the CO₂ sorting in the shop', async ({ adminSettings, shop }) => {
+  test('switching the CO₂ features off hides the CO₂ sorting in the shop', async ({ adminSettings, shop, apiMock }) => {
+    // The shop's home asks for its products, filters and spec names: all answered here, so nothing depends on the real catalogue.
+    await apiMock.use(
+      mock.respond('QUERY', '/products', paginated([product], 9)),
+      mock.respond('GET', '/categories/tree', [category]),
+      mock.respond('GET', '/product-specs/names', []),
+    );
     const sort = shop.home.filters.sort;
     await expect(adminSettings.co2Features, 'the features start switched on').toBeChecked();
     await shop.home.open();

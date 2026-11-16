@@ -33,11 +33,25 @@ export class InvoicesPage {
 
 export class InvoiceDetailsPage {
   readonly downloadPdfButton: Locator;
+  readonly table: Locator;
   readonly productLines: Locator;
 
   constructor(readonly page: Page) {
     this.downloadPdfButton = page.getByRole('button', { name: 'Download PDF' });
-    this.productLines = page.getByRole('table').last().getByRole('row').filter({ has: page.getByRole('cell') });
+    this.table = page.getByRole('table').last();
+    this.productLines = this.table.getByRole('row').filter({ has: page.getByRole('cell') });
+  }
+
+  /**
+   * The quantity cell of a product's line, found by the "Quantity" column header rather than by position: the first cell
+   * is the quantity today, and a reordered table must not make a spec read the price instead. Resolves once the header is drawn.
+   */
+  async quantityOf(productName: string): Promise<Locator> {
+    const quantityHeader = this.table.getByRole('columnheader', { name: 'Quantity', exact: true });
+    await quantityHeader.waitFor();
+    const headers = await this.table.getByRole('columnheader').allInnerTexts();
+    const column = headers.findIndex((header) => header.trim() === 'Quantity');
+    return this.productLines.filter({ hasText: productName }).getByRole('cell').nth(column);
   }
 
   field(label: string): Locator {

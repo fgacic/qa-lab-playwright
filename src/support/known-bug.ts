@@ -1,6 +1,13 @@
 import { test } from '@playwright/test';
 
 /**
+ * How long a pin waits for the behaviour a fixed site would show (an error message, a disabled button, a redirect).
+ * One value for every pin, so a slower runner is tuned in one place: the bug assertion fails after this window
+ * on a site that still has the defect, so it is also what a passing (broken) pin costs.
+ */
+export const BUG_TIMEOUT = 5_000;
+
+/**
  * Pins a known defect of the site under test. The spec states the behaviour the site *should*
  * have; `test.fail` makes today's failure expected, so the suite stays green, and the test turns
  * red ("expected to fail, but passed") the day the site is fixed.

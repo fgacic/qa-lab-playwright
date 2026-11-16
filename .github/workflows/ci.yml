@@ -42,6 +42,10 @@ jobs:
           browsers: none
       - run: npm run typecheck
       - run: npm run lint
+      # The workflows and composite actions are code too: a typo in an expression or an `if:` that never matches fails here,
+      # not on the one run that takes that path. The image is pinned by tag; run it locally with the same command.
+      - name: Lint the workflows
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.7 -color
       # The visual baselines are only valid in the image of the installed Playwright version, and the
       # tag in scripts/visual.sh is typed by hand: a bump of @playwright/test must not leave it behind.
       - name: The visual image matches @playwright/test
@@ -53,6 +57,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.id }})
     needs: static
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -108,6 +113,7 @@ jobs:
   visual:
     name: visual (Playwright image)
     needs: static
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -142,6 +148,7 @@ jobs:
   verify-bugs:
     name: known bugs still reproduce
     needs: static
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -165,7 +172,9 @@ jobs:
 
   # Manual only: measures the perf project on a runner with UPDATE_PERF_BASELINE=1 and uploads
   # tests/performance/baseline.json. The `ci` entries in it are what the runner is held to; a person
-  # downloads the artifact, reviews the diff and commits the file. Not part of the gate.
+  # downloads the artifact, reviews the diff and commits the file. Not part of the gate, and for that dispatch it is the
+  # only job besides `static`: the e2e, visual and verify-bugs jobs (and what depends on them) are skipped, so recording a
+  # baseline does not also spend a whole run of the suite.
   record-perf-baseline:
     name: record the ci performance baseline
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline }}
@@ -199,7 +208,7 @@ jobs:
     name: merge reports
     needs: [static, e2e, visual]
     # Not after a failed static job: e2e and visual never ran then, so there would be no blob to merge.
-    if: ${{ !cancelled() && needs.static.result == 'success' }}
+    if: ${{ !cancelled() && needs.static.result == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -271,7 +280,7 @@ jobs:
   gate:
     name: gate
     needs: [static, e2e, visual, verify-bugs]
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.record_perf_baseline) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

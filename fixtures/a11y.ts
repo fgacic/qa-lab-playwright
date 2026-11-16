@@ -87,7 +87,8 @@ export const test = base.extend<A11yFixtures>({
         const byTarget = new Map<string, Finding>();
         for (const v of results.violations) {
           for (const n of v.nodes) {
-            const target = n.target.join(' ').replace(/:nth-child\(\d+\)/g, '');
+            // A target inside a frame or a shadow root is a nested list of selectors: flattened, so it reads as one path and not "a,b".
+            const target = n.target.flat(Infinity).join(' ').replace(/:nth-child\(\d+\)/g, '');
             // Keyed by rule AND target with a separator neither can contain, so no rule/target pair can collide with another.
             const key = `${v.id}\u0000${target}`;
             const found = byTarget.get(key);

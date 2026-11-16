@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
+import { ATTRIBUTE_XSS_PAYLOAD, OBSERVATION_WINDOW_MS, ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 
 /**
  * Positive control for the other security specs. A "nothing ran" result only means something if
@@ -15,14 +15,10 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
 
   for (const [name, payload] of everyPayload) {
     test(`detects ${name} when a page parses it as HTML`, async ({ homePage, xss }) => {
+      await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
       expect(xss.executions(), 'nothing has run before the payload is injected').toEqual([]);
 
-      // A frame's srcdoc is parsed as a document, which is what makes <script> and <svg onload> run.
-      await homePage.page.evaluate((html) => {
-        const frame = document.createElement('iframe');
-        frame.srcdoc = html;
-        document.body.append(frame);
-      }, payload);
+      await xss.parseInFrame(payload);
 
       await expect.poll(() => xss.executions(), 'the sentinel saw the payload run').not.toEqual([]);
       await expect(xss.expectNotExecuted(), 'the negative check fails once something ran').rejects.toThrow(/script ran on the page/);
@@ -31,9 +27,10 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
 
   for (const [name, payload] of everyPayload) {
     test(`counts the element a ${name} payload leaves in the page`, async ({ homePage, xss }) => {
+      await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
       await xss.expectNoInjectedElements();
 
-      await homePage.page.evaluate((html) => document.body.insertAdjacentHTML('beforeend', html), payload);
+      await xss.insertHtml(payload);
 
       await expect.poll(() => xss.injectedCount(), { message: 'the payload left exactly one element' }).toBe(1);
     });
@@ -45,30 +42,33 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
     // The sentinel's wait for pending images must not take over the image's own handlers: an `<img onerror=...>` payload runs through
     // `onerror`, and a wait that assigned that property would silence it, so the check would pass on a payload that ran.
     test(`detects ${name} that only runs once a slow image fails`, async ({ homePage, xss }) => {
-      const IMAGE_LATENCY_MS = 400;
+      // Longer than the observation window: a check that only watched the window would see a quiet page and pass, so it fails
+      // here unless it first waits for the pending image (and, once the image failed, sees the handler that ran).
+      const IMAGE_LATENCY_MS = OBSERVATION_WINDOW_MS + 500;
       await homePage.page.route('**/x', async (route) => {
         // Latency, not a wait: the image is still loading when the negative check starts, so the check has to wait for it.
+        // The body is not an image, so it fails to decode and fires `error` (a 404 would also log a console error the guard rejects).
         await new Promise((answered) => setTimeout(answered, IMAGE_LATENCY_MS));
-        await route.fulfill({ status: 404 });
+        await route.fulfill({ status: 200, contentType: 'image/png', body: 'not an image' });
       });
-      await homePage.page.evaluate((html) => document.body.insertAdjacentHTML('beforeend', html), payload);
+      await xss.insertHtml(payload);
 
       await expect(xss.expectNotExecuted(), 'the negative check waited for the slow image and saw its handler run').rejects.toThrow(/script ran on the page/);
     });
   }
 
+  // The attribute payload is not HTML on its own (it is text until it lands inside a quoted attribute), so it gets its own control.
+  test('detects a payload that breaks out of an attribute, and counts the element it leaves', async ({ homePage, xss }) => {
+    await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+    await xss.insertAsAttributeValue(ATTRIBUTE_XSS_PAYLOAD);
+
+    await expect.poll(() => xss.injectedCount(), { message: 'the input that grew an onfocus attribute is one parsed payload' }).toBe(1);
+    await expect.poll(() => xss.executions(), 'autofocus ran the handler').toEqual(['7']);
+  });
+
   test('counts payloads left inside an iframe and a shadow root', async ({ homePage, xss }) => {
-    await homePage.page.evaluate(
-      ([framed, shadowed]) => {
-        const frame = document.createElement('iframe');
-        document.body.append(frame);
-        frame.contentDocument!.body.insertAdjacentHTML('beforeend', framed);
-        const host = document.createElement('div');
-        document.body.append(host);
-        host.attachShadow({ mode: 'open' }).innerHTML = shadowed;
-      },
-      ['<img src="x">', '<svg onload="__qaLabXssHit(9)"></svg>'],
-    );
+    await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+    await xss.insertInFrameAndShadowRoot('<img src="x">', '<svg onload="__qaLabXssHit(9)"></svg>');
 
     await expect.poll(() => xss.injectedCount(), { message: 'one payload in the frame and one in the shadow root' }).toBe(2);
   });
@@ -86,18 +86,17 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
   });
 
   test('detects a dialog opened by page script', async ({ homePage, xss }) => {
-    await homePage.page.evaluate(() => window.alert('anything'));
+    await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+    await xss.raiseAlert('anything');
 
     await expect.poll(() => xss.executions(), 'the alert was recorded').toEqual(['alert: anything']);
   });
 
   test('detects a dialog opened in a popup the page opened', async ({ homePage, xss }) => {
-    const opened = homePage.page.waitForEvent('popup');
-    await homePage.page.evaluate(() => window.open('/contact', '_blank'));
-    const popup = await opened;
-    await popup.waitForLoadState('domcontentloaded');
+    await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+    const popup = await xss.openPopup('/contact');
 
-    await popup.evaluate(() => window.alert('in a popup'));
+    await xss.raiseAlert('in a popup', popup);
 
     await expect.poll(() => xss.executions(), 'the alert in the popup was recorded').toEqual(['alert: in a popup']);
   });
@@ -106,7 +105,7 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
     const tab = await homePage.page.context().newPage();
     await tab.goto('/contact');
 
-    await tab.evaluate(() => window.alert('in another tab'));
+    await xss.raiseAlert('in another tab', tab);
 
     await expect.poll(() => xss.executions(), 'the alert in the other tab was recorded').toEqual(['alert: in another tab']);
   });
@@ -117,7 +116,7 @@ test.describe('XSS sentinel on another visitor (positive control, self-hosted on
   test.use({ xssWatch: true });
 
   test('detects a dialog opened for a visitor with a context of their own', async ({ visitorContactPage, xss }) => {
-    await visitorContactPage.page.evaluate(() => window.alert('for the visitor'));
+    await xss.raiseAlert('for the visitor', visitorContactPage.page);
 
     await expect.poll(() => xss.executions(), "the alert in the visitor's context was recorded").toEqual(['alert: for the visitor']);
   });

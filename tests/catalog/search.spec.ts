@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
@@ -8,12 +9,18 @@ const NO_MATCH = 'qa-lab-no-such-product';
 /** The search box ignores terms outside these lengths (BUG-27, BUG-35). */
 const MIN_TERM = 3;
 const MAX_TERM = 40;
-/** How long the shop gets to either send a search or say why it did not. */
-const REACTION_MS = 3_000;
-/** An alert that explains why a term was not searched (not a toast about something else). */
-const TERM_EXPLANATION = /character|short|long|least|most|term/i;
 /** A term with spaces on both sides, as typed. */
 const PADDED_TERM = '  pliers  ';
+
+/**
+ * Whether the shop reacts at all: any of `reactions` (each a promise that rejects when its window runs out) comes true.
+ * Every one is observed from the moment it is passed in, so the ones that lose the race, or all of them when the action
+ * throws, never end as an unhandled rejection. Call it before the action, await the result after.
+ */
+async function reactedWithin(...reactions: Promise<unknown>[]): Promise<boolean> {
+  for (const reaction of reactions) reaction.catch(() => undefined);
+  return Promise.any(reactions).then(() => true, () => false);
+}
 
 test.describe('Search', () => {
   test('lists exactly the products the search found', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
@@ -68,7 +75,7 @@ test.describe('Search', () => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
     await homePage.search.searchFor('pliers');
     const exact = (await results).json;
-    const padded = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search', (body) => body.q === PADDED_TERM);
+    const padded = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search', (body) => String(body.q).trim() === PADDED_TERM.trim());
 
     await homePage.search.searchFor(PADDED_TERM);
 
@@ -135,25 +142,36 @@ test.describe('Search', () => {
     await expect(homePage.grid.cards).toHaveCount(pageSize);
   });
 
+  // The search box takes terms of 3 to 40 characters: the terms at the two edges are valid and are searched.
+  for (const [edge, length] of [['shortest', MIN_TERM], ['longest', MAX_TERM]] as const) {
+    test(`the ${edge} valid term (${length} characters) is searched`, { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
+      const term = 'x'.repeat(length);
+      const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
+
+      await homePage.search.searchFor(term);
+
+      const { response, body } = await results;
+      expect(response.status()).toBe(200);
+      expect(body.q).toBe(term);
+      await expect(homePage.search.caption).toHaveText(`Searched for: ${term}`);
+      await expect(homePage.search.resultCount).toHaveText(`0 products found for '${term}'`);
+    });
+  }
+
   for (const { title, term, bug } of [
     { title: 'a long search term', term: 'x'.repeat(MAX_TERM + 1), bug: { id: 'BUG-27', summary: 'a search term over 40 characters is silently ignored: no request, no message.' } },
     { title: 'a very short search term', term: 'x'.repeat(MIN_TERM - 1), bug: { id: 'BUG-35', summary: 'a search term under 3 characters is silently ignored: no request, no message.' } },
   ]) {
     test(`${title} is searched or explained`, { tag: ['@negative', '@bug'] }, async ({ homePage, apiMock }) => {
       knownBug(bug.id, bug.summary);
-      const searched = apiMock.waitForRequest('QUERY', '/products/search', { timeout: REACTION_MS });
-      const explained = expect(homePage.page.getByRole('alert').filter({ hasText: TERM_EXPLANATION }).first()).toBeVisible({ timeout: REACTION_MS });
-      // Both race the action below, so both must be handled from the start: if the action throws, neither is left rejecting unobserved.
-      searched.catch(() => undefined);
-      explained.catch(() => undefined);
+      // Either answer is fine: the term goes to the API, or the page says why not.
+      const searched = apiMock.waitForRequest('QUERY', '/products/search', { timeout: BUG_TIMEOUT });
+      const explained = expect(homePage.search.termExplanation).toBeVisible({ timeout: BUG_TIMEOUT });
+      const reacted = reactedWithin(searched, explained);
       await homePage.search.query.fill(term);
       await homePage.search.submitButton.click();
 
-      // Either answer is fine: the term goes to the API, or the page shows an alert saying why not.
-      // Promise.any settles on whichever happens first; only when both time out does it reject,
-      // which `responded` reports as false.
-      const responded = await Promise.any([searched, explained]).then(() => true, () => false);
-      expect(responded, `${bug.id}: the term is searched, or the shopper is told why not`).toBe(true);
+      expect(await reacted, `${bug.id}: the term is searched, or the shopper is told why not`).toBe(true);
     });
   }
 
@@ -176,7 +194,7 @@ test.describe('Search', () => {
       await homePage.search.searchFor('hammer');
       await expect(homePage.search.caption).toHaveText('Searched for: hammer');
 
-      await expect(homePage.shell.errorAlert, 'BUG-03: a failed search is reported as a failure').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(homePage.page).first(), 'BUG-03: a failed search is reported as a failure').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

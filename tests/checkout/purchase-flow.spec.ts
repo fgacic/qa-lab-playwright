@@ -2,12 +2,16 @@ import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
 import { PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, test, withMocks } from '@fixtures';
 import { postcodeLookupMock, twoProductCart } from '@fixtures/pages';
+import { knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /** What the three-product flow changes: the first product goes to this quantity, the second is removed. */
 const KEPT_QUANTITY = 3;
 /** How many of the product the browse-and-buy journeys put in the cart. */
 const ORDERED_QUANTITY = 2;
+
+/** The cart's discount for an eco-friendly product: 5% off the subtotal. */
+const ECO_DISCOUNT = 0.05;
 
 interface GuestInvoice {
   invoice_number: string;
@@ -124,6 +128,58 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
       await expect(checkout.wizard.confirmation).toContainText(invoice.invoice_number);
       expect(invoice.total).toBeCloseTo(cartTotal, 2);
       expect(invoice.billing_city, 'the order is billed to the address on screen').toBe(billedCity);
+    });
+  });
+  test('a double click on Confirm places one order', { tag: ['@self-hosted', '@bug'] }, async ({ checkout, apiMock }) => {
+    knownBug('BUG-46', 'a double click on Confirm sends the order twice, so two invoices are created for one cart.');
+    await checkout.proceedToPayment(fakeGuest(), fakeAddress());
+    await checkout.payment.choose('cash-on-delivery');
+    await checkout.payment.checkPayment();
+    await expect(checkout.payment.confirmButton).toBeEnabled();
+
+    await checkout.payment.confirmWithDoubleClick();
+
+    await expect(checkout.wizard.confirmation).toBeVisible();
+    expect(apiMock.requestsTo('POST', '/invoices/guest'), 'BUG-46: one order is sent for one cart').toBe(1);
+  });
+
+  test('browser Back from the sign-in step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {
+    const [{ product }] = cartItems;
+    // The cart opened from the shop, so there is a page to go Back to.
+    await checkout.header.goHomeViaLogo();
+    await expect(page).toHaveURL('/');
+    await checkout.header.openCart();
+    await expect(checkout.cart.table.row(product.name).title).toBeVisible();
+    await checkout.cart.proceed();
+    await expect(checkout.signIn.guestTab).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL('/');
+    await page.goForward();
+
+    await expect(page).toHaveURL(/\/checkout$/);
+    await expect(checkout.cart.table.row(product.name).title, 'the cart still holds its line').toBeVisible();
+    await expect(checkout.cart.proceedButton).toBeEnabled();
+  });
+
+  test.describe('ordering an eco-friendly product', { tag: ['@self-hosted'] }, () => {
+    test.use({ cartItems: async ({ catalog }, use) => use([{ product: await catalog.eco(), quantity: 2 }]) });
+
+    test('the invoice honours the 5% eco-friendly discount the cart showed', async ({ checkout, cartItems, apiMock }) => {
+      const [{ product, quantity }] = cartItems;
+      // 5% off the subtotal, written out and not computed with the app's rule: the cart shows it before the order.
+      const subtotal = product.price * quantity;
+      const discounted = subtotal * (1 - ECO_DISCOUNT);
+      await expect(checkout.cart.table.total).toShowAmount(discounted);
+
+      const [{ response, json: invoice }] = await Promise.all([
+        apiMock.waitForResponse<GuestInvoice>('POST', '/invoices/guest'),
+        checkout.checkOutAsGuest(fakeGuest(), fakeAddress()),
+      ]);
+
+      expect(response.status(), JSON.stringify(invoice)).toBe(201);
+      await expect(checkout.wizard.confirmation).toContainText(invoice.invoice_number);
+      expect(invoice.total, 'the invoice charges the discounted total the cart showed').toBeCloseTo(discounted, 2);
     });
   });
 });

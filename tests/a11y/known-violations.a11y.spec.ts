@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { Locator } from '@playwright/test';
 import { NO_SUCH_PRODUCT, type A11yFixtures } from '@fixtures/a11y';
-import { KNOWN_VIOLATIONS, type KnownViolation, type ScanName } from '@support/a11y-baseline';
+import { KNOWN_VIOLATIONS, type AxId, type PinnedViolation, type ScanName } from '@support/a11y-baseline';
 import { contactMessage } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
@@ -22,7 +22,7 @@ import { RegisterPage } from '@pages/RegisterPage';
  * on a state ("with errors") is pinned in that state: the pin brings the page there before it scans.
  * @axe: Chromium only, like the baseline it pins (see pages.a11y.spec.ts).
  */
-const summaryOf = (v: KnownViolation) => `${v.rule} (${v.impact}, WCAG ${v.wcag}): ${v.summary}`;
+const summaryOf = (v: PinnedViolation) => `${v.rule} (${v.impact}, WCAG ${v.wcag}): ${v.summary}`;
 
 /** The element a pin is about, plus anything else its state must show before the scan (the validation errors of a "with errors" state). Never empty: a scan with nothing to wait for is not allowed. */
 type Anchor = Locator | [Locator, ...Locator[]];
@@ -36,7 +36,7 @@ type Visit = () => Promise<Anchor>;
  * the pin can reach cheaply; visits run in order and may build on each other. Pages of the entry
  * it does not reach are watched by the baseline ratchet in pages.a11y.spec.ts.
  */
-async function expectFixed(a11y: A11yFixtures['a11y'], violation: KnownViolation, scan: ScanName, offending: Anchor, alsoOn: Partial<Record<ScanName, Visit>> = {}): Promise<void> {
+async function expectFixed(a11y: A11yFixtures['a11y'], violation: PinnedViolation, scan: ScanName, offending: Anchor, alsoOn: Partial<Record<ScanName, Visit>> = {}): Promise<void> {
   // A pin must scan pages its baseline entry was recorded on, or a "fix" on a page the entry never covered would pass for nothing.
   for (const name of [scan, ...(Object.keys(alsoOn) as ScanName[])]) {
     if (!violation.pages.includes(name)) throw new Error(`The pin scans "${name}", which is not one of the pages its baseline entry was recorded on (${violation.pages.join(', ')})`);
@@ -54,7 +54,7 @@ async function expectFixed(a11y: A11yFixtures['a11y'], violation: KnownViolation
 
 /** The ids of the entries a pin below was written for: filled as the file loads, read by the coverage check. */
 const pinned = new Set<string>();
-function on(page: KnownViolation['page']): KnownViolation[] {
+function on(page: PinnedViolation['page']): PinnedViolation[] {
   const entries = KNOWN_VIOLATIONS.filter((v) => v.page === page);
   for (const entry of entries) pinned.add(entry.id);
   return entries;
@@ -64,7 +64,8 @@ function on(page: KnownViolation['page']): KnownViolation[] {
  * The element each pin is about, by pin id: the page object's own locator for it, one table per page the pins scan.
  * A missing anchor throws without the pin's id, so it is never read as the bug reproducing (VERIFY_BUGS).
  */
-type Anchors<Page> = Record<string, (page: Page) => Anchor>;
+// Keyed by AxId: an id that is not in the baseline (a typo, an entry that was removed) is a compile error. An entry with no anchor is still caught at run time.
+type Anchors<Page> = Partial<Record<AxId, (page: Page) => Anchor>>;
 
 const HOME_ANCHORS: Anchors<HomePage> = { 'AX-08': (p) => p.header.language.button, 'AX-11': (p) => p.filters.categories };
 const PRODUCT_ANCHORS: Anchors<ProductPage> = { 'AX-13': (p) => p.relatedProducts.first() };
@@ -81,7 +82,7 @@ const PROFILE_ANCHORS: Anchors<ProfilePage> = { 'AX-05': (p) => p.newPassword, '
 // The pill of the one mocked message; the message page shows it too and is watched by the baseline ratchet.
 const INBOX_ANCHORS: Anchors<AdminListPage<AdminMessagePage>> = { 'AX-07': (p) => p.table.statusBadge(contactMessage.status) };
 
-function anchorOf<Page>(anchors: Anchors<Page>, violation: KnownViolation, page: Page): Anchor {
+function anchorOf<Page>(anchors: Anchors<Page>, violation: PinnedViolation, page: Page): Anchor {
   const anchor = anchors[violation.id];
   if (!anchor) throw new Error(`A pin for ${violation.rule} on ${violation.target} has no anchor: name the element it is about`);
   return anchor(page);
@@ -91,7 +92,7 @@ function anchorOf<Page>(anchors: Anchors<Page>, violation: KnownViolation, page:
  * The other pages of a home-page pin's baseline entry that it reaches cheaply. AX-08 is on every
  * page of the site, so it is pinned on the home page alone and the ratchet watches the rest.
  */
-function homeVisits(violation: KnownViolation, homePage: HomePage, productName: string): Partial<Record<ScanName, Visit>> {
+function homeVisits(violation: PinnedViolation, homePage: HomePage, productName: string): Partial<Record<ScanName, Visit>> {
   if (violation.id !== 'AX-11') return {};
   const categories = homePage.filters.categories;
   return {
@@ -110,6 +111,7 @@ function homeVisits(violation: KnownViolation, homePage: HomePage, productName: 
 
 // Before any navigation, on the context: the scan fixture refuses to read a page that may still be mid-fade.
 test.use({ reducedMotion: 'reduce' });
+
 
 test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug'] }, () => {
   for (const violation of on('home')) {
@@ -227,5 +229,11 @@ test.describe('Known violation pins', { tag: ['@a11y', '@axe'] }, () => {
 
     expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'baseline ids that appear twice').toEqual([]);
     expect(ids.filter((id) => !pinned.has(id)), 'baseline entries no pin test is written for (add one above)').toEqual([]);
+  });
+
+  test('every pin scans a page its entry was recorded on, once', () => {
+    // The entry's `pages` is built from `page` and `alsoOn`, so this guards a page listed twice and an `alsoOn` that repeats the pin's own page.
+    expect(KNOWN_VIOLATIONS.filter((v) => !v.pages.includes(v.page)).map((v) => v.id), 'entries whose pin scans a page the entry was not recorded on').toEqual([]);
+    expect(KNOWN_VIOLATIONS.filter((v) => new Set(v.pages).size !== v.pages.length).map((v) => v.id), 'entries that list a page twice').toEqual([]);
   });
 });

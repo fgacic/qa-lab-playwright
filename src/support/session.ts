@@ -9,14 +9,23 @@ export const TOKEN_KEY = 'auth-token';
  * signing out (which clears it and reloads) really signs the user out.
  */
 export async function installToken(page: Page, token: string): Promise<void> {
-  await page.addInitScript(
+  // On the context, so a second tab the test opens (a popup, `context.newPage()`) is signed in the same way.
+  // The per-tab sessionStorage flag keeps the "install once" rule: a reload or a sign-out in that tab stays signed out.
+  await page.context().addInitScript(
     ({ key, token }) => {
+      // Opaque frames (sandboxed iframes, about:blank children) have no storage: reading it throws a SecurityError, and they hold no SPA to sign in.
+      if (location.origin === 'null') return;
       if (sessionStorage.getItem('qa-lab-token-installed')) return;
       sessionStorage.setItem('qa-lab-token-installed', '1');
       localStorage.setItem(key, token);
     },
     { key: TOKEN_KEY, token },
   );
+}
+
+/** The JWT the SPA currently holds in localStorage, or null when signed out. Poll it: `await expect.poll(() => storedToken(page)).toBeTruthy()`. */
+export function storedToken(page: Page): Promise<string | null> {
+  return page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY);
 }
 
 /** The token a saved storageState file holds. Read from the file: the SPA drops an expired one as soon as a page opens. */

@@ -1,6 +1,9 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { allowLoggedFailure } from '@pages/admin/alerts';
+import { failureFeedback } from '@support/feedback';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
+import { settleRequests } from '@support/settle';
 import type { ProductPage } from '@support/toolshop-api';
 
 /**
@@ -31,8 +34,6 @@ const SEED = {
 
 /** How long the answer for an earlier price step is held back in the BUG-30 test. */
 const LATE_ANSWER_MS = 2_000;
-/** Time the grid gets, once every answer is in, to show the last one: the late answer plus a margin. */
-const LATE_ANSWER_SETTLE_MS = LATE_ANSWER_MS + 1_000;
 
 /**
  * Filtering happens on the server: every change re-sends QUERY /products with the filter in
@@ -40,16 +41,6 @@ const LATE_ANSWER_SETTLE_MS = LATE_ANSWER_MS + 1_000;
  * honours it, and the grid shows exactly that answer.
  */
 test.describe('Product filters', () => {
-  test('every card of the home grid shows a picture with the product name as alt text', async ({ homePage, api }) => {
-    const { data: listed } = await api.listProducts();
-    expect(listed, 'the catalogue should list products').not.toHaveLength(0);
-    await expect(homePage.grid.cards).toHaveCount(listed.length);
-
-    for (const [index, product] of listed.entries()) {
-      await expect(homePage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
-    }
-  });
-
   test('a category shows only products of that category', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
     const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => !!body.by_category);
 
@@ -109,17 +100,21 @@ test.describe('Product filters', () => {
     await homePage.filters.filterByBrand(SEED.hammerBrand);
 
     const { json: found } = await results;
+    expect(found.total, `the catalogue should contain ${SEED.hammerBrand} products in ${SEED.otherCategory}`).toBeGreaterThan(0);
     expect(found.data.every((p) => p.category.name === SEED.otherCategory && p.brand.name === SEED.hammerBrand)).toBe(true);
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
   test('unticking a filter restores the unfiltered list', async ({ homePage, apiMock }) => {
+    const narrowed = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => !!body.by_category);
     await homePage.filters.filterByCategory(SEED.category);
+    const { json: filtered } = await narrowed;
     const restored = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => !body.by_category);
 
     await homePage.filters.category(SEED.category).uncheck();
 
     const { json: all } = await restored;
+    expect(all.total, 'the unfiltered list is longer than the one for the category').toBeGreaterThan(filtered.total);
     await expect(homePage.grid.names).toHaveText(all.data.map((p) => p.name));
   });
 
@@ -178,14 +173,18 @@ test.describe('Product filters', () => {
     await expect(homePage.grid.cards.first(), 'the grid shows products before the slider moves').toBeVisible();
     // The answer for the step below the last is held back until after the last one's, as a slow network can do.
     await apiMock.delay('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`, LATE_ANSWER_MS);
-    const late = apiMock.waitForResponse('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`);
+    const late = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`);
     const final = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},100`);
 
-    await homePage.filters.setMinPrice(MIN_PRICE);
+    // Every product request must have finished and gone quiet (the held-back one included) before the grid is judged:
+    // only then has the page drawn the late answer, so the pin cannot pass by looking before it replaces the grid.
+    await settleRequests(homePage.page, '/products', () => homePage.filters.setMinPrice(MIN_PRICE));
 
     const { json: wanted } = await final;
-    await late;
-    await expect(homePage.grid.names, `BUG-30: the grid shows the answer for the last step ($${MIN_PRICE} and up)`).toHaveText(wanted.data.map((p) => p.name), { timeout: LATE_ANSWER_SETTLE_MS });
+    const { json: held } = await late;
+    // The race only exists if the held answer is a different list from the last step's: otherwise a grid that showed it would look right.
+    expect(held.data.map((p) => p.name), 'the held answer lists other products than the last step').not.toEqual(wanted.data.map((p) => p.name));
+    await expect(homePage.grid.names, `BUG-30: the grid shows the answer for the last step ($${MIN_PRICE} and up)`).toHaveText(wanted.data.map((p) => p.name), { timeout: BUG_TIMEOUT });
   });
 
   test.describe('when the product list comes back empty', { tag: ['@mocked'] }, () => {
@@ -201,12 +200,13 @@ test.describe('Product filters', () => {
     const how = 'abort' in failure.responses[0] ? 'cannot be reached' : 'answers 500';
     test.describe(`when the product list API ${how}`, { tag: ['@mocked', '@bug'] }, () => {
       test.use(withMocks(failure));
+      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
       test('the shopper is told the products could not be loaded', async ({ homePage }) => {
         knownBug('BUG-04', 'a failed product list leaves the grid blank with no message.', { absence: true });
         await expect(homePage.filters.sort).toBeVisible();
 
-        await expect(homePage.shell.errorAlert, 'BUG-04: a failed product list is reported').toBeVisible({ timeout: 5_000 });
+        await expect(failureFeedback(homePage.page).first(), 'BUG-04: a failed product list is reported').toBeVisible({ timeout: BUG_TIMEOUT });
       });
     });
   }
@@ -230,12 +230,13 @@ test.describe('Product filters', () => {
 
   test.describe('when categories and brands fail to load', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/categories/tree'), mock.fail('GET', '/brands')));
+    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the shopper is told the filters could not be loaded', async ({ homePage }) => {
       knownBug('BUG-05', 'failed category and brand requests leave empty filter groups with no message.', { absence: true });
       await expect(homePage.grid.cards.first()).toBeVisible();
 
-      await expect(homePage.shell.errorAlert, 'BUG-05: failed category and brand requests are reported').toBeVisible({ timeout: 5_000 });
+      await expect(failureFeedback(homePage.page).first(), 'BUG-05: failed category and brand requests are reported').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 });

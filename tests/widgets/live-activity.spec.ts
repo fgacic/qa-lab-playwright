@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { fakeSale, salesStream } from '@support/payloads';
+import { escapeRegExp } from '@support/regexp';
 
 /**
  * The panel is "Live" only while its EventSource is open. A mocked stream is a finite body: the browser
@@ -49,7 +50,7 @@ test.describe('Live shop activity', () => {
       await liveActivity.open();
 
       // The newest sale is listed first.
-      await expect(liveActivity.items).toHaveText([saw.name, hammer.name].map((name) => new RegExp(name)));
+      await expect(liveActivity.items).toHaveText([saw.name, hammer.name].map((name) => new RegExp(escapeRegExp(name))));
       await expect(liveActivity.salesCount).toHaveText('2');
       await expect(liveActivity.revenue).toHaveText(`$${revenue.toFixed(2)}`);
     });
@@ -57,6 +58,8 @@ test.describe('Live shop activity', () => {
 
   test.describe('when the feed cannot be reached', { tag: ['@mocked', '@negative'] }, () => {
     test.use(withMocks(mock.abort('GET', '/sales-stream')));
+    // Firefox logs an EventSource that cannot connect as a console error; the abort is this test's own doing.
+    test.beforeEach(({ consoleGuard }) => consoleGuard.allow(/can.t establish a connection to the server at [^\s]*\/sales-stream/, 'the feed this test aborts on purpose: Firefox logs the EventSource that could not connect'));
 
     // The panel does not fail silently: it stays in its "connecting" state and the dot says it is retrying.
     test('the panel says it is still connecting and lists nothing', async ({ homePage }) => {
@@ -84,7 +87,7 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
 
-      await expect(liveActivity.items).toHaveText([new RegExp(reconnected.name)]);
+      await expect(liveActivity.items).toHaveText([new RegExp(escapeRegExp(reconnected.name))]);
       await expect(liveActivity.salesCount).toHaveText('1');
     });
   });

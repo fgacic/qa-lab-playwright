@@ -1,18 +1,35 @@
-# Weekly update PRs for the two ecosystems this repo pins: the GitHub Actions (by commit SHA) and the npm dev
-# dependencies. @playwright/test is bumped together with the image tag in scripts/visual.sh (the `static` CI job checks they match).
+# Weekly update PRs for the ecosystems this repo pins: the GitHub Actions (by commit SHA, in the workflows and in both composite
+# actions), the container images of the Toolshop build (Dockerfiles and compose, by digest or tag) and the npm dev dependencies.
+# @playwright/test is bumped together with the image tag in scripts/visual.sh (the `static` CI job checks they match).
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # `/` covers .github/workflows; a composite action's own `uses:` lines are only found by naming its directory.
+    directories:
+      - /
+      - /.github/actions/setup-suite
+      - /.github/actions/toolshop
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     groups:
       actions:
         patterns: ['*']
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     groups:
       playwright:
         patterns: ['@playwright/*', 'playwright*', 'allure*', '@axe-core/*']

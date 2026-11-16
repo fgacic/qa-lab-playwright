@@ -6,11 +6,11 @@ import { ADMIN_LISTS, type AdminListName } from '@pages/admin/admin-lists';
 import { AdminDashboardPage, AdminMessagePage, AdminOrderPage, AdminSalesReportPage, AdminSettingsPage, AdminStatisticsPage } from '@pages/admin/AdminPages';
 import * as A from '@support/admin-payloads';
 import { mock } from '@support/api-mock';
-import { ADMIN_CREDENTIALS, API_URL, apiPath } from '@support/env';
+import { apiPath } from '@support/env';
 import { fakeJwt } from '@support/payloads';
 import { installToken } from '@support/session';
 import type { Product, ToolshopApi } from '@support/toolshop-api';
-import { test as apiTest } from './api';
+import { test as adminTokenTest } from './admin-token';
 import { test as mocksTest } from './mocks';
 
 /**
@@ -20,17 +20,20 @@ import { test as mocksTest } from './mocks';
  */
 export type AdminSession = 'mocked' | 'storage-state';
 
-/** The records the mocked back office serves, so specs can assert against them. */
+/** The records the mocked back office serves, so specs can assert against them. (The real one has none to hand out: reading them there throws.) */
 export interface MockedBackOffice {
-  product: Product;
-  order: ReturnType<typeof A.order>;
+  readonly product: Product;
+  readonly order: ReturnType<typeof A.order>;
 }
+
+const NO_REAL_RECORDS = 'backOffice.product and backOffice.order exist only in the mocked session: the real back office serves the real catalogue (read it through the `catalog` fixture).';
 
 /**
  * Products the page created through the real API, watched from the requests and responses
  * themselves (a timed-out wait in the test cannot leak one) and deleted when the test ends, pass or
- * fail. It is automatic in the `storage-state` session, so no real-backend test can forget to ask for
- * it, and does nothing in the mocked session (whose "created" product is a real catalogue record).
+ * fail. A test that creates a product asks for it by name; it does nothing in the mocked session (whose
+ * "created" product is a real catalogue record). It is not automatic: an auto fixture would add a listener and a
+ * teardown to every test of the suite, for the few that create anything.
  * A product the UI deleted is dropped from the list as soon as its DELETE succeeds.
  */
 export interface CreatedProducts {
@@ -44,8 +47,6 @@ export interface BrandFactory {
 }
 
 export interface AdminFixtures {
-  /** Signs the real admin in through the API (once per test, on first use) and returns a fresh token, for arranging and cleaning up. */
-  adminToken: () => Promise<string>;
   createdProducts: CreatedProducts;
   brandFactory: BrandFactory;
   adminSession: AdminSession;
@@ -64,8 +65,10 @@ export interface AdminFixtures {
   /** Which report `adminSalesReport` opens, for specs that run the same case over both. */
   adminSalesPeriod: 'month' | 'week';
   adminSalesReport: AdminSalesReportPage;
+  /** The monthly report, whatever `adminSalesPeriod` says: for specs that are about that one report. */
   adminMonthlySales: AdminSalesReportPage;
-  adminWeeklySales: AdminSalesReportPage;
+  /** The dashboard page object, not opened and with no back office behind it: for a visitor who may be turned away before the dashboard asks for anything. */
+  adminEntrance: AdminDashboardPage;
   adminSettings: AdminSettingsPage;
 }
 
@@ -121,110 +124,92 @@ function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
   ];
 }
 
-export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
+export const test = mergeTests(adminTokenTest, mocksTest).extend<AdminFixtures>({
   adminSession: ['mocked', { option: true }],
-  // No runtime skip here: specs that need a real admin carry @admin, and the `admin` project that
-  // runs them is only scheduled where a real admin may be used (playwright.config.ts).
-  adminToken: async ({ api }, use) => {
-    const { email, password } = ADMIN_CREDENTIALS;
-    if (!email || !password) throw new Error('No admin credentials: set ADMIN_EMAIL and ADMIN_PASSWORD (the self-hosted shop is seeded with its own admin).');
-    // Lazy, so mocked specs never sign in; one login per test. A login that failed is not remembered: the next call tries again.
-    let token: Promise<string> | undefined;
-    await use(() => (token ??= api.login(email, password).catch((error: unknown) => {
-      token = undefined;
-      throw error;
-    })));
-  },
-  // Auto (like `xss`): an e2e test that created a product through the form and never asked for this fixture would leak it.
-  createdProducts: [
-    async ({ page, api, adminToken, adminSession }, use) => {
-      if (adminSession !== 'storage-state') {
-        await use({ pending: () => [] });
-        return;
-      }
-      const pending = new Set<string>();
-      const reads: Promise<void>[] = [];
-      // Names of products whose create request went out and whose id is not (yet) known: no response, a response
-      // that could not be read, or one still in flight. Their ids cannot be reached, so teardown looks them up by
-      // name, by walking the catalogue (the shop's search drops words under 3 letters, BUG-28, so it cannot find
-      // "Set of ..."). The names are unique per test, which is why this is not a sweep by the "QaLab" prefix:
-      // another worker's product, created at that moment, would match it too.
-      const unaccounted = new Set<string>();
-      page.on('request', (request) => {
-        if (request.method() !== 'POST' || apiPath(request.url()) !== '/products') return;
+  createdProducts: async ({ page, api, adminToken, adminSession }, use) => {
+    if (adminSession !== 'storage-state') {
+      await use({ pending: () => [] });
+      return;
+    }
+    const pending = new Set<string>();
+    const reads: Promise<void>[] = [];
+    // Names of products whose create request went out and whose id is not (yet) known: no response, a response
+    // that could not be read, or one still in flight. Their ids cannot be reached, so teardown looks them up by
+    // name, by walking the catalogue (the shop's search drops words under 3 letters, BUG-28, so it cannot find
+    // "Set of ..."). The names are unique per test, which is why this is not a sweep by the "QaLab" prefix:
+    // another worker's product, created at that moment, would match it too.
+    const unaccounted = new Set<string>();
+    // On the context, like the mock layer: a product created from a second tab is watched too.
+    const context = page.context();
+    context.on('request', (request) => {
+      if (request.method() !== 'POST' || apiPath(request.url()) !== '/products') return;
+      const name = postedName(request);
+      if (name) unaccounted.add(name);
+    });
+    context.on('response', (response) => {
+      const request = response.request();
+      const method = request.method();
+      const pathname = apiPath(response.url());
+      if (method === 'POST' && pathname === '/products') {
         const name = postedName(request);
-        if (name) unaccounted.add(name);
-      });
-      page.on('response', (response) => {
-        const request = response.request();
-        const method = request.method();
-        const pathname = apiPath(response.url());
-        if (method === 'POST' && pathname === '/products') {
-          const name = postedName(request);
-          if (!response.ok()) {
-            if (name) unaccounted.delete(name); // refused: nothing was created
-            return;
-          }
-          // Read at once: the id is the only handle teardown has on the product.
-          const read = response.json().then((body: { id?: string }) => {
-            if (!body.id) throw new Error('A create response carried no product id, so the product could not be cleaned up.');
-            pending.add(body.id);
-            if (name) unaccounted.delete(name);
-          });
-          read.catch(() => undefined); // reported in teardown; this only keeps the rejection from going unhandled meanwhile
-          reads.push(read);
-        } else if (method === 'DELETE' && /^\/products\/[^/]+$/.test(pathname) && response.ok()) {
-          pending.delete(pathname.split('/').pop()!);
+        if (!response.ok()) {
+          if (name) unaccounted.delete(name); // refused: nothing was created
+          return;
         }
-      });
-      await use({ pending: () => [...pending] });
+        // Read at once: the id is the only handle teardown has on the product.
+        const read = response.json().then((body: { id?: string }) => {
+          if (!body.id) throw new Error('A create response carried no product id, so the product could not be cleaned up.');
+          pending.add(body.id);
+          if (name) unaccounted.delete(name);
+        });
+        read.catch(() => undefined); // reported in teardown; this only keeps the rejection from going unhandled meanwhile
+        reads.push(read);
+      } else if (method === 'DELETE' && /^\/products\/[^/]+$/.test(pathname) && response.ok()) {
+        pending.delete(pathname.split('/').pop()!);
+      }
+    });
+    await use({ pending: () => [...pending] });
 
-      // Clean up everything that can be reached, whatever else fails, then report every failure at once.
-      const failures: unknown[] = (await Promise.allSettled(reads)).flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
-      const outcomes = await Promise.allSettled([
-        ...[...pending].map(async (id) => api.deleteProduct(await adminToken(), id)),
-        ...[...unaccounted].map(async (name) => {
-          const leaked = await findInCatalogue(api, name);
-          if (leaked) await api.deleteProduct(await adminToken(), leaked.id);
-        }),
-      ]);
-      failures.push(...outcomes.flatMap((r) => (r.status === 'rejected' ? [r.reason] : [])));
-      if (failures.length) throw new AggregateError(failures, `Cleaning up the products this test created failed ${failures.length} time(s)`);
-    },
-    { auto: true },
-  ],
-  brandFactory: async ({ request, adminToken }, use) => {
+    // Clean up everything that can be reached, whatever else fails, then report every failure at once.
+    const failures: unknown[] = (await Promise.allSettled(reads)).flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+    const outcomes = await Promise.allSettled([
+      ...[...pending].map(async (id) => api.deleteProduct(await adminToken(), id)),
+      ...[...unaccounted].map(async (name) => {
+        const leaked = await findInCatalogue(api, name);
+        if (leaked) await api.deleteProduct(await adminToken(), leaked.id);
+      }),
+    ]);
+    failures.push(...outcomes.flatMap((r) => (r.status === 'rejected' ? [r.reason] : [])));
+    if (failures.length) throw new AggregateError(failures, `Cleaning up the products this test created failed ${failures.length} time(s)`);
+  },
+  brandFactory: async ({ api, adminToken }, use) => {
     const made = new Set<string>(); // slugs, so a brand the UI saved under the same slug is removed as well
-    const headers = async () => ({ authorization: `Bearer ${await adminToken()}` });
     await use({
       async create() {
         const suffix = randomUUID().slice(0, 8);
         const brand = { name: `QaLab Brand ${suffix}`, slug: `qalab-brand-${suffix}` };
         made.add(brand.slug);
-        const response = await request.post(`${API_URL}/brands`, { data: brand, headers: await headers() });
-        if (!response.ok()) throw new Error(`Could not arrange the brand ${brand.slug}: POST /brands answered ${response.status()}`);
-        return { ...brand, id: ((await response.json()) as { id: string }).id };
+        return api.createBrand(await adminToken(), brand);
       },
     });
     if (!made.size) return;
-    const failures: unknown[] = [];
-    const brands = (await (await request.get(`${API_URL}/brands`)).json()) as { id: string; slug: string }[];
-    for (const { id, slug } of brands) {
-      if (!made.has(slug)) continue;
-      const response = await request.delete(`${API_URL}/brands/${id}`, { headers: await headers() });
-      if (!response.ok()) failures.push(new Error(`Could not remove the brand ${slug}: DELETE answered ${response.status()}`));
-    }
+    // Every removal is attempted whatever the others do, and every failure is reported at once, like the product cleanup.
+    const [outcome] = await Promise.allSettled([removeBrands(api, made, await adminToken())]);
+    const failures = outcome.status === 'rejected' ? [outcome.reason] : outcome.value;
     if (failures.length) throw new AggregateError(failures, 'Cleaning up the brands this test created failed');
   },
   adminListName: ['products', { option: true }],
 
-  backOffice: async ({ page, adminSession, apiMock, adminToken, catalog }, use) => {
+  backOffice: async ({ page, adminSession, apiMock, adminToken }, use) => {
     if (adminSession === 'storage-state') {
       // The storageState from admin.setup.ts carries the session, but Toolshop's JWT lives 300 s
       // and cannot be refreshed (/users/refresh answers 500), so a fresh token is put in place.
       await installToken(page, await adminToken());
-      const product = await catalog.inStock();
-      await use({ product, order: A.order(product) });
+      // No catalogue lookup for the tests that never ask: a test that reads a record learns why there is none.
+      await use({
+        get product(): Product { throw new Error(NO_REAL_RECORDS); },
+        get order(): MockedBackOffice['order'] { throw new Error(NO_REAL_RECORDS); },
+      });
       return;
     }
     // A fixed product, carrying the mocked brand and category the edit form can select: nothing here depends on the catalogue.
@@ -255,27 +240,29 @@ export const test = mergeTests(apiTest, mocksTest).extend<AdminFixtures>({
     await use(statistics);
   },
   adminSalesPeriod: ['month', { option: true }],
-  adminSalesReport: async ({ page, adminSalesPeriod, backOffice: _ }, use) => {
-    const report = new AdminSalesReportPage(page, adminSalesPeriod);
-    await report.open();
-    await use(report);
-  },
-  adminMonthlySales: async ({ page, backOffice: _ }, use) => {
-    const report = new AdminSalesReportPage(page, 'month');
-    await report.open();
-    await use(report);
-  },
-  adminWeeklySales: async ({ page, backOffice: _ }, use) => {
-    const report = new AdminSalesReportPage(page, 'week');
-    await report.open();
-    await use(report);
-  },
+  adminSalesReport: async ({ page, adminSalesPeriod, backOffice: _ }, use) => use(await openSalesReport(page, adminSalesPeriod)),
+  adminMonthlySales: async ({ page, backOffice: _ }, use) => use(await openSalesReport(page, 'month')),
+  // Unlike the other admin pages it needs no back office: it is also for a visitor who is not an admin.
+  adminEntrance: async ({ page }, use) => use(new AdminDashboardPage(page)),
   adminSettings: async ({ page, backOffice: _ }, use) => {
     const settings = new AdminSettingsPage(page);
     await settings.open();
     await use(settings);
   },
 });
+
+async function openSalesReport(page: Page, period: 'month' | 'week'): Promise<AdminSalesReportPage> {
+  const report = new AdminSalesReportPage(page, period);
+  await report.open();
+  return report;
+}
+
+/** Removes the brands with these slugs (the shop's brand list has no search), attempting every one and returning every failure. */
+async function removeBrands(api: ToolshopApi, slugs: ReadonlySet<string>, token: string): Promise<unknown[]> {
+  const brands = await api.listBrands();
+  const removals = await Promise.allSettled(brands.filter(({ slug }) => slugs.has(slug)).map(({ id }) => api.deleteBrand(token, id)));
+  return removals.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+}
 
 async function openList<Detail>(page: Page, config: ConstructorParameters<typeof AdminListPage<Detail>>[1]): Promise<AdminListPage<Detail>> {
   const list = new AdminListPage(page, config);

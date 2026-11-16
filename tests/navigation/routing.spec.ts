@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Routing', () => {
   const accountRoutes = ['/account', '/account/favorites', '/account/profile', '/account/invoices', '/account/messages'];
@@ -17,7 +17,7 @@ test.describe('Routing', () => {
     knownBug('BUG-01', '/admin keeps its URL and renders an empty page instead of redirecting to login.');
     await shop.appShell.goto('/admin');
 
-    await expect(page, 'BUG-01: /admin redirects to the login page').toHaveURL('/auth/login', { timeout: 8_000 });
+    await expect(page, 'BUG-01: /admin redirects to the login page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
   });
 
   test('an unknown route lands on a working home page', { tag: ['@negative', '@bug'] }, async ({ page, shop }) => {
@@ -27,7 +27,7 @@ test.describe('Routing', () => {
     // The page around the grid is there, so the grid's absence below is the defect and not a page that never loaded.
     await expect(shop.home.shell.header.brandLink).toBeVisible();
 
-    await expect(shop.home.grid.cards.first(), 'BUG-02: the product grid renders').toBeVisible({ timeout: 8_000 });
+    await expect(shop.home.grid.cards.first(), 'BUG-02: the product grid renders').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
   // Unknown routes redirect to the home page (BUG-02 is about the grid that page then fails to show).

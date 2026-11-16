@@ -1,44 +1,43 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, mock, test, withMocks } from '@fixtures';
-import type { Page } from '@playwright/test';
+import { expectImagesLoaded } from '@support/page-metrics';
 import { emptyProductPage } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
-
-/** Every image the page has requested is decoded: a shot taken before it would record a hole where the picture goes. */
-async function imagesLoaded(page: Page): Promise<void> {
-  await expect
-    .poll(() => page.evaluate(() => [...document.images].filter((image) => image.currentSrc !== '').every((image) => image.complete && image.naturalWidth > 0)), {
-      message: 'every image to be loaded before the screenshot',
-    })
-    .toBe(true);
-}
 
 /**
  * Screenshot comparisons of key pages and states. Baselines are recorded and compared only
  * inside the official Playwright image (scripts/visual.sh, pinned by digest and run as linux/amd64),
- * against the freshly seeded self-hosted shop, in Chromium at 1280×800 (and 390×844 for the phone shot):
- * same fonts, same data, same pixels everywhere. Animations are off, a shot waits for every image to be
- * decoded, and anything that can change between runs is masked.
+ * against the freshly seeded self-hosted shop: same fonts, same data, same pixels everywhere. Animations
+ * are off, a shot waits for every image to be decoded, and anything that can change between runs is masked.
+ *
+ * What this covers, and what it does not: ONE engine (Chromium, no Firefox or WebKit rendering), ONE theme (the shop has a
+ * single, light one: colour scheme is pinned to light), ONE language (English), ONE desktop width (1280×800) and ONE phone width
+ * (390×844, the home page only). A layout break that only shows in another engine, another width or another language is
+ * not seen here; the functional specs and the axe reflow check (tests/a11y) carry what they can of that.
  *
  * Two kinds of budget, because they prove different things. The full-page shots use the default `maxDiffPixels`
  * of playwright.config.ts (150): a net for layout, colour and missing or moved blocks. It does NOT catch a
- * changed price or label, which is a few dozen pixels. Those regions (a product's price, the out-of-stock
- * label, the cart's total) have element shots of their own with no budget at all: one changed glyph fails them.
+ * changed price or label, which is a few dozen pixels. Those regions (a product's price, a card's price, the out-of-stock
+ * label, the cart's total) have element shots of their own with no budget at all: `maxDiffPixels: 0` and `threshold: 0`
+ * (the default per-pixel colour tolerance would let a slightly different shade of the same glyph through), so one changed glyph fails them.
  */
+/** No pixel may differ, by any amount: for the regions a customer reads to decide (see the header). */
+const ZERO_BUDGET = { maxDiffPixels: 0, threshold: 0 } as const;
+
 test.describe('Visual regression', { tag: ['@visual'] }, () => {
   test('home page', async ({ homePage, api, page }) => {
     // A full first page: as many cards as the API serves for it, so the shot is not taken mid-render.
     const firstPage = await api.listProducts();
     await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('home.png', { fullPage: true, mask: [page.getByRole('slider')] });
   });
 
   test('product page', async ({ productPage, page }) => {
     await expect(productPage.relatedProducts.first()).toBeVisible();
     // Related products are picked by the API and their order varies.
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('product.png', { fullPage: true, mask: [productPage.relatedProducts] });
   });
 
@@ -47,40 +46,40 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     const [first] = await api.categoryTree();
     await categoryPage.open(first.slug);
     await expect(categoryPage.grid.cards.first()).toBeVisible();
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('category.png', { fullPage: true });
   });
 
   test('rentals', async ({ rentalsPage, page }) => {
     await expect(rentalsPage.grid.cards.first()).toBeVisible();
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('rentals.png', { fullPage: true });
   });
 
   test('contact form with errors', async ({ contactPage, page }) => {
     await contactPage.submit();
     await expect(contactPage.message.error).toBeVisible();
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('contact-errors.png', { fullPage: true });
   });
 
   test('login with errors', async ({ loginPage, page }) => {
     await loginPage.loginButton.click();
     await expect(loginPage.password.error).toBeVisible();
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('login-errors.png');
   });
 
   test('registration with errors', async ({ registerPage, page }) => {
     await registerPage.submit();
     await expect(registerPage.password.error).toBeVisible();
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('register-errors.png', { fullPage: true });
   });
 
   test('cart with a product', async ({ checkout, page }) => {
     await expect(checkout.cart.table.rows).toHaveCount(1);
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('cart.png');
   });
 
@@ -89,7 +88,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await checkout.signIn.continueAsGuest(fakeGuest());
     await expect(checkout.billing.heading).toBeVisible();
     // The guest summary line carries the generated email.
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('checkout-billing.png', { mask: [checkout.signIn.guestSummary] });
   });
 
@@ -98,7 +97,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('product out of stock', async ({ productPage, page }) => {
       await expect(productPage.outOfStock).toBeVisible();
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('product-out-of-stock.png', { fullPage: true, mask: [productPage.relatedProducts] });
     });
   });
@@ -108,14 +107,22 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await checkout.payment.choose('credit-card');
     await expect(checkout.payment.field('Credit Card Number')).toBeVisible();
     // The guest summary line carries the generated email.
-    await imagesLoaded(page);
+    await expectImagesLoaded(page);
     await expect(page).toHaveScreenshot('checkout-payment.png', { fullPage: true, mask: [checkout.signIn.guestSummary] });
   });
 
   // Element shots with no budget: the text a customer reads to decide, which the 150-pixel full-page budget would let change.
   test('product price', async ({ productPage }) => {
     await expect(productPage.price).toBeVisible();
-    await expect(productPage.price).toHaveScreenshot('product-price.png', { maxDiffPixels: 0 });
+    await expect(productPage.price).toHaveScreenshot('product-price.png', ZERO_BUDGET);
+  });
+
+  test('price on the first product card', async ({ homePage, api }) => {
+    // The first card of the shop's default order, which is the same on every freshly seeded shop: its price is read from the grid, not from the product page.
+    const firstPage = await api.listProducts();
+    await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
+    await expect(homePage.grid.first().price).toBeVisible();
+    await expect(homePage.grid.first().price).toHaveScreenshot('card-price.png', ZERO_BUDGET);
   });
 
   test.describe('out of stock label', () => {
@@ -123,14 +130,14 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('out-of-stock label', async ({ productPage }) => {
       await expect(productPage.outOfStock).toBeVisible();
-      await expect(productPage.outOfStock).toHaveScreenshot('out-of-stock-label.png', { maxDiffPixels: 0 });
+      await expect(productPage.outOfStock).toHaveScreenshot('out-of-stock-label.png', ZERO_BUDGET);
     });
   });
 
   test('cart total', async ({ checkout }) => {
     await expect(checkout.cart.table.rows).toHaveCount(1);
     await expect(checkout.cart.table.total).toBeVisible();
-    await expect(checkout.cart.table.total).toHaveScreenshot('cart-total.png', { maxDiffPixels: 0 });
+    await expect(checkout.cart.table.total).toHaveScreenshot('cart-total.png', ZERO_BUDGET);
   });
 
   test.describe('on a phone', () => {
@@ -138,7 +145,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('home page on a phone', async ({ homePage, page }) => {
       await expect(homePage.grid.cards.first()).toBeVisible();
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       // The header collapses behind its toggler here: the shot proves the phone layout, so it is the screen, not the page.
       await expect(page).toHaveScreenshot('home-phone.png');
     });
@@ -149,7 +156,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('home page with an empty catalogue', async ({ homePage, page }) => {
       await expect(homePage.grid.emptyState).toBeVisible();
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('home-empty-catalogue.png', { fullPage: true, mask: [page.getByRole('slider')] });
     });
   });
@@ -165,7 +172,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('account page', async ({ accountPage, page }) => {
       await expect(accountPage.title).toBeVisible();
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('account.png');
     });
   });
@@ -174,13 +181,13 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     test('admin dashboard', async ({ adminDashboard, page }) => {
       await expect(adminDashboard.latestOrders.rows.first()).toBeVisible();
       // The chart animates on a canvas; CSS animation switches do not reach it.
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('admin-dashboard.png', { mask: [adminDashboard.salesChart] });
     });
 
     test('admin orders list', async ({ adminOrders, backOffice, page }) => {
       await expect(adminOrders.table.row(backOffice.order.invoice_number)).toBeVisible();
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('admin-orders.png', { fullPage: true });
     });
 
@@ -188,7 +195,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
       const order = await adminOrders.edit(backOffice.order.invoice_number);
       await expect(order.lines.first()).toBeVisible();
       // The line carries a product from the real catalogue; its name is not what this shot is about.
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('admin-order.png', { fullPage: true, mask: [order.lines] });
     });
 
@@ -196,7 +203,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
       const form = await adminProducts.edit(backOffice.product.id);
       await expect(form.name).toHaveValue(backOffice.product.name);
       // The form shows the product's id, which the self-hosted shop makes anew on every reseed.
-      await imagesLoaded(page);
+      await expectImagesLoaded(page);
       await expect(page).toHaveScreenshot('admin-product-form.png', { fullPage: true, mask: [form.chrome.id] });
     });
   });

@@ -1,8 +1,9 @@
-import type { APIRequestContext, APIResponse, Page, TestInfo } from '@playwright/test';
-import { expect, test } from '@fixtures';
+import type { APIRequestContext, APIResponse, TestInfo } from '@playwright/test';
+import { apiOnlyTest as test, expect } from '@fixtures';
 import { knownBug } from '@support/known-bug';
-import { skipIfBotChallenge } from '@support/bot-challenge';
+import { skipIfChallengedResponse } from '@support/bot-challenge';
 import { API_URL, BASE_URL } from '@support/env';
+import { httpsUrl } from '@support/urls';
 
 /**
  * Response headers of the real deployment. Only meaningful on the live site: the self-hosted
@@ -12,7 +13,10 @@ import { API_URL, BASE_URL } from '@support/env';
  * Each pin first checks, outside the bug assertion, that the shop answered (a Cloudflare
  * challenge skips the test; any other non-2xx fails it without naming the pin), so a block page
  * can never stand in for "the header is missing". The bug assertion states the value a fixed
- * site would send, not just that the header exists.
+ * site would send, not just that the header exists. Plain HTTP, no browser: the file runs on the browserless `apiOnlyTest`,
+ * and a challenge is recognised by Cloudflare's `cf-mitigated: challenge` response header.
+ *
+ * Defect ids: SEC-01..06 are the pins below; the next free one is SEC-13 (the registry in docs/COVERAGE.md is the source).
  */
 
 /** The directives of a Content-Security-Policy, by name (lower-cased), each with its source list. */
@@ -65,36 +69,33 @@ const expected: { id: string; header: string; ok: (value: string) => boolean; ac
 ];
 
 /** The shop's own answer, once it has given one: a Cloudflare challenge skips, any other error fails. */
-async function shopAnswer({ request, page }: { request: APIRequestContext; page: Page }, testInfo: TestInfo): Promise<APIResponse> {
+async function shopAnswer(request: APIRequestContext, testInfo: TestInfo): Promise<APIResponse> {
   const response = await request.get(BASE_URL);
   await testInfo.attach('headers.json', { body: JSON.stringify(response.headers(), null, 2), contentType: 'application/json' });
-  if (response.status() === 403) {
-    await page.goto(BASE_URL);
-    await skipIfBotChallenge(page);
-  }
+  skipIfChallengedResponse(response);
   expect(response.status(), 'the shop answered before its headers are judged').toBeLessThan(400);
   return response;
 }
 
 /** The shop's response headers, once it has answered. */
-async function shopHeaders(fixtures: { request: APIRequestContext; page: Page }, testInfo: TestInfo) {
-  return (await shopAnswer(fixtures, testInfo)).headers();
+async function shopHeaders(request: APIRequestContext, testInfo: TestInfo) {
+  return (await shopAnswer(request, testInfo)).headers();
 }
 
 test.describe('Security headers of the live shop', { tag: ['@security', '@live-only', '@bug'] }, () => {
   for (const { id, header, ok, accepts, why } of expected) {
-    test(`the shop sends ${header}`, async ({ request, page }, testInfo) => {
+    test(`the shop sends ${header}`, async ({ request }, testInfo) => {
       knownBug(id, why);
-      const headers = await shopHeaders({ request, page }, testInfo);
+      const headers = await shopHeaders(request, testInfo);
 
       const sent = headers[header] ?? '';
       expect(ok(sent), `${id}: ${why} (sent "${sent}", wanted ${accepts})`).toBe(true);
     });
   }
 
-  test('the shop cannot be framed', async ({ request, page }, testInfo) => {
+  test('the shop cannot be framed', async ({ request }, testInfo) => {
     knownBug('SEC-02', 'no X-Frame-Options (or CSP frame-ancestors): the shop can be framed (clickjacking)');
-    const headers = await shopHeaders({ request, page }, testInfo);
+    const headers = await shopHeaders(request, testInfo);
 
     const frameOptions = (headers['x-frame-options'] ?? '').trim();
     const policy = headers['content-security-policy'] ?? '';
@@ -108,6 +109,7 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
   test('the API does not disclose its server version', async ({ request }) => {
     knownBug('SEC-06', 'the API answers with "Server: Apache/2.4.52 (Ubuntu)", disclosing product, version and OS.');
     const response = await request.get(`${API_URL}/status`);
+    skipIfChallengedResponse(response);
     expect(response.status(), 'the API answered before its headers are judged').toBeLessThan(400);
 
     expect(response.headers()['server'] ?? '', 'SEC-06: the Server header names a product version').not.toMatch(/\d+\.\d+/);
@@ -117,14 +119,15 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
 // Not pins, so a describe of their own without @bug (verify-bugs.mjs treats every @bug test as a pin that must fail).
 test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['@security', '@live-only'] }, () => {
   // The checks below are not pins: nothing is known about the live site's answer yet, so each states the behaviour a
-  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-10) then.
+  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-13) then.
   // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
 
-  test('every cookie the shop and its API set is Secure, HttpOnly and has a SameSite', async ({ request, page }, testInfo) => {
+  test('every cookie the shop and its API set is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
     // Both must have answered (a challenge skips): a block page or an error sets no cookies, and "none" would read as "all fine".
     const api = await request.get(`${API_URL}/status`);
+    skipIfChallengedResponse(api);
     expect(api.status(), 'the API answered before its cookies are judged').toBeLessThan(400);
-    const answers = [await shopAnswer({ request, page }, testInfo), api];
+    const answers = [await shopAnswer(request, testInfo), api];
     const cookies = answers.flatMap((answer) => answer.headersArray().filter(({ name }) => name.toLowerCase() === 'set-cookie').map(({ value }) => value));
     // A shop that sets no cookie has nothing to misconfigure, but the count is recorded so "none" is a stated fact and not an unread loop.
     testInfo.annotations.push({ type: 'cookies inspected', description: String(cookies.length) });
@@ -138,8 +141,9 @@ test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['
   });
 
   test('the API does not let another origin read it with credentials', async ({ request }) => {
-    const origin = 'https://attacker.example';
+    const origin = httpsUrl('attacker.example');
     const response = await request.get(`${API_URL}/status`, { headers: { origin } });
+    skipIfChallengedResponse(response);
     expect(response.status(), 'the API answered before its headers are judged').toBeLessThan(400);
 
     const allowedOrigin = response.headers()['access-control-allow-origin'] ?? '';
@@ -148,8 +152,8 @@ test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['
     expect(withCredentials && (allowedOrigin === origin || allowedOrigin === '*'), `an unknown origin may read the API with credentials (allow-origin "${allowedOrigin}", allow-credentials true)`).toBe(false);
   });
 
-  test('the shop sends a Permissions-Policy that switches off the camera, microphone and geolocation', async ({ request, page }, testInfo) => {
-    const headers = await shopHeaders({ request, page }, testInfo);
+  test('the shop sends a Permissions-Policy that switches off the camera, microphone and geolocation', async ({ request }, testInfo) => {
+    const headers = await shopHeaders(request, testInfo);
 
     const policy = headers['permissions-policy'] ?? '';
     for (const feature of ['camera', 'microphone', 'geolocation']) {

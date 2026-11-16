@@ -1,4 +1,5 @@
 import { expect, test } from '@fixtures';
+import { knownBug } from '@support/known-bug';
 import { ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { escapeRegExp } from '@support/regexp';
 
@@ -40,6 +41,9 @@ test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => 
   }
 });
 
+/** The same error, read from the error object itself (message text and the object's message), which every engine can give. */
+const CATEGORY_TYPE_ERROR = /categories\[0\]|reading 'name'/;
+
 /** The address bar is input too. Payloads go in as a path segment, percent-encoded as a browser would send them. */
 test.describe('Injection, reflected through the route (read-only)', { tag: ['@security'] }, () => {
   test.use({ xssWatch: true });
@@ -68,4 +72,27 @@ test.describe('Injection, reflected through the route (read-only)', { tag: ['@se
       await xss.expectNotExecuted();
     });
   }
+});
+
+/**
+ * Found while guarding the console: the category page throws on a slug it does not know, a slug that comes straight from the
+ * address bar. The page still draws (its title echoes the slug), so nothing visibly breaks, which is why only a console guard saw it.
+ */
+test.describe('Unknown route segments, uncaught errors (read-only)', { tag: ['@security', '@bug'] }, () => {
+  test('an unknown category slug does not throw an uncaught error', async ({ categoryPage, page }) => {
+    knownBug('SEC-13', 'the category page throws "TypeError: Cannot read properties of undefined (reading \'name\')" for a slug it does not know (any slug from the address bar).');
+    const logged: Promise<string>[] = [];
+    // The error object's own message, not the console text: Firefox prints an object it logged as `JSHandle@object`.
+    page.on('console', (message) => {
+      if (message.type() !== 'error') return;
+      logged.push(Promise.all(message.args().map((arg) => arg.evaluate((value) => (value instanceof Error ? `${value.name}: ${value.message}` : String(value))))).then((texts) => texts.join(' ')));
+    });
+
+    await categoryPage.open('qa-lab-no-such-category');
+    // Precondition, true whether or not the bug is fixed: the page drew for the slug (its answer was waited for in `open`).
+    await expect(categoryPage.title).toBeVisible();
+
+    const thrown = (await Promise.all(logged)).filter((text) => /TypeError/.test(text) && CATEGORY_TYPE_ERROR.test(text));
+    expect(thrown, 'SEC-13: the category page threw for an unknown slug').toEqual([]);
+  });
 });

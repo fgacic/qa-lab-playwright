@@ -37,8 +37,9 @@ export class BillingStep {
 
   /**
    * Country, postcode and house number trigger GET /postcode-lookup, which fills the rest.
-   * Returns the status of the last answer and what it suggested, so a caller that needs the
-   * lookup to work can say so and knows which fields the page is about to fill.
+   * Returns the status of the last answer to arrive (not of the last request sent: a slow answer for an
+   * earlier input may arrive after a later one, which is what BUG-41 pins) and what it suggested, so a caller
+   * that needs the lookup to work can say so and knows which fields the page is about to fill.
    */
   @step('Look up the address for {0.postalCode} {0.houseNumber}')
   async lookUp(address: Pick<Address, 'country' | 'postalCode' | 'houseNumber'>): Promise<LookupAnswer> {

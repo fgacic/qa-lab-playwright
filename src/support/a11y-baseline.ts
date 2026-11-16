@@ -11,7 +11,8 @@ export const SCAN_NAMES = [
   'account messages', 'account profile', 'admin dashboard', 'admin products', 'admin product form',
   'admin brands', 'admin brand form', 'admin categories', 'admin orders', 'admin users', 'admin order',
   'admin user form', 'admin messages', 'admin statistics', 'admin message', 'admin sales report',
-  'admin settings', 'home on a phone', 'product on a phone',
+  'admin settings', 'home on a phone', 'product on a phone', 'language menu open', 'mobile menu open', 'product with a toast', 'compare bar',
+  'order confirmation', 'admin brand deleted',
 ] as const;
 export type ScanName = (typeof SCAN_NAMES)[number];
 
@@ -22,7 +23,7 @@ export interface KnownViolation {
   /** WCAG success criterion. */
   wcag: string;
   target: string;
-  /** The scans (names in pages.a11y.spec.ts) it was recorded on. */
+  /** The scans (names in pages.a11y.spec.ts) it was recorded on: `page` first, then `alsoOn`. */
   pages: ScanName[];
   /** The most elements of this kind it was recorded on in one scan. */
   nodes: number;
@@ -33,14 +34,19 @@ export interface KnownViolation {
    * recorded and nowhere else, but its element count is not held to the self-hosted one.
    */
   seedDependent?: true;
-  /** Where its pin test scans: one of the pages it occurs on, so a typo is a compile error and the pin cannot scan a page the entry does not name. */
+  /** Where its pin test scans. It is one of `pages` by construction (see `known` below), so the pin cannot scan a page the entry does not name. */
   page: ScanName;
   summary: string;
 }
 
+/** An entry as it is written: the page its pin scans, and the other pages it was recorded on. */
+type KnownViolationEntry = Omit<KnownViolation, 'pages'> & { alsoOn?: readonly ScanName[] };
+const known = ({ alsoOn = [], ...entry }: KnownViolationEntry): KnownViolation => ({ ...entry, pages: [entry.page, ...alsoOn] });
+
 /**
  * The scans the language button, present in the header of every desktop page, is recorded on. At phone width the header collapses behind its
- * toggler and the button is not scanned (nothing is reported there), so the phone scans are not among them.
+ * toggler and the button is not scanned while it is closed (nothing is reported there), so the two closed phone scans are not among them;
+ * once the menu is open (`mobile menu open`) the button is scanned and reported again.
  */
 const EVERY_PAGE: ScanName[] = SCAN_NAMES.filter((name) => !name.endsWith('on a phone'));
 
@@ -53,20 +59,28 @@ const EVERY_PAGE: ScanName[] = SCAN_NAMES.filter((name) => !name.endsWith('on a 
  * so the same selector on another page, or the defect spreading, is a new violation.
  * Rebuild from a real run (refuses to run on CI):
  *   A11Y_RECORD=/tmp/findings.jsonl npx playwright test tests/a11y/pages.a11y.spec.ts --project=chromium
- * then fill `pages` and `nodes` from the JSON lines (page, rule, target, nodes).
+ * then fill `page`, `alsoOn` (the other pages of the entry) and `nodes` from the JSON lines (page, rule, target, nodes).
  */
-export const KNOWN_VIOLATIONS: KnownViolation[] = [
-  { id: 'AX-01', rule: 'aria-required-children', impact: 'critical', wcag: '1.3.1', target: '.nav', pages: ['checkout sign-in'], nodes: 1, page: 'checkout sign-in', summary: 'The sign-in / guest tab list (role tablist) contains list items instead of tabs.' },
-  { id: 'AX-02', rule: 'aria-required-parent', impact: 'critical', wcag: '1.3.1', target: 'a[href$="#signin-tab"]', pages: ['checkout sign-in'], nodes: 1, page: 'checkout sign-in', summary: 'The "Sign in" tab is not directly inside its tablist.' },
-  { id: 'AX-03', rule: 'aria-required-parent', impact: 'critical', wcag: '1.3.1', target: 'a[href$="#guest-tab"]', pages: ['checkout sign-in'], nodes: 1, page: 'checkout sign-in', summary: 'The "Continue as Guest" tab is not directly inside its tablist.' },
-  { id: 'AX-04', rule: 'button-name', impact: 'critical', wcag: '4.1.2', target: '.btn-outline-secondary', pages: ['login with errors', 'register with errors'], nodes: 1, page: 'login with errors', summary: 'The show-password button has no accessible name (login, register; see A11Y-02).' },
-  { id: 'AX-05', rule: 'button-name', impact: 'critical', wcag: '4.1.2', target: 'app-password-input[formcontrolname="new_password"] > .input-group > .input-group-append > .btn-outline-secondary.btn[type="button"]', pages: ['account profile'], nodes: 1, page: 'account profile', summary: 'The show-password button of "New Password" has no accessible name.' },
-  { id: 'AX-06', rule: 'button-name', impact: 'critical', wcag: '4.1.2', target: 'app-password-input[formcontrolname="new_password_confirmation"] > .input-group > .input-group-append > .btn-outline-secondary.btn[type="button"]', pages: ['account profile'], nodes: 1, page: 'account profile', summary: 'The show-password button of "Confirm New Password" has no accessible name.' },
-  { id: 'AX-07', rule: 'color-contrast', impact: 'serious', wcag: '1.4.3', target: '.badge', pages: ['admin messages', 'admin message'], nodes: 1, page: 'admin messages', summary: 'Status badges in the admin inbox have too little contrast.' },
-  { id: 'AX-08', rule: 'label-content-name-mismatch', impact: 'serious', wcag: '2.5.3', target: '#language', pages: EVERY_PAGE, nodes: 1, page: 'home', summary: 'The language button shows "EN" but is named "Select language", so voice control by its label fails (every page).' },
-  { id: 'AX-09', rule: 'label-content-name-mismatch', impact: 'serious', wcag: '2.5.3', target: 'a[data-test="nav-cart"]', pages: ['cart', 'checkout sign-in', 'checkout guest with errors', 'checkout billing', 'checkout payment'], nodes: 1, page: 'cart', summary: 'The cart link shows the item count but its name does not contain it.' },
-  { id: 'AX-10', rule: 'list', impact: 'serious', wcag: '1.3.1', target: '#passwordHelp > ul', pages: ['register with errors', 'account profile'], nodes: 1, page: 'register with errors', summary: 'The password rules list contains a non-list element.' },
-  { id: 'AX-11', rule: 'list', impact: 'serious', wcag: '1.3.1', target: '.checkbox > ul', pages: ['home', 'search results', 'search without results', 'chat open'], nodes: 3, seedDependent: true, page: 'home', summary: 'The subcategory lists in the filters contain groups instead of list items.' },
-  { id: 'AX-12', rule: 'listitem', impact: 'serious', wcag: '1.3.1', target: '.nav > .nav-item', pages: ['checkout sign-in'], nodes: 2, page: 'checkout sign-in', summary: 'The tab list items are not inside a list (role overridden to tablist).' },
-  { id: 'AX-13', rule: 'target-size', impact: 'serious', wcag: '2.5.8', target: '.card > .card-body > a[href="#"][large=""]', pages: ['product', 'product out of stock', 'product on a phone'], nodes: 4, seedDependent: true, page: 'product', summary: 'The "More information" links of related products are smaller than 24×24 px and too close together.' },
-];
+const ENTRIES = [
+  { id: 'AX-01', rule: 'aria-required-children', impact: 'critical', wcag: '1.3.1', target: '.nav', nodes: 1, page: 'checkout sign-in', summary: 'The sign-in / guest tab list (role tablist) contains list items instead of tabs.' },
+  { id: 'AX-02', rule: 'aria-required-parent', impact: 'critical', wcag: '1.3.1', target: 'a[href$="#signin-tab"]', nodes: 1, page: 'checkout sign-in', summary: 'The "Sign in" tab is not directly inside its tablist.' },
+  { id: 'AX-03', rule: 'aria-required-parent', impact: 'critical', wcag: '1.3.1', target: 'a[href$="#guest-tab"]', nodes: 1, page: 'checkout sign-in', summary: 'The "Continue as Guest" tab is not directly inside its tablist.' },
+  { id: 'AX-04', rule: 'button-name', impact: 'critical', wcag: '4.1.2', target: '.btn-outline-secondary', nodes: 1, page: 'login with errors', alsoOn: ['register with errors'], summary: 'The show-password button has no accessible name (login, register; see A11Y-02).' },
+  { id: 'AX-05', rule: 'button-name', impact: 'critical', wcag: '4.1.2', target: 'app-password-input[formcontrolname="new_password"] > .input-group > .input-group-append > .btn-outline-secondary.btn[type="button"]', nodes: 1, page: 'account profile', summary: 'The show-password button of "New Password" has no accessible name.' },
+  { id: 'AX-06', rule: 'button-name', impact: 'critical', wcag: '4.1.2', target: 'app-password-input[formcontrolname="new_password_confirmation"] > .input-group > .input-group-append > .btn-outline-secondary.btn[type="button"]', nodes: 1, page: 'account profile', summary: 'The show-password button of "Confirm New Password" has no accessible name.' },
+  { id: 'AX-07', rule: 'color-contrast', impact: 'serious', wcag: '1.4.3', target: '.badge', nodes: 1, page: 'admin messages', alsoOn: ['admin message'], summary: 'Status badges in the admin inbox have too little contrast.' },
+  { id: 'AX-08', rule: 'label-content-name-mismatch', impact: 'serious', wcag: '2.5.3', target: '#language', nodes: 1, page: 'home', alsoOn: EVERY_PAGE.filter((name) => name !== 'home'), summary: 'The language button shows "EN" but is named "Select language", so voice control by its label fails (every page).' },
+  { id: 'AX-09', rule: 'label-content-name-mismatch', impact: 'serious', wcag: '2.5.3', target: 'a[data-test="nav-cart"]', nodes: 1, page: 'cart', alsoOn: ['checkout sign-in', 'checkout guest with errors', 'checkout billing', 'checkout payment', 'product with a toast'], summary: 'The cart link shows the item count but its name does not contain it.' },
+  { id: 'AX-10', rule: 'list', impact: 'serious', wcag: '1.3.1', target: '#passwordHelp > ul', nodes: 1, page: 'register with errors', alsoOn: ['account profile'], summary: 'The password rules list contains a non-list element.' },
+  { id: 'AX-11', rule: 'list', impact: 'serious', wcag: '1.3.1', target: '.checkbox > ul', nodes: 3, seedDependent: true, page: 'home', alsoOn: ['search results', 'search without results', 'chat open', 'language menu open', 'compare bar'], summary: 'The subcategory lists in the filters contain groups instead of list items.' },
+  { id: 'AX-12', rule: 'listitem', impact: 'serious', wcag: '1.3.1', target: '.nav > .nav-item', nodes: 2, page: 'checkout sign-in', summary: 'The tab list items are not inside a list (role overridden to tablist).' },
+  { id: 'AX-13', rule: 'target-size', impact: 'serious', wcag: '2.5.8', target: '.card > .card-body > a[href="#"][large=""]', nodes: 4, seedDependent: true, page: 'product', alsoOn: ['product out of stock', 'product on a phone', 'product with a toast'], summary: 'The "More information" links of related products are smaller than 24×24 px and too close together.' },
+] as const satisfies readonly KnownViolationEntry[];
+
+/** The ids of the entries above: a pin's anchor table is keyed by them, so a typo or a stale id is a compile error. */
+export type AxId = (typeof ENTRIES)[number]['id'];
+
+/** A baseline entry with its id narrowed to the ids that exist. */
+export type PinnedViolation = KnownViolation & { id: AxId };
+
+export const KNOWN_VIOLATIONS: PinnedViolation[] = ENTRIES.map((entry) => ({ ...known(entry), id: entry.id }));

@@ -32,7 +32,7 @@ export const describeUiText = ({ kind, text }: UiText): string => (kind === 'tex
  * What a read skips, by what it is looking for. Both lists are CSS, because these are containers with
  * no role to find them by, and both skip an element's text and its descendants' attributes.
  *
- * Real data (DATA) is skipped by every read: product, brand and category names, descriptions, specs,
+ * Real data (DATA) is skipped by every read (the two reads add their own, STRAY_SCAN_DATA and KEY_SCAN_DATA): product, brand and category names, descriptions, specs,
  * prices, what the visitor typed, the signed-in customer's name, product images (their alt text is the
  * product's name) and the training-aid bar laid over the shop for testers. It is never translated, and
  * its text is not the shop's, so not even a leaked key could be the shop's doing. A product card is not
@@ -44,16 +44,13 @@ const DATA = [
   '[data-test="product-name"]', '[data-test="product-description"]', '[data-test="product-price"]', '[data-test="unit-price"]',
   // A cart line's product title, and the product page's spec table.
   '[data-test="product-title"]', '[data-test="product-specs"]',
-  // A card's title (a product's or a related product's name) and the <figure> around the product page's image, whose caption credits the photographer.
-  // Not the card itself: its Compare button, its CO2 scale and its "Out of stock" label are the shop's own text and are read.
-  '.card-title', 'figure',
+  // The image of the product page: its alt text is the product's name. (The photographer's credit beside it is read by the key scan.)
+  'figure img',
   // The filter checkboxes' labels: the names of categories and brands.
   'label:has([data-test^="category-"])', 'label:has([data-test^="brand-"])',
   // A card's image (in the grid, among the related products, in the rentals list): its alt text and tooltip are the product's name.
   // Not the wrapper around it, which also holds the Compare button.
   '.card img',
-  // A rental's description, under its name.
-  '.card-text',
   // The comparison table's data: brand, category, spec values and descriptions, the spec names that head those rows (the rows of
   // "Price", "Brand" or "Availability" are the shop's own words and are read), and the product images in its header.
   '[data-test="compare-brand"]', '[data-test="compare-category"]', '[data-test="compare-spec"]', '[data-test="compare-description"]',
@@ -68,6 +65,20 @@ const DATA = [
   // Never visible text, but the tree walker would read their source as text nodes.
   'script', 'style',
 ];
+
+/**
+ * What the key-leak read skips on top of DATA: the name and description of a card that shows a product's picture (the grid, the related
+ * products, the rentals). Nothing else on a card: `.card-title` and `.card-text` are also what the shop's own cards (the account tiles) use
+ * for their words, and the photographer's credit under the product page's image is the shop's too, so a leaked key in any of them is seen.
+ */
+const KEY_SCAN_DATA = ['.card:has(img) .card-title', '.card:has(img) .card-text'];
+
+/**
+ * What the stray-English read skips on top of DATA, wider than the key scan's because it only compares with English: every card's title and
+ * text (a product's name and description, a rental's description) and the whole <figure> around the product page's image, whose caption
+ * credits the photographer (a name and a link to an external site, the same in every language).
+ */
+const STRAY_SCAN_DATA = ['.card-title', '.card-text', 'figure'];
 
 /**
  * Wording that is legitimately the same in every language, which only the stray-English comparison
@@ -101,7 +112,7 @@ const SHELL = ['app-root > .bg-dark', 'app-header', 'app-footer', 'app-chat-widg
  *
  * `readFor` says what the read is for. Looking for 'strays' also leaves out the shared wording and the
  * containers whose text is not language (TEXT_ONLY); looking for 'keys' leaves out only the shop's real data
- * (DATA), so a raw key standing in a footer blurb or a slider's label is still seen.
+ * (DATA and KEY_SCAN_DATA), so a raw key standing in a footer blurb, a slider's label, an account tile or a photographer's credit is still seen.
  */
 export async function visibleUiText(page: Page, readFor: ReadFor = 'strays'): Promise<UiText[]> {
   const strays = readFor === 'strays';
@@ -125,7 +136,12 @@ export async function visibleUiText(page: Page, readFor: ReadFor = 'strays'): Pr
         // Fewer than two characters is a glyph or a unit ("x", "€", "%"), and text with no letter is a number or a symbol: neither is a word to translate.
         if (text.length < 2 || !/\p{L}/u.test(text) || inside(el, data) || !shown(el)) return;
         if (textOnlyToo && inside(el, textOnly)) return;
-        out.set(`${kind}\u0000${text}`, { kind, text, part: inside(el, shell) ? 'shell' : 'page' });
+        // The same string in the header and in the route's content is on the page: a `page` occurrence is never hidden by a `shell` one read first.
+        const key = `${kind}\u0000${text}`;
+        const part = inside(el, shell) ? 'shell' : 'page';
+        const seen = out.get(key);
+        if (!seen) out.set(key, { kind, text, part });
+        else if (part === 'page') seen.part = 'page';
       };
 
       add('page-title', document.title, document.body, false);
@@ -145,7 +161,7 @@ export async function visibleUiText(page: Page, readFor: ReadFor = 'strays'): Pr
       for (const el of document.querySelectorAll('input[type="submit"], input[type="button"], input[type="reset"]')) add('value', el.getAttribute('value'), el, false);
       return [...out.values()];
     },
-    { data: strays ? [...DATA, ...SHARED_WORDING] : DATA, textOnly: strays ? TEXT_ONLY : [], shell: SHELL },
+    { data: strays ? [...DATA, ...STRAY_SCAN_DATA, ...SHARED_WORDING] : [...DATA, ...KEY_SCAN_DATA], textOnly: strays ? TEXT_ONLY : [], shell: SHELL },
   );
 }
 
@@ -213,6 +229,11 @@ export async function settledUiText(page: Page, traffic?: DataTraffic, readFor: 
  * keeps a number ("1,234.56", "2.5kg", "0800.123.456", "v5.3.1", "17.00") from being one. A dot
  * followed by a space ends a sentence, so it never continues a key. Abbreviation-like, domain-like
  * and file-like matches are dropped (NOT_KEYS).
+ *
+ * Documented gap: a key with ONE segment ("home", "HOME", "nav-home", "login_title") has no dot to tell it from a word,
+ * so it is not detected as a key (tests/i18n/translation-keys.spec.ts pins that). A single-segment key that leaked
+ * shows up in the stray-English comparison instead, where it equals the English rendering, unless English shows
+ * the same key too.
  */
 const SEGMENT = String.raw`[\p{L}\p{N}][\p{L}\p{N}_-]*`;
 const KEY = new RegExp(String.raw`(?<![\p{L}\p{N}@/._-])${SEGMENT}(?:\.${SEGMENT})+(?![\p{L}\p{N}@/_-]|\.[\p{L}\p{N}])`, 'gu');

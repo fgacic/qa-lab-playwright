@@ -12,7 +12,7 @@ export class PromoBanners {
   readonly guidePrevious: Locator;
   readonly guideProgress: Locator;
 
-  constructor(page: Page) {
+  constructor(private readonly page: Page) {
     this.documentationLink = page.getByRole('link', { name: 'Documentation' });
     this.testingGuideButton = page.getByRole('button', { name: 'Testing Guide' });
     this.bugHuntingButton = page.getByRole('button', { name: /Bug Hunting/ });
@@ -22,6 +22,19 @@ export class PromoBanners {
     this.guideNext = page.getByRole('button', { name: 'Next →' });
     this.guidePrevious = page.getByRole('button', { name: '← Previous' });
     this.guideProgress = page.getByText(/^Step \d+ of \d+$/);
+  }
+
+  /** The guide's progress line when it shows step `n`. */
+  guideStep(n: number): Locator {
+    return this.page.getByText(new RegExp(`^Step ${n} of \\d+$`));
+  }
+
+  /** How many steps the guide has, read from its progress line. */
+  async guideStepCount(): Promise<number> {
+    const text = (await this.guideProgress.textContent()) ?? '';
+    const count = /of (\d+)$/.exec(text)?.[1];
+    if (!count) throw new Error(`The guide's progress line does not say how many steps there are: "${text}"`);
+    return Number(count);
   }
 
   @step('Open the testing guide')

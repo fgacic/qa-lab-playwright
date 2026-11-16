@@ -82,6 +82,12 @@ export class PaymentStep {
     await this.confirmButton.click();
   }
 
+  /** A shopper who double-clicks Confirm: both clicks reach the button before the page can react to the first. */
+  @step('Confirm the order with a double click')
+  async confirmWithDoubleClick(): Promise<void> {
+    await this.confirmButton.dblclick();
+  }
+
   /** The one method that needs no financial details: choose it, check, confirm. */
   @step('Pay cash on delivery')
   async payOnDelivery(): Promise<void> {
