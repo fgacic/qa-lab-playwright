@@ -12,7 +12,7 @@ RUN git init /src && cd /src \
 
 FROM composer:2.8.3 AS composer
 
-FROM php:8.3.13-fpm-alpine3.20
+FROM php:8.4.8-fpm-alpine3.20
 RUN apk add --no-cache mysql-client libzip libpng libjpeg-turbo libwebp freetype icu \
  && apk add --no-cache --virtual .build icu-dev zlib-dev g++ make autoconf libffi-dev libzip-dev libpng-dev libwebp-dev libjpeg-turbo-dev freetype-dev \
  && docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg --with-webp \
