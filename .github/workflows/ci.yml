@@ -79,7 +79,8 @@ jobs:
           # nothing else may run between the setup and the specs that use it (fixtures/auth.ts, `storage-state`).
           - { id: sessions, browsers: chromium, projects: --project=account --project=admin, shard: 1/1 }
           # The suite's own plumbing (the mock layer, the target configuration, the defect-id bookkeeping), once.
-          - { id: framework, browsers: chromium, projects: --project=framework, shard: 1/1 }
+          # The answer-gate control and the verify-bugs self-tests launch Firefox and WebKit themselves.
+          - { id: framework, browsers: chromium firefox webkit, projects: --project=framework, shard: 1/1 }
           # The phone smoke set.
           - { id: mobile, browsers: chromium, projects: --project=mobile, shard: 1/1 }
     steps:
