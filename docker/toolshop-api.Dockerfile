@@ -10,7 +10,7 @@ RUN git init /src && cd /src \
  && git remote add origin https://github.com/testsmith-io/practice-software-testing.git \
  && git fetch --depth 1 origin "${TOOLSHOP_REF}" && git checkout FETCH_HEAD
 
-FROM composer:2.8.3 AS composer
+FROM composer:2.11.1 AS composer
 
 FROM php:8.3.13-fpm-alpine3.20
 RUN apk add --no-cache mysql-client libzip libpng libjpeg-turbo libwebp freetype icu \
