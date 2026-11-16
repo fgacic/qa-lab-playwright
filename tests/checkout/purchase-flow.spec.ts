@@ -60,17 +60,16 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     ]);
 
     expect(response.status(), JSON.stringify(invoice)).toBe(201);
-    await expect(checkout.wizard.confirmation).toHaveText(`Thanks for your order! Your invoice number is ${invoice.invoice_number}.`);
+    await expect(checkout.wizard.confirmationFor(invoice.invoice_number)).toBeVisible();
     expect(invoice.invoice_number).toMatch(/^INV-\d{10}$/);
     await expect(checkout.header.cartLink).toHaveCount(0);
   });
 
   test('search, fill a cart with three products, then change a quantity and remove a line', async ({ homePage, catalog, api }) => {
     // Three distinct products, chosen by the catalogue and not by what a search happens to list first.
-    const first = await catalog.inStock();
-    const second = await catalog.anotherInStock();
-    const third = await api.inStockProduct([first.id, second.id]);
-    const [kept, removed, alsoKept] = [first, second, third];
+    const kept = await catalog.inStock();
+    const removed = await catalog.anotherInStock();
+    const alsoKept = await api.inStockProduct([kept.id, removed.id]);
     for (const product of [kept, removed, alsoKept]) {
       await homePage.search.searchFor(product.name);
       await expect(homePage.search.caption).toHaveText(`Searched for: ${product.name}`);
@@ -130,17 +129,19 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
       expect(invoice.billing_city, 'the order is billed to the address on screen').toBe(billedCity);
     });
   });
+
   test('a double click on Confirm places one order', { tag: ['@self-hosted', '@bug'] }, async ({ checkout, apiMock }) => {
     knownBug('BUG-46', 'a double click on Confirm sends the order twice, so two invoices are created for one cart.');
     await checkout.proceedToPayment(fakeGuest(), fakeAddress());
     await checkout.payment.choose('cash-on-delivery');
     await checkout.payment.checkPayment();
     await expect(checkout.payment.confirmButton).toBeEnabled();
+    const before = await apiMock.mark();
 
     await checkout.payment.confirmWithDoubleClick();
 
     await expect(checkout.wizard.confirmation).toBeVisible();
-    expect(apiMock.requestsTo('POST', '/invoices/guest'), 'BUG-46: one order is sent for one cart').toBe(1);
+    expect(apiMock.requestsTo('POST', '/invoices/guest', { since: before }), 'BUG-46: one order is sent for one cart').toBe(1);
   });
 
   test('browser Back from the sign-in step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {

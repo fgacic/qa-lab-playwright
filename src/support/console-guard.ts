@@ -1,4 +1,5 @@
-import { API_URL } from './env';
+import type { JSHandle } from '@playwright/test';
+import { apiPath, isApiUrl } from './env';
 
 /**
  * What counts as a browser error a test must not ignore: anything the page logs with `console.error` or throws
@@ -7,6 +8,25 @@ import { API_URL } from './env';
 export interface Allowance {
   pattern: RegExp;
   reason: string;
+  /** The error is allowed only while the page that logged it is on a path this matches (a defect belongs to one screen, not to the whole site). */
+  route?: RegExp;
+  /** The error is allowed only when the browser reports this URL for it (the failing resource of a "Failed to load resource"). */
+  url?: RegExp;
+  /**
+   * The error is allowed only in a test in which the browser received at least one answer of the shop that this matches: a log that
+   * is only the echo of a request (the 401 of `GET /users/me`) means nothing without that request. It is not one log per answer:
+   * the SPA shares one request between several subscribers and each logs the refusal, so WebKit receives 4 such 401s and the SPA
+   * logs 6 times. The answer is read from the response the browser received, not from a console line of its own, because Chromium
+   * logs a "Failed to load resource" for a 401 and Firefox and WebKit do not.
+   */
+  requiresAnswer?: (answer: ApiAnswer) => boolean;
+}
+
+/** One response of the shop's API the browser received, in any engine (`context.on('response')`). */
+export interface ApiAnswer {
+  method: string;
+  pathname: string;
+  status: number;
 }
 
 export interface BrowserError {
@@ -20,6 +40,14 @@ export interface BrowserError {
   args?: string;
   /** The URL the browser reports for the message: the failing resource for a "Failed to load resource". */
   url?: string;
+  /** The path of the page that logged or threw it, when the browser said which page. */
+  route?: string;
+}
+
+/** What the mock layer answered with, for `isApiResourceFailure`: the API path and either the HTTP status or `'aborted'`. */
+export interface MockAnswer {
+  pathname: string;
+  outcome: number | 'aborted';
 }
 
 /**
@@ -37,14 +65,24 @@ export const EXPECTED_ANSWER_LOGS: readonly Allowance[] = [
   {
     pattern: /\bmessage"?: ?"?Unauthorized\b/,
     reason: 'every anonymous page load asks GET /users/me, gets the 401 it should, and the SPA logs the refusal as an error',
+    // Only as the echo of that very request: no "Unauthorized" log without a 401 of GET /users/me.
+    requiresAnswer: (answer) => answer.method === 'GET' && answer.pathname === '/users/me' && answer.status === 401,
   },
   {
     pattern: /"status":404,[^\n]*"url":"[^"]*\/products\/[^"]+"/,
+    route: /^\/product\//,
     reason: 'a product id the shop does not know: the SPA logs the 404 (an HttpErrorResponse) it got, handled, and draws the page without a product',
   },
   {
     pattern: /"status":500,[^\n]*"url":"[^"]*\/products\/[^"]+\/related"[^\n]*"message":"Product with ID /,
+    route: /^\/product\//,
     reason: 'the related products of that unknown id: the shop answers 500 "Product with ID … not found" (the same missing product), and the SPA logs it, handled',
+  },
+  {
+    pattern: /^Failed to load resource: the server responded with a status of 500\b/,
+    url: /\/products\/[^/]+\/related$/,
+    route: /^\/product\//,
+    reason: 'the browser\'s own line for the 500 the shop answers for the related products of a product id it does not know (the same missing product as the 404 above); the SPA handles it and draws the page without a product',
   },
   {
     pattern: /^ERROR XMLHttpRequestProgressEvent$/,
@@ -61,16 +99,19 @@ export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string })[] = [
   {
     id: 'BUG-37',
     pattern: /angularx-qrcode.*Field `qrdata` is empty/,
+    route: /^\/account\/profile$/,
     reason: 'the profile page draws its two-factor QR code from an empty secret before the setup answers, and logs it every time',
   },
   {
     id: 'BUG-38',
     pattern: /TypeError:.*\bcart_items\b/s,
+    route: /^\/checkout$/,
     reason: 'the checkout reads cart_items of a cart that is not there yet (or no longer) while it moves between steps and after the order; the page still renders',
   },
   {
     id: 'SEC-13',
     pattern: /TypeError: (?:Cannot read properties of undefined \(reading 'name'\)|undefined is not an object \(evaluating 'this\.categories\[0\]\.name'\)|.*this\.categories\[0\].* is undefined)/,
+    route: /^\/category\//,
     reason: 'the category page reads the name of a category that has not arrived (or does not exist) and throws; the page is drawn once it has arrived',
   },
   {
@@ -81,11 +122,20 @@ export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string })[] = [
   {
     id: 'BUG-47',
     pattern: /TypeError: (?:Cannot read properties of undefined \(reading 'value'\)|undefined is not an object \(evaluating '[\w.$]*\.value'\)|can't access property "value", [\w.$]+ is undefined)/,
+    route: /^\/account\/profile$/,
     reason: 'the profile page reads `.value` of something that is not there each time its change-password request is answered, whatever the answer; the page still shows the answer',
+  },
+  {
+    id: 'BUG-54',
+    pattern: /^Failed to load resource: the server responded with a status of 500\b/,
+    url: /\/users\/refresh$/,
+    route: /^\/(?:account(?:\/|$)|auth\/login$)/,
+    reason: 'a signed-out visit of a protected page asks GET /users/refresh with no token and gets an unhandled JWTException (500) instead of 401, then goes to the login page',
   },
   {
     id: 'ADM-21',
     pattern: /NG01002|Must supply a value for form control/,
+    route: /^\/admin\/users(?:\/|$)/,
     reason: 'after the API accepts a new user the SPA throws an unhandled Angular error although the form says "User saved!"',
   },
 ];
@@ -94,23 +144,66 @@ export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string })[] = [
 export const SUITE_WIDE_ALLOWANCES: readonly Allowance[] = [...THIRD_PARTY_NOISE, ...EXPECTED_ANSWER_LOGS, ...PINNED_DEFECT_LOGS];
 
 /**
- * "Failed to load resource: the server responded with a status of 500" is the browser's own line for any failed request.
- * For the shop's API it is the mirror of a response the suite already controls (a mock) or asserts (a status), so it
- * adds nothing; for any other resource (an image, a script, a font) it is a broken asset and does fail the test.
+ * "Failed to load resource: the server responded with a status of 500" is the browser's own line for any failed request. It is
+ * the mirror of an answer the suite already controls or asserts, so it adds nothing, only in these two cases:
+ * - the shop answered with a status the suite expects of it (`EXPECTED_API_STATUSES`: the 401 of an anonymous `GET /users/me`, the
+ *   404 of an id it does not know, the 422 and 409 with which it refuses invalid or conflicting input, which the tests that send such input assert), or
+ * - the request is one a mock of this test answered (with that status, or by aborting it): the test chose that failure.
+ * Anything else (a real 5xx, a refused connection, a broken image, script or font) is a defect and fails the test.
  */
 const RESOURCE_FAILURE = /^Failed to load resource/;
+const STATUS_OF = /status of (\d{3})/;
+export const EXPECTED_API_STATUSES: readonly number[] = [401, 404, 409, 422];
 
-export function isApiResourceFailure(error: BrowserError): boolean {
-  return error.kind === 'console' && RESOURCE_FAILURE.test(error.text) && !!error.url && (error.url === API_URL || error.url.startsWith(`${API_URL}/`));
+export function isApiResourceFailure(error: BrowserError, mocked: readonly MockAnswer[] = []): boolean {
+  if (error.kind !== 'console' || !RESOURCE_FAILURE.test(error.text) || !error.url || !isApiUrl(error.url)) return false;
+  const status = Number(STATUS_OF.exec(error.text)?.[1]);
+  if (EXPECTED_API_STATUSES.includes(status)) return true;
+  const pathname = apiPath(error.url);
+  return mocked.some((answer) => answer.pathname === pathname && (answer.outcome === 'aborted' ? /net::ERR_/.test(error.text) : answer.outcome === status));
 }
 
-/** The errors no allowance covers, in the order they happened. */
-export function unexpectedErrors(errors: readonly BrowserError[], allowances: readonly Allowance[]): BrowserError[] {
-  return errors.filter((error) => !isApiResourceFailure(error) && !allowances.some(({ pattern }) => pattern.test(error.text) || (error.args !== undefined && pattern.test(error.args))));
+/**
+ * The errors no allowance covers, in the order they happened. `mocked` is what the test's mocks answered (`ApiMock.answers`);
+ * `answered` is every API response the browser received, which an allowance with `requiresAnswer` looks for.
+ */
+export function unexpectedErrors(
+  errors: readonly BrowserError[],
+  allowances: readonly Allowance[],
+  mocked: readonly MockAnswer[] = [],
+  answered: readonly ApiAnswer[] = [],
+): BrowserError[] {
+  return errors.filter((error) => {
+    if (isApiResourceFailure(error, mocked)) return false;
+    const covered = allowances.some((allowance) => {
+      if (!(allowance.pattern.test(error.text) || (error.args !== undefined && allowance.pattern.test(error.args)))) return false;
+      if (allowance.route && !(error.route !== undefined && allowance.route.test(error.route))) return false;
+      if (allowance.url && !(error.url !== undefined && allowance.url.test(error.url))) return false;
+      return allowance.requiresAnswer === undefined || answered.some(allowance.requiresAnswer);
+    });
+    return !covered;
+  });
 }
 
 /** One line per error, for the failure message. */
 export function describeError(error: BrowserError): string {
   const first = error.text.split('\n').find((line) => line.trim()) ?? error.text;
   return `[${error.kind}] ${first.slice(0, 300)}${error.url ? ` (${error.url})` : ''}`;
+}
+
+/**
+ * What the page passed to `console.error`, as text: an Error by its name and message, anything else as JSON. The named helper for
+ * a spec that must read the arguments of a console message (it may not call `evaluate` on a handle itself, see eslint.config.mjs).
+ * A handle the page already closed (a navigation, a closed page) reads as nothing instead of rejecting.
+ */
+export async function consoleArgsText(args: readonly JSHandle[]): Promise<string> {
+  const values = await Promise.all(
+    args.map((arg) =>
+      arg.jsonValue().then(
+        (value: unknown) => (value instanceof Error ? `${value.name}: ${value.message}` : JSON.stringify(value)),
+        () => '',
+      ),
+    ),
+  );
+  return values.join(' ');
 }

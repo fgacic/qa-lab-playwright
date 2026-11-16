@@ -1,3 +1,4 @@
+import type { HttpMethod } from './api-mock';
 import type { Product } from './toolshop-api';
 
 /**
@@ -41,6 +42,9 @@ export const customer = {
 export const brand = { id: '01QALABBRAND0000000000000', name: 'Qa Lab Tools', slug: 'qa-lab-tools' };
 
 export const category = { id: '01QALABCATEGORY0000000000', parent_id: null, name: 'Qa Lab Category', slug: 'qa-lab-category', sub_categories: [] };
+
+/** A category under `category`: what the edit form must show as its parent, and send back as `parent_id`. */
+export const subcategory = { id: '01QALABSUBCATEGORY000000000', parent_id: category.id, name: 'Qa Lab Subcategory', slug: 'qa-lab-subcategory', sub_categories: [] };
 
 /**
  * The one product the mocked back office serves: fixed, so a spec never depends on what the shop's
@@ -130,3 +134,16 @@ export const reports = {
 };
 
 export const updated = { success: true };
+
+/**
+ * What each back-office list is fed by, how its search box asks, and an empty answer for both (the messages list has no
+ * search). `column` is a column title that stays on screen when the answer is empty.
+ */
+export const LIST_ANSWERS = {
+  products: { feed: ['QUERY', '/products'], search: ['QUERY', '/products/search'], empty: paginated([], 9), column: 'Price' },
+  brands: { feed: ['GET', '/brands'], search: ['QUERY', '/brands/search'], empty: [], column: 'Slug' },
+  categories: { feed: ['GET', '/categories'], search: ['QUERY', '/categories/search'], empty: [], column: 'Slug' },
+  orders: { feed: ['GET', '/invoices'], search: ['QUERY', '/invoices/search'], empty: paginated([]), column: 'Total' },
+  users: { feed: ['GET', '/users'], search: ['QUERY', '/users/search'], empty: paginated([]), column: 'Email' },
+  messages: { feed: ['GET', '/messages'], empty: paginated([]), column: 'Subject' },
+} as const satisfies Record<string, { feed: readonly [HttpMethod, string]; search?: readonly [HttpMethod, string]; empty: unknown; column: string }>;

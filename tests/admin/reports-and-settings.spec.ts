@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { reportColumns, type ReportTitle } from '@pages/admin/AdminPages';
+import { REPORT_TITLES, reportColumns } from '@pages/admin/AdminPages';
 import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
 import { category, paginated, product, reports } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -8,8 +8,6 @@ import { httpsUrl } from '@support/urls';
 
 /** A payment endpoint the settings accept: made up, on example.com. */
 const PAYMENT_ENDPOINT = httpsUrl('payments.example.com', '/check');
-
-const REPORT_TITLES: ReportTitle[] = ['Top 10 Best Selling Categories', 'Top 10 Most Purchased Products', 'Customers By Country', 'Total Sales Per Country'];
 
 test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => {
   test('statistics show the four reports', async ({ adminStatistics }) => {
@@ -80,7 +78,7 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
 
   test('the year picker offers the current year', { tag: ['@negative', '@bug'] }, async ({ adminMonthlySales }) => {
     knownBug('ADM-08', 'the sales reports stop at 2025 and open on it; the current year cannot be chosen.');
-    const thisYear = String(new Date().getFullYear());
+    const thisYear = await adminMonthlySales.currentYear();
     await expect(adminMonthlySales.year.getByRole('option').first()).toBeAttached();
 
     await expect(adminMonthlySales.year.getByRole('option', { name: thisYear }), `ADM-08: ${thisYear} can be chosen`).toHaveCount(1, { timeout: BUG_TIMEOUT });

@@ -37,7 +37,7 @@ export class ContactPage {
     this.subject = new FormField(form, 'Subject', 'subject-error');
     this.message = new FormField(form, 'Message *', 'message-error');
     this.attachment = new FormField(form, 'Attachment', 'attachment-error');
-    this.sendButton = page.getByRole('button', { name: 'Send' });
+    this.sendButton = page.getByRole('button', { name: 'Send', exact: true });
     this.successMessage = page.getByRole('alert').filter({ hasText: 'Thanks for your message! We will contact you shortly.' });
   }
 

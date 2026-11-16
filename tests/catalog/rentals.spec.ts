@@ -27,6 +27,18 @@ test.describe('Rentals', () => {
     await expect(product.decreaseQuantityButton).toBeHidden();
   });
 
+  test('a rental goes into the cart as one unit of that product', async ({ catalog, rentalsPage, apiMock }) => {
+    const rental = await catalog.rental();
+    const product = await rentalsPage.openRental(rental.name);
+    const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
+    added.catch(() => undefined);
+
+    await product.addToCart();
+
+    expect((await added).postDataJSON()).toEqual({ product_id: rental.id, quantity: 1 });
+    await expect(product.header.cartLink).toHaveText('1');
+  });
+
   test.describe('when there are no rentals', { tag: ['@mocked', '@bug'] }, () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));
 

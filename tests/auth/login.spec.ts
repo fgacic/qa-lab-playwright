@@ -3,6 +3,11 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { MOCKED_PASSWORD, UNKNOWN_EMAIL, UNKNOWN_PASSWORD, fakeJwt, fakeUser } from '@support/payloads';
 import { storedToken } from '@support/session';
 
+/** The pending token the API hands out when the account needs a second factor, and the codes the TOTP tests type. */
+const PENDING_TOTP = 'qa-lab-pending-totp';
+const TOTP_CODE = '123456';
+const WRONG_TOTP_CODE = '000000';
+
 /**
  * Real requests in this file use only obviously fake credentials (UNKNOWN_EMAIL, UNKNOWN_PASSWORD).
  * Successful sign-ins are mocked end to end: no real account is touched.
@@ -107,7 +112,7 @@ test.describe('Login', () => {
   test.describe('when the account uses two-factor authentication', { tag: ['@mocked'] }, () => {
     test.use(withMocks(
       mock.sequence('POST', '/users/login',
-        { status: 200, json: { requires_totp: true, access_token: 'qa-lab-pending-totp' } },
+        { status: 200, json: { requires_totp: true, access_token: PENDING_TOTP } },
         { status: 200, json: { access_token: fakeJwt(), token_type: 'bearer', expires_in: 3600 } }),
       mock.respond('GET', '/users/me', fakeUser),
     ));
@@ -118,25 +123,29 @@ test.describe('Login', () => {
       await expect(loginPage.password.input).toBeHidden();
 
       const verification = apiMock.waitForRequest('POST', '/users/login');
-      await loginPage.verifyTotp('123456');
+      await loginPage.verifyTotp(TOTP_CODE);
 
-      expect((await verification).postDataJSON()).toEqual({ totp: '123456', access_token: 'qa-lab-pending-totp' });
+      expect((await verification).postDataJSON()).toEqual({ totp: TOTP_CODE, access_token: PENDING_TOTP });
       await expect(page).toHaveURL('/account');
     });
 
-    test('an empty TOTP code is refused', { tag: ['@negative'] }, async ({ loginPage }) => {
+    test('an empty TOTP code is refused', { tag: ['@negative'] }, async ({ loginPage, apiMock }) => {
       await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
+      await expect(loginPage.totpCode).toBeVisible();
+      const before = await apiMock.mark();
 
       await loginPage.verifyTotp('');
 
       await expect(loginPage.error).toHaveText('TOTP code is required');
+      // The mocked sequence would answer a second request with a full login: none may leave for an empty code.
+      await apiMock.expectNoRequest('POST', '/users/login', { since: before });
     });
   });
 
   test.describe('when the TOTP code is wrong', { tag: ['@mocked', '@negative'] }, () => {
     // The first answer asks for a code; the second refuses it, the way the real API refuses a bad credential.
     test.use(withMocks(mock.sequence('POST', '/users/login',
-      { status: 200, json: { requires_totp: true, access_token: 'qa-lab-pending-totp' } },
+      { status: 200, json: { requires_totp: true, access_token: PENDING_TOTP } },
       { status: 401, json: { error: 'Unauthorized' } })));
 
     test('the code is refused and the customer stays on login', async ({ loginPage, apiMock, page }) => {
@@ -144,7 +153,7 @@ test.describe('Login', () => {
       await expect(loginPage.totpCode).toBeVisible();
 
       const verification = apiMock.waitForResponse('POST', '/users/login');
-      await loginPage.verifyTotp('000000');
+      await loginPage.verifyTotp(WRONG_TOTP_CODE);
 
       expect((await verification).response.status()).toBe(401);
       await expect(loginPage.error).toHaveText('Unauthorized');

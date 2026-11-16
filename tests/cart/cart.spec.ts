@@ -143,17 +143,32 @@ test.describe('Cart', () => {
     await expect(row.quantity, 'BUG-42: the saved quantity is the corrected one').toHaveValue(String(CORRECTED_FRACTION));
   });
 
-  test('a quantity above 99 is capped at 99 with a warning, also in the saved cart', { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
+  test(`a quantity of ${QUANTITY_LIMIT} is kept, with no warning`, { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
     const [{ product }] = cartItems;
 
-    const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, ABOVE_LIMIT)]);
+    const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, QUANTITY_LIMIT)]);
 
-    expect(saved.response.status(), 'the shop saves the capped quantity').toBe(200);
-    await expect(checkout.cart.table.row(product.name).quantity).toHaveValue(String(QUANTITY_LIMIT));
-    await expect(checkout.toast.message(MESSAGES.atMost99).first()).toBeVisible();
+    expect(saved.response.status(), 'the shop saves the quantity at the limit').toBe(200);
+    await expect(checkout.toast.message(MESSAGES.quantityUpdated)).toBeVisible();
+    await expect(checkout.toast.message(MESSAGES.atMost99)).toHaveCount(0);
     await checkout.page.reload();
     await expect(checkout.cart.table.row(product.name).quantity).toHaveValue(String(QUANTITY_LIMIT));
   });
+
+  // One above the limit, and far above it.
+  for (const typed of [QUANTITY_LIMIT + 1, ABOVE_LIMIT]) {
+    test(`a quantity of ${typed} is capped at ${QUANTITY_LIMIT} with a warning, also in the saved cart`, { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
+      const [{ product }] = cartItems;
+
+      const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, typed)]);
+
+      expect(saved.response.status(), 'the shop saves the capped quantity').toBe(200);
+      await expect(checkout.cart.table.row(product.name).quantity).toHaveValue(String(QUANTITY_LIMIT));
+      await expect(checkout.toast.message(MESSAGES.atMost99).first()).toBeVisible();
+      await checkout.page.reload();
+      await expect(checkout.cart.table.row(product.name).quantity).toHaveValue(String(QUANTITY_LIMIT));
+    });
+  }
 
   test('removing the last line empties the cart and the header link', async ({ checkout, cartItems }) => {
     await checkout.cart.table.remove(cartItems[0].product.name);
@@ -242,7 +257,13 @@ test.describe('Cart', () => {
       await expect(row.title).toBeVisible();
       await expect(row.linePrice).toShowAmount(product.price);
 
-      await expect(row.outOfStock.or(checkout.shell.errorAlert), 'BUG-44: the cart says the out-of-stock line cannot be bought').toBeVisible({ timeout: BUG_TIMEOUT });
+      // Either way of refusing the line is a fix: a notice on it (or an alert), or a Proceed that cannot be pressed.
+      await expect
+        .poll(async () => (await row.outOfStock.or(checkout.shell.errorAlert).first().isVisible()) || (await checkout.cart.proceedButton.isDisabled()), {
+          message: 'BUG-44: the cart says the out-of-stock line cannot be bought, or will not go on to checkout',
+          timeout: BUG_TIMEOUT,
+        })
+        .toBe(true);
     });
   });
 

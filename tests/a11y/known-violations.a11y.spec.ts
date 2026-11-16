@@ -52,13 +52,8 @@ async function expectFixed(a11y: A11yFixtures['a11y'], violation: PinnedViolatio
   expect(stillOn, `${violation.id}: ${violation.rule} on ${violation.target} is fixed on every page it was recorded on that the pin scans`).toEqual([]);
 }
 
-/** The ids of the entries a pin below was written for: filled as the file loads, read by the coverage check. */
-const pinned = new Set<string>();
-function on(page: PinnedViolation['page']): PinnedViolation[] {
-  const entries = KNOWN_VIOLATIONS.filter((v) => v.page === page);
-  for (const entry of entries) pinned.add(entry.id);
-  return entries;
-}
+/** The entries whose pin scans `page`. That every entry's page has such a loop below is checked in tests/framework/a11y-baseline.spec.ts, which reads this file. */
+const on = (page: PinnedViolation['page']): PinnedViolation[] => KNOWN_VIOLATIONS.filter((v) => v.page === page);
 
 /**
  * The element each pin is about, by pin id: the page object's own locator for it, one table per page the pins scan.
@@ -219,21 +214,5 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
         await expectFixed(a11y, violation, 'admin messages', anchorOf(INBOX_ANCHORS, violation, adminMessages));
       });
     }
-  });
-});
-
-test.describe('Known violation pins', { tag: ['@a11y', '@axe'] }, () => {
-  // No page: this guards the baseline itself. A pin for an entry that was added without one would never go red when it is fixed.
-  test('every baseline entry has a pin, and every id is unique', () => {
-    const ids = KNOWN_VIOLATIONS.map((v) => v.id);
-
-    expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'baseline ids that appear twice').toEqual([]);
-    expect(ids.filter((id) => !pinned.has(id)), 'baseline entries no pin test is written for (add one above)').toEqual([]);
-  });
-
-  test('every pin scans a page its entry was recorded on, once', () => {
-    // The entry's `pages` is built from `page` and `alsoOn`, so this guards a page listed twice and an `alsoOn` that repeats the pin's own page.
-    expect(KNOWN_VIOLATIONS.filter((v) => !v.pages.includes(v.page)).map((v) => v.id), 'entries whose pin scans a page the entry was not recorded on').toEqual([]);
-    expect(KNOWN_VIOLATIONS.filter((v) => new Set(v.pages).size !== v.pages.length).map((v) => v.id), 'entries that list a page twice').toEqual([]);
   });
 });

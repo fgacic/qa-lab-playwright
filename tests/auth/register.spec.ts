@@ -2,6 +2,10 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeCustomer } from '@support/test-data';
 
+/** A password the form accepts, typed where a test only needs some password, and the id the mocked register answers with. */
+const VISIBLE_PASSWORD = 'Qa-lab-visible-1!';
+const NEW_CUSTOMER_ID = '01QALABNEWCUSTOMER0000000';
+
 /**
  * Nothing here creates a real account. Submissions with valid data are answered by a mocked
  * POST /users/register; real sign-up lives in tests/account (gated by RUN_ACCOUNT_TESTS).
@@ -78,12 +82,12 @@ test.describe('Registration form', () => {
   });
 
   test('the eye button shows and hides the password', async ({ registerPage }) => {
-    await registerPage.password.input.fill('Qa-lab-visible-1!');
+    await registerPage.password.input.fill(VISIBLE_PASSWORD);
     await expect(registerPage.password.input).toHaveAttribute('type', 'password');
 
     await registerPage.showPasswordButton.click();
     await expect(registerPage.password.input).toHaveAttribute('type', 'text');
-    await expect(registerPage.password.input).toHaveValue('Qa-lab-visible-1!');
+    await expect(registerPage.password.input).toHaveValue(VISIBLE_PASSWORD);
 
     await registerPage.showPasswordButton.click();
 
@@ -137,7 +141,7 @@ test.describe('Registration form', () => {
   });
 
   test.describe('when registration succeeds', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.respond('POST', '/users/register', { id: '01QALABNEWCUSTOMER0000000' }, 201)));
+    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.respond('POST', '/users/register', { id: NEW_CUSTOMER_ID }, 201)));
 
     test('the form sends the customer and moves on to the login page', async ({ registerPage, apiMock, page }) => {
       const customer = fakeCustomer();
@@ -176,7 +180,7 @@ test.describe('Registration form', () => {
   });
 
   test.describe('when registration is submitted with Enter', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.respond('POST', '/users/register', { id: '01QALABNEWCUSTOMER0000000' }, 201)));
+    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.respond('POST', '/users/register', { id: NEW_CUSTOMER_ID }, 201)));
 
     test('Enter in the email field registers as the button does', async ({ registerPage, apiMock, page }) => {
       const customer = fakeCustomer();

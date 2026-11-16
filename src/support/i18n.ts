@@ -12,6 +12,7 @@ export type UiTextKind =
   | 'aria-description'
   | 'aria-valuetext'
   | 'aria-placeholder'
+  | 'aria-roledescription'
   | 'title'
   | 'alt'
   | 'value'
@@ -74,11 +75,12 @@ const DATA = [
 const KEY_SCAN_DATA = ['.card:has(img) .card-title', '.card:has(img) .card-text'];
 
 /**
- * What the stray-English read skips on top of DATA, wider than the key scan's because it only compares with English: every card's title and
- * text (a product's name and description, a rental's description) and the whole <figure> around the product page's image, whose caption
- * credits the photographer (a name and a link to an external site, the same in every language).
+ * What the stray-English read skips on top of DATA, the same two parts of a product card as the key scan (a card that shows a picture is a
+ * product's or a rental's: its name and description are data) and the whole <figure> around the product page's image, whose caption
+ * credits the photographer (a name and a link to an external site, the same in every language). A card with no picture is the shop's own
+ * (the account tiles), so its words are compared with English like any other.
  */
-const STRAY_SCAN_DATA = ['.card-title', '.card-text', 'figure'];
+const STRAY_SCAN_DATA = [...KEY_SCAN_DATA, 'figure'];
 
 /**
  * Wording that is legitimately the same in every language, which only the stray-English comparison
@@ -107,7 +109,8 @@ const SHELL = ['app-root > .bg-dark', 'app-header', 'app-footer', 'app-chat-widg
 /**
  * Every string of UI a visitor can see or hear on the page, trimmed, one entry per distinct
  * string: the document title, text nodes, `placeholder`, `aria-label`, `aria-description`, `aria-valuetext`,
- * `aria-placeholder`, `title`, `alt`, the value of a submit or button input, and the text of `<option>`s. Items
+ * `aria-placeholder`, `aria-roledescription`, `title`, `alt` (an image's and an image button's), the value of a submit or button input, and the text of `<option>`s.
+ * (`aria-errormessage`, `aria-describedby` and `aria-labelledby` hold the id of an element, not text: the element they point to is read as the text it is.) Items
  * of a dropdown menu are read although the menu is closed (it is part of the page; its toggle must be visible).
  *
  * `readFor` says what the read is for. Looking for 'strays' also leaves out the shared wording and the
@@ -156,8 +159,9 @@ export async function visibleUiText(page: Page, readFor: ReadFor = 'strays'): Pr
       for (const el of document.querySelectorAll('[aria-description]')) add('aria-description', el.getAttribute('aria-description'), el, false);
       for (const el of document.querySelectorAll('[aria-valuetext]')) add('aria-valuetext', el.getAttribute('aria-valuetext'), el, false);
       for (const el of document.querySelectorAll('[aria-placeholder]')) add('aria-placeholder', el.getAttribute('aria-placeholder'), el, false);
+      for (const el of document.querySelectorAll('[aria-roledescription]')) add('aria-roledescription', el.getAttribute('aria-roledescription'), el, false);
       for (const el of document.querySelectorAll('[title]')) add('title', el.getAttribute('title'), el, false);
-      for (const el of document.querySelectorAll('img[alt]')) add('alt', el.getAttribute('alt'), el, false);
+      for (const el of document.querySelectorAll('img[alt], input[type="image"][alt]')) add('alt', el.getAttribute('alt'), el, false);
       for (const el of document.querySelectorAll('input[type="submit"], input[type="button"], input[type="reset"]')) add('value', el.getAttribute('value'), el, false);
       return [...out.values()];
     },
@@ -197,12 +201,12 @@ export function watchDataTraffic(page: Page): DataTraffic {
 
 /**
  * The UI text once the page has stopped loading and changing: no data request is in flight
- * (`traffic`, from `watchDataTraffic`, when the caller watched the page from its navigation) and two
+ * (`traffic`, from `watchDataTraffic`, which the caller starts before the navigation: required, because a read with no view of the requests would pass for a page that has not loaded) and two
  * reads in a row, 250 ms apart, are the same. The route's own content, the translation file and the
  * toasts all arrive on their own schedule, so a single read can be taken before they are in; the
  * quiet period only covers what no request announces (a render after the last answer, a fade).
  */
-export async function settledUiText(page: Page, traffic?: DataTraffic, readFor: ReadFor = 'strays'): Promise<UiText[]> {
+export async function settledUiText(page: Page, traffic: DataTraffic, readFor: ReadFor = 'strays'): Promise<UiText[]> {
   let previous = '';
   let latest: UiText[] = [];
   await expect
@@ -210,7 +214,7 @@ export async function settledUiText(page: Page, traffic?: DataTraffic, readFor: 
       async () => {
         latest = await visibleUiText(page, readFor);
         const now = JSON.stringify(latest);
-        const settled = now === previous && (traffic?.inFlight() ?? 0) === 0;
+        const settled = now === previous && traffic.inFlight() === 0;
         previous = now;
         return settled;
       },
@@ -218,6 +222,16 @@ export async function settledUiText(page: Page, traffic?: DataTraffic, readFor: 
     )
     .toBe(true);
   return latest;
+}
+
+/**
+ * Stops the page's timers where they are, so a toast or a message that fades on its own is still there however long the reads after
+ * it take. The clock must have been installed before the page loaded (`page.clock.install()`); time moves on by a tick only,
+ * enough for what is already due.
+ */
+export async function freezeClock(page: Page): Promise<void> {
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(now + 10);
 }
 
 /**

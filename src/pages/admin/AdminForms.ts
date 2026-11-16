@@ -81,21 +81,23 @@ export interface CategoryInput {
 export class AdminCategoryForm {
   readonly chrome: AdminFormChrome;
   readonly parent: Locator;
-  readonly name: Locator;
-  readonly slug: Locator;
+  /** No error test id on this form: its "... is required" alerts are reached through `chrome.required`. */
+  readonly name: FormField;
+  readonly slug: FormField;
 
   constructor(readonly page: Page) {
     this.chrome = new AdminFormChrome(page);
     this.parent = page.getByRole('combobox', { name: 'Parent Id' });
-    this.name = page.getByRole('textbox', { name: 'Name', exact: true });
-    this.slug = page.getByRole('textbox', { name: 'Slug', exact: true });
+    const body = page.locator('body');
+    this.name = new FormField(body, 'Name');
+    this.slug = new FormField(body, 'Slug');
   }
 
   @step('Fill in category "{0.name}"')
   async fillIn(category: CategoryInput): Promise<void> {
     if (category.parent) await this.parent.selectOption({ label: category.parent });
-    await this.name.fill(category.name);
-    await this.slug.fill(category.slug);
+    await this.name.input.fill(category.name);
+    await this.slug.input.fill(category.slug);
   }
 }
 

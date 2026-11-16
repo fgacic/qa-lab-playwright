@@ -43,7 +43,7 @@ export interface Observed {
   lcpEntries: number;
   /** Discrete interactions (clicks, key presses) the browser reported to the event-timing API: only those that took 16 ms or more, plus the first input. */
   interactions: number;
-  /** Trusted clicks and key presses the page received, whatever they cost: what the scenario actually did, to hold against what it declared. */
+  /** Trusted clicks and key presses the page received, whatever they cost: what the scenario actually did, to hold against what it declared. Of one load; the aggregate is `Measurement.inputsPerSample`. */
   inputs: number;
   /** Whether the browser can report long tasks at all: without it a TBT of 0 means "not observed", not "no blocking". */
   longTaskObserver: boolean;
@@ -59,8 +59,10 @@ export interface Measurement {
   spread: Vitals;
   /** The smallest count over the samples: every sample must have observed it. */
   observed: Observed;
-  /** How many clicks and key presses the scenario declared it makes (see `measure`): `observed.inputs` is held to it. */
+  /** How many clicks and key presses the scenario declared it makes (see `measure`): every entry of `inputsPerSample` is held to it. */
   expectedInputs: number;
+  /** The trusted clicks and key presses the page received in each sample, in order: one entry per sample, so a single sample that lost (or gained) an input cannot hide behind the others. */
+  inputsPerSample: number[];
   /** The element each sample's last LCP candidate was, as a short selector: which element "main content" was, for anyone reading a slide. */
   lcpElements: string[];
 }
@@ -215,7 +217,7 @@ export const test = base.extend<PerformanceFixtures>({
           // so none of them is an idle page the others are not.
           await page.goto(start, { waitUntil: 'load' });
           await scenario();
-          taken.push(await read(page, name, inputs > 0));
+          taken.push(await read(page, name, inputs > 0, testInfo));
         }
         const load = loadavg()[0];
         testInfo.annotations.push({ type: 'host-load', description: `${name}: one-minute load average ${load.toFixed(2)} on ${cpus().length} CPUs, ${loadAtRunStart.toFixed(2)} when the run began (a recording needs the latter under ${MAX_LOAD_TO_RECORD}; the run's own work raises the former)` });
@@ -233,7 +235,7 @@ export const test = base.extend<PerformanceFixtures>({
           fcpObserved: taken.every((t) => t.entries.fcpObserved),
           lcpEntries: Math.min(...taken.map((t) => t.entries.lcpEntries)),
           interactions: Math.min(...taken.map((t) => t.entries.interactions)),
-          // The most any sample saw, not the fewest: a sample that got an extra input is as wrong as one that got too few.
+          // Of the aggregate, the largest: the per-sample counts are in `inputsPerSample`, where an extra input or a missing one is told apart.
           inputs: Math.max(...taken.map((t) => t.entries.inputs)),
           longTaskObserver: taken.every((t) => t.entries.longTaskObserver),
         };
@@ -241,7 +243,7 @@ export const test = base.extend<PerformanceFixtures>({
         const body = JSON.stringify({ median, spread, samples: all, entries: taken.map((t) => t.entries), lcpElements, observed, expectedInputs: inputs, throttling: THROTTLING }, null, 2);
         await testInfo.attach(`vitals-${name}.json`, { body, contentType: 'application/json' });
         testInfo.annotations.push({ type: 'vitals', description: `${name} (median of ${samples}): LCP ${median.lcp} ms, CLS ${median.cls}, TBT ${median.tbt} ms, INP-proxy ${median.inp} ms; LCP element ${[...new Set(lcpElements)].join(' | ')}` });
-        return { name, median, spread, samples: all, observed, expectedInputs: inputs, lcpElements };
+        return { name, median, spread, samples: all, observed, expectedInputs: inputs, inputsPerSample: taken.map((t) => t.entries.inputs), lcpElements };
       },
       blockMainThread: (ms) =>
         page.evaluate(
@@ -335,7 +337,7 @@ async function throttle(page: Page): Promise<void> {
 }
 
 /** Asks the page's observers for what they hold but have not delivered yet, then reads the totals. */
-async function read(page: Page, name: string, interactive: boolean): Promise<{ vitals: Vitals; entries: Observed; lcpElement: string }> {
+async function read(page: Page, name: string, interactive: boolean, testInfo: TestInfo): Promise<{ vitals: Vitals; entries: Observed; lcpElement: string }> {
   const flush = () =>
     page.evaluate(() => {
       const vitals = (window as unknown as { __qaLabVitals?: PageVitals }).__qaLabVitals;
@@ -345,10 +347,12 @@ async function read(page: Page, name: string, interactive: boolean): Promise<{ v
     });
   // Entries arrive a little after what causes them: an LCP candidate once it is painted, an interaction once the frame
   // after the input has been presented. Wait for the evidence this scenario is owed. If it never comes the sample goes on
-  // with what there is, and the spec's assertion on the evidence says so.
+  // with what there is, annotated here, and the spec's assertion on the evidence fails on it.
   let collected: Awaited<ReturnType<typeof flush>> | undefined;
   const owed = () => !!collected && collected.entries.lcpEntries > 0 && (!interactive || collected.entries.interactions > 0);
-  await expect.poll(async () => ((collected = await flush()), owed()), { timeout: 5_000 }).toBe(true).catch(() => undefined);
+  await expect.poll(async () => ((collected = await flush()), owed()), { timeout: 5_000 }).toBe(true).catch(() => {
+    testInfo.annotations.push({ type: 'evidence', description: `${name}: the evidence a sample is owed (an LCP entry${interactive ? ' and an interaction' : ''}) had not arrived after 5 s; the sample was read as it was` });
+  });
   if (!collected) throw new Error(`No vitals were collected for "${name}": the collector did not run in this document (was the page opened before measureVitals took effect?).`);
   return { vitals: collected.values, entries: collected.entries, lcpElement: collected.lcpElement };
 }

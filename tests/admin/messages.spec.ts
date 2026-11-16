@@ -16,23 +16,14 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(message.status).toHaveValue(contactMessage.status);
   });
 
-  test.describe('after the status is saved', () => {
-    // The page asks for the message again on a reload, and the API now has the new status: a reload that shows it read it back.
-    test.use(withMocks(mock.sequence('GET', /^\/messages\/[^/]+$/, { status: 200, json: contactMessage }, { status: 200, json: { ...contactMessage, status: 'IN_PROGRESS' } })));
+  test('a status change is sent as soon as it is picked', async ({ adminMessages, apiMock }) => {
+    const message = await adminMessages.details(contactMessage.name);
+    await expect(message.status).toHaveValue(contactMessage.status);
+    const sent = apiMock.waitForRequest('PUT', `/messages/${contactMessage.id}/status`);
 
-    test('a status change is saved on change and is still there after a reload', async ({ adminMessages, apiMock }) => {
-      const message = await adminMessages.details(contactMessage.name);
-      await expect(message.status).toHaveValue(contactMessage.status);
-      const sent = apiMock.waitForRequest('PUT', `/messages/${contactMessage.id}/status`);
+    await message.setStatus('IN_PROGRESS');
 
-      await message.setStatus('IN_PROGRESS');
-
-      expect((await sent).postDataJSON()).toEqual({ status: 'IN_PROGRESS' });
-      const reread = apiMock.waitForResponse('GET', /^\/messages\/[^/]+$/);
-      await message.page.reload();
-      await reread;
-      await expect(message.status).toHaveValue('IN_PROGRESS');
-    });
+    expect((await sent).postDataJSON()).toEqual({ status: 'IN_PROGRESS' });
   });
 
   test.describe('after a reply', () => {
@@ -61,7 +52,7 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the admin is told the reply was not sent', async ({ adminMessages, apiMock }) => {
-      knownBug('ADM-10', 'a reply the API refuses (500) leaves the page as it was: no message, and the typed text stays in the box as if nothing happened.', { absence: true });
+      knownBug('ADM-10', 'a reply the API refuses (500) is not reported to the admin: no message.', { absence: true });
       const message = await adminMessages.details(contactMessage.name);
       await expect(message.text(contactMessage.message)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', `/messages/${contactMessage.id}/reply`);

@@ -7,7 +7,8 @@ import { expect, test } from '@fixtures';
  * Dutch and French "Contact" equal the English word: those languages use it as is, so they are not
  * untranslated strings.
  */
-type NavLabels = { home: string } & Partial<Record<NavKey, string>>;
+const LABELLED_KEYS = ['home', 'categories', 'contact', 'sign-in'] as const satisfies readonly NavKey[];
+type NavLabels = Record<(typeof LABELLED_KEYS)[number], string>;
 const NAV_LABELS: Record<Language, NavLabels> = {
   de: { home: 'Start', categories: 'Kategorien', contact: 'Kontakt', 'sign-in': 'Einloggen' },
   el: { home: 'Αρχική', categories: 'Κατηγορίες', contact: 'Επικοινωνία', 'sign-in': 'Σύνδεση' },
@@ -23,6 +24,8 @@ test.describe('Language switcher', () => {
     const { language } = homePage.header;
     await language.button.click();
 
+    // The count is literal on purpose: a language dropped from LANGUAGES must fail here, not shrink the expectation with it.
+    await expect(language.menu.getByRole('menuitem')).toHaveCount(7);
     await expect(language.menu.getByRole('menuitem')).toHaveText(LANGUAGES.map((l) => l.toUpperCase()));
   });
 
@@ -38,8 +41,8 @@ test.describe('Language switcher', () => {
 
       await expect(header.language.button).toHaveText(lang.toUpperCase());
       await expect(page.locator('html')).toHaveAttribute('lang', lang);
-      for (const [key, label] of Object.entries(NAV_LABELS[lang])) {
-        await expect(header.navItem(key as NavKey)).toHaveText(label);
+      for (const key of LABELLED_KEYS) {
+        await expect(header.navItem(key)).toHaveText(NAV_LABELS[lang][key]);
       }
     });
   }

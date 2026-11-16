@@ -1,5 +1,6 @@
 import type { Page, Request, Response, Route } from '@playwright/test';
-import { API_URL, IS_SELF_HOSTED, apiPath } from './env';
+import { IS_SELF_HOSTED, apiPath, isApiUrl } from './env';
+import type { MockAnswer } from './console-guard';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'QUERY';
 const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -120,6 +121,8 @@ export class ApiMock {
   readonly blockedWrites: string[] = [];
   /** Failures of the mock layer's own code (a `when` predicate that threw), which the test must not ignore: the `page` fixture asserts there are none. */
   readonly handlerErrors: string[] = [];
+  /** What the mocks of this test answered (a status, or an abort), so the console guard can tell a failure the test chose from one the shop raised. */
+  readonly answers: MockAnswer[] = [];
   /** Every API request the page has sent since this mock was created, mocked or real, for `requestsTo`. */
   private readonly sent: { method: string; pathname: string }[] = [];
 
@@ -195,8 +198,14 @@ export class ApiMock {
   /**
    * A position in the page's requests, taken right before the action under test. `expectNoRequest(..., { since: mark })`
    * and `requestsTo(..., { since: mark })` then count only what the action caused, not the page's own load.
+   *
+   * Async on purpose: a request the page has just sent reaches this mock as a protocol event, and the event can still
+   * be in flight when the page's own code has moved on. One round trip to the browser (a call whose answer is queued
+   * behind every event sent before it) drains them, so the position is taken after the page's earlier requests are counted,
+   * not before: a request sent before the mark can never be counted as the action's.
    */
-  mark(): RequestMark {
+  async mark(): Promise<RequestMark> {
+    await this.page.context().cookies();
     return this.sent.length as RequestMark;
   }
 
@@ -221,7 +230,7 @@ export class ApiMock {
    * this once, at the end of the scenario, not between steps.
    *
    * Without `since` every request since the mock was created counts, the page's own load included: a negative about
-   * an action takes `const before = apiMock.mark()` first and passes `{ since: before }`.
+   * an action takes `const before = await apiMock.mark()` first and passes `{ since: before }`.
    */
   async expectNoRequest(method: HttpMethod, path: MockRoute['path'], { within = 750, since = 0 as RequestMark }: { within?: number; since?: RequestMark } = {}): Promise<void> {
     // Up front: a /g regex would otherwise throw from inside the listener, as an unhandled error, instead of from this call.
@@ -329,7 +338,11 @@ export class ApiMock {
         });
       }
       const response = match.responses[Math.min(index, match.responses.length - 1)];
-      if ('abort' in response) return await route.abort(response.abort);
+      if ('abort' in response) {
+        this.answers.push({ pathname, outcome: 'aborted' });
+        return await route.abort(response.abort);
+      }
+      this.answers.push({ pathname, outcome: response.status });
       return await route.fulfill({
         status: response.status,
         headers: { ...CORS, 'content-type': response.contentType ?? 'application/json' },
@@ -361,10 +374,6 @@ function assertPath(path: MockRoute['path']): void {
   if (typeof path !== 'string' && (path.global || path.sticky)) {
     throw new Error(`Mock path ${path} must not use the /g or /y flag: it is stateful across test() calls`);
   }
-}
-
-function isApiUrl(url: string): boolean {
-  return url === API_URL || url.startsWith(`${API_URL}/`);
 }
 
 /** The JSON body of a request, `{}` when it has none or is not JSON: a predicate must never throw. */

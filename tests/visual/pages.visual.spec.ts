@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { expectImagesLoaded } from '@support/page-metrics';
+import { settleImages } from '@support/visual';
 import { emptyProductPage } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
@@ -30,14 +30,14 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     // A full first page: as many cards as the API serves for it, so the shot is not taken mid-render.
     const firstPage = await api.listProducts();
     await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('home.png', { fullPage: true, mask: [page.getByRole('slider')] });
   });
 
   test('product page', async ({ productPage, page }) => {
     await expect(productPage.relatedProducts.first()).toBeVisible();
     // Related products are picked by the API and their order varies.
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('product.png', { fullPage: true, mask: [productPage.relatedProducts] });
   });
 
@@ -46,40 +46,40 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     const [first] = await api.categoryTree();
     await categoryPage.open(first.slug);
     await expect(categoryPage.grid.cards.first()).toBeVisible();
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('category.png', { fullPage: true });
   });
 
   test('rentals', async ({ rentalsPage, page }) => {
     await expect(rentalsPage.grid.cards.first()).toBeVisible();
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('rentals.png', { fullPage: true });
   });
 
   test('contact form with errors', async ({ contactPage, page }) => {
     await contactPage.submit();
     await expect(contactPage.message.error).toBeVisible();
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('contact-errors.png', { fullPage: true });
   });
 
   test('login with errors', async ({ loginPage, page }) => {
     await loginPage.loginButton.click();
     await expect(loginPage.password.error).toBeVisible();
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('login-errors.png');
   });
 
   test('registration with errors', async ({ registerPage, page }) => {
     await registerPage.submit();
     await expect(registerPage.password.error).toBeVisible();
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('register-errors.png', { fullPage: true });
   });
 
   test('cart with a product', async ({ checkout, page }) => {
     await expect(checkout.cart.table.rows).toHaveCount(1);
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('cart.png');
   });
 
@@ -88,7 +88,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await checkout.signIn.continueAsGuest(fakeGuest());
     await expect(checkout.billing.heading).toBeVisible();
     // The guest summary line carries the generated email.
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('checkout-billing.png', { mask: [checkout.signIn.guestSummary] });
   });
 
@@ -97,7 +97,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('product out of stock', async ({ productPage, page }) => {
       await expect(productPage.outOfStock).toBeVisible();
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('product-out-of-stock.png', { fullPage: true, mask: [productPage.relatedProducts] });
     });
   });
@@ -107,7 +107,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await checkout.payment.choose('credit-card');
     await expect(checkout.payment.field('Credit Card Number')).toBeVisible();
     // The guest summary line carries the generated email.
-    await expectImagesLoaded(page);
+    await settleImages(page);
     await expect(page).toHaveScreenshot('checkout-payment.png', { fullPage: true, mask: [checkout.signIn.guestSummary] });
   });
 
@@ -145,7 +145,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('home page on a phone', async ({ homePage, page }) => {
       await expect(homePage.grid.cards.first()).toBeVisible();
-      await expectImagesLoaded(page);
+      await settleImages(page);
       // The header collapses behind its toggler here: the shot proves the phone layout, so it is the screen, not the page.
       await expect(page).toHaveScreenshot('home-phone.png');
     });
@@ -156,7 +156,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('home page with an empty catalogue', async ({ homePage, page }) => {
       await expect(homePage.grid.emptyState).toBeVisible();
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('home-empty-catalogue.png', { fullPage: true, mask: [page.getByRole('slider')] });
     });
   });
@@ -172,7 +172,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
     test('account page', async ({ accountPage, page }) => {
       await expect(accountPage.title).toBeVisible();
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('account.png');
     });
   });
@@ -181,13 +181,13 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     test('admin dashboard', async ({ adminDashboard, page }) => {
       await expect(adminDashboard.latestOrders.rows.first()).toBeVisible();
       // The chart animates on a canvas; CSS animation switches do not reach it.
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('admin-dashboard.png', { mask: [adminDashboard.salesChart] });
     });
 
     test('admin orders list', async ({ adminOrders, backOffice, page }) => {
       await expect(adminOrders.table.row(backOffice.order.invoice_number)).toBeVisible();
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('admin-orders.png', { fullPage: true });
     });
 
@@ -195,7 +195,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
       const order = await adminOrders.edit(backOffice.order.invoice_number);
       await expect(order.lines.first()).toBeVisible();
       // The line carries a product from the real catalogue; its name is not what this shot is about.
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('admin-order.png', { fullPage: true, mask: [order.lines] });
     });
 
@@ -203,7 +203,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
       const form = await adminProducts.edit(backOffice.product.id);
       await expect(form.name).toHaveValue(backOffice.product.name);
       // The form shows the product's id, which the self-hosted shop makes anew on every reseed.
-      await expectImagesLoaded(page);
+      await settleImages(page);
       await expect(page).toHaveScreenshot('admin-product-form.png', { fullPage: true, mask: [form.chrome.id] });
     });
   });

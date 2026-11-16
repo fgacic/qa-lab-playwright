@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { perfAloneViolation, overridesReporter, selectedProjects } from './src/support/run-guard';
+import { overridesReporter, perfAloneViolationFor } from './src/support/run-guard';
 import { ADMIN_STORAGE_STATE, BASE_URL, CUSTOMER_STORAGE_STATE, IS_SELF_HOSTED, PROJECTS, RUN_ACCOUNT_TESTS, RUN_ADMIN_TESTS, TARGET } from './src/support/env';
 
 const isCI = !!process.env.CI;
@@ -145,7 +145,7 @@ const config = defineConfig({
 // The perf budgets are measured alone. The reporter above refuses a mixed run, but a `--reporter` flag replaces it, so
 // the command line is checked here as well. `--list` schedules nothing.
 if (!process.argv.includes('--list') && overridesReporter(process.argv)) {
-  const violation = perfAloneViolation(selectedProjects(process.argv, config.projects?.map((p) => p.name ?? '') ?? []));
+  const violation = perfAloneViolationFor(process.argv, config.projects?.map((p) => p.name ?? '') ?? []);
   if (violation) throw new Error(violation);
 }
 

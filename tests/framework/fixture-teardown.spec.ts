@@ -19,6 +19,7 @@ function runProbes(): Record<string, Outcome> {
     const out = join(dir, 'report.json');
     const run = spawnSync('npx', ['playwright', 'test', '--config=tests/framework/probe/playwright.probe.config.ts', `--output=${join(dir, 'artifacts')}`], {
       encoding: 'utf8',
+      timeout: 100_000, // a hung nested run must fail this spec, not hold the suite
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: out },
     });
     expect(run.error, 'the nested run started').toBeUndefined();
@@ -41,6 +42,7 @@ function runProbes(): Record<string, Outcome> {
 test.describe('fixture teardown guards', { tag: ['@framework', '@self-hosted'] }, () => {
   let outcomes: Record<string, Outcome>;
   test.beforeAll(() => {
+    test.setTimeout(120_000); // the nested run starts a second Playwright: longer than a test's own budget
     outcomes = runProbes();
   });
 
@@ -65,5 +67,35 @@ test.describe('fixture teardown guards', { tag: ['@framework', '@self-hosted'] }
     expect(outcomes['probe: an uncaught error in the page'].status).toBe('failed');
     expect(outcomes['probe: an uncaught error in the page'].messages).toContain('[pageerror]');
     expect(outcomes['probe: an uncaught error in the page'].messages).toContain('probe: uncaught');
+  });
+
+  test('a failure of the mock layer itself (a delay predicate that threw) fails the test at teardown, naming the predicate', () => {
+    const outcome = outcomes['probe: a delay predicate that throws'];
+    expect(outcome.status).toBe('failed');
+    expect(outcome.messages).toContain('failures of the mock layer itself');
+    expect(outcome.messages).toContain('the predicate broke');
+  });
+
+  test('a pinned defect is allowed suite-wide only on its own page: BUG-47 on the profile page passes, the same error elsewhere fails', () => {
+    expect(outcomes['probe: a TypeError reading value on the profile page, the pinned defect (BUG-47)'].status).toBe('passed');
+    const elsewhere = outcomes['probe: the same TypeError on another page'];
+    expect(elsewhere.status).toBe('failed');
+    expect(elsewhere.messages).toContain('[pageerror]');
+    expect(elsewhere.messages).toContain("reading 'value'");
+  });
+
+  test('the browser line for a failed API request is allowed when a mock of the test answered it, and fails the test when nothing did', () => {
+    expect(outcomes['probe: a 500 of the API that a mock of the test answered'].status).toBe('passed');
+    const unmocked = outcomes['probe: a 500 of the API that no mock of the test answered'];
+    expect(unmocked.status).toBe('failed');
+    expect(unmocked.messages).toContain('Failed to load resource');
+    expect(unmocked.messages).toContain('/probe-500');
+  });
+
+  test('an "Unauthorized" log is allowed only with the 401 of GET /users/me behind it', () => {
+    expect(outcomes['probe: an Unauthorized log with the 401 of GET /users/me behind it'].status).toBe('passed');
+    const bare = outcomes['probe: an Unauthorized log with no 401 behind it'];
+    expect(bare.status).toBe('failed');
+    expect(bare.messages).toContain('Unauthorized');
   });
 });

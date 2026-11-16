@@ -110,7 +110,12 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use({
       apiMocks: async ({ catalog }, use) => {
         const invoice = fakeInvoice(await catalog.inStock());
-        await use({ routes: [mock.respond('GET', '/invoices', listOf([invoice])), mock.respond('GET', `/invoices/${invoice.id}`, invoice)] });
+        await use({ routes: [
+          mock.respond('GET', '/invoices', listOf([invoice])),
+          mock.respond('GET', `/invoices/${invoice.id}`, invoice),
+          // The details page polls for the PDF with the invoice number; the real backend would answer 401 to a fake session.
+          mock.respond('GET', `/invoices/${invoice.invoice_number}/download-pdf-status`, { status: 'PROCESSING' }),
+        ] });
       },
     });
 
@@ -122,6 +127,26 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       await expect(details.downloadPdfButton).toBeVisible();
       await expect(await details.quantityOf(product.name)).toHaveText(String(INVOICE_QUANTITY));
+    });
+  });
+
+  test.describe('with no invoices', () => {
+    test.use(withMocks(mock.respond('GET', '/invoices', listOf([]))));
+
+    test('the list is empty: no order rows and no failure notice', async ({ invoicesPage, page }) => {
+      await expect(invoicesPage.title).toBeVisible();
+      await expect(invoicesPage.table.getByRole('columnheader', { name: 'Invoice Number' })).toBeVisible();
+
+      await expect(invoicesPage.invoiceRows).toHaveCount(0);
+      await expect(failureFeedback(page)).toHaveCount(0);
+    });
+
+    test('the customer is told there are no invoices yet', { tag: ['@bug'] }, async ({ invoicesPage }) => {
+      knownBug('BUG-48', 'an account with no invoices shows the bare table header and no empty-state text, unlike the favorites and messages pages.', { absence: true });
+      await expect(invoicesPage.table.getByRole('columnheader', { name: 'Invoice Number' })).toBeVisible();
+      await expect(invoicesPage.invoiceRows).toHaveCount(0);
+
+      await expect(invoicesPage.emptyState, 'BUG-48: an empty invoice list says so').toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -164,6 +189,38 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     });
   });
 
+  test.describe('when messages fail to load', { tag: ['@bug'] }, () => {
+    test.use(withMocks(mock.fail('GET', '/messages', 500)));
+
+    test('the customer is told they could not be loaded', async ({ messagesPage, apiMock }) => {
+      knownBug('BUG-49', 'a failed messages request says "There are no messages yet", which is not true.', { absence: true });
+      await expect(messagesPage.title).toBeVisible();
+      // Precondition, true whether or not the bug is fixed: the list was asked for and refused.
+      expect(apiMock.requestsTo('GET', '/messages'), 'the page asked for the list').toBeGreaterThan(0);
+
+      await expect(failureFeedback(messagesPage.page).first(), 'BUG-49: the customer is told the messages could not be loaded').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+  });
+
+  test.describe('when a reply fails', { tag: ['@bug'] }, () => {
+    test.use(withMocks(
+      mock.respond('GET', '/messages', listOf([fakeMessage])),
+      mock.respond('GET', `/messages/${fakeMessage.id}`, fakeMessage),
+      mock.fail('POST', `/messages/${fakeMessage.id}/reply`, 500),
+    ));
+
+    test('the customer is told the reply was not sent', async ({ messagesPage, apiMock }) => {
+      knownBug('BUG-50', 'a reply the API refuses (500) is not reported: no alert, no message, and the reply box keeps its text without a word.', { absence: true });
+      const details = await messagesPage.openDetails(fakeMessage.subject);
+      const answered = apiMock.waitForResponse('POST', `/messages/${fakeMessage.id}/reply`);
+      await details.sendReply('A reply the API refuses.');
+      // Precondition, true whether or not the bug is fixed: the failure path ran.
+      expect((await answered).response.status()).toBe(500);
+
+      await expect(failureFeedback(messagesPage.page).first(), 'BUG-50: the customer is told the reply was not sent').toBeVisible({ timeout: BUG_TIMEOUT });
+    });
+  });
+
   test.describe('with no messages', () => {
     test.use(withMocks(mock.respond('GET', '/messages', listOf([]))));
 
@@ -180,7 +237,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       mock.respond('POST', '/users/change-password', { success: true }),
     ));
 
-    test('is filled in from the account', async ({ profilePage }) => {
+    test('shows the account\'s own details', async ({ profilePage }) => {
       await expect(profilePage.firstName.input).toHaveValue(fakeUser.first_name);
       await expect(profilePage.lastName.input).toHaveValue(fakeUser.last_name);
       await expect(profilePage.email.input).toHaveValue(fakeUser.email);
@@ -233,7 +290,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
       knownBug('BUG-26', 'Change Password with every field empty is sent to the API instead of being validated in the form.', { absence: true });
       await expect(profilePage.changePasswordButton).toBeVisible();
-      const before = apiMock.mark();
+      const before = await apiMock.mark();
 
       await profilePage.changePasswordButton.click();
 
@@ -284,6 +341,49 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
       await expect(profilePage.alerts.filter({ hasText: 'The first name field must not be greater than 40 characters.' })).toBeVisible();
       await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    });
+
+    // The two ways a request fails besides a refusal with a reason: the API answers 500, or is not reached at all.
+    test('saving the profile when the API answers 500 shows the failure, not a success', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await apiMock.use(mock.fail('PUT', PROFILE_PATH, 500));
+
+      await profilePage.update();
+
+      await expect(profilePage.alerts.filter({ hasText: 'Server Error' })).toBeVisible();
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    });
+
+    test('saving the profile when the API cannot be reached shows the failure, not a success', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await apiMock.use(mock.abort('PUT', PROFILE_PATH));
+      const attempted = apiMock.waitForRequest('PUT', PROFILE_PATH);
+
+      await profilePage.update();
+      await attempted;
+
+      await expect(profilePage.alerts.filter({ hasText: 'An unexpected error occurred.' })).toBeVisible();
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    });
+
+    test('changing the password when the API answers 500 shows the failure, not a success', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
+      await apiMock.use(mock.fail('POST', '/users/change-password', 500));
+
+      await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD);
+
+      await expect(profilePage.alerts.filter({ hasText: 'Server Error' })).toBeVisible();
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    });
+
+    test('changing the password when the API cannot be reached tells the customer', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
+      knownBug('BUG-51', 'a change-password request that never reaches the API is not reported: no alert, although a failed profile save says "An unexpected error occurred".', { absence: true });
+      await apiMock.use(mock.abort('POST', '/users/change-password'));
+      const attempted = apiMock.waitForRequest('POST', '/users/change-password');
+
+      await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD);
+      await attempted;
+      // Precondition, true whether or not the bug is fixed: no success is claimed.
+      await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+
+      await expect(profilePage.alerts.first(), 'BUG-51: the customer is told the password was not changed').toBeVisible({ timeout: BUG_TIMEOUT });
     });
 
     test('a wrong current password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {

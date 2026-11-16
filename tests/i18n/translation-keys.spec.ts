@@ -105,7 +105,51 @@ test.describe('The UI text read from a page', { tag: ['@i18n'] }, () => {
     expect(partOf('Only in the footer')).toBe('shell');
   });
 
-  test('a card with a picture holds data the key scan skips, a card without one is the shop\'s own words', async ({ page }) => {
+  test('every kind of UI text is read once, under its own kind, and what is not drawn is skipped', async ({ page }) => {
+    // One element for each place a visitor, a screen reader or the browser takes words from, and the ones that must stay unread: the
+    // text of an element that is not drawn, a value of one character, a number, and a closed dropdown's items (which are read: the
+    // menu is part of the page, only its toggle must show).
+    await page.setContent(`
+      <title>Document title</title>
+      <main>
+        <p>Plain text</p>
+        <input placeholder="Placeholder text" aria-label="Label text" aria-description="Description text" aria-placeholder="Aria placeholder text" title="Title text">
+        <div role="slider" aria-valuetext="Value text" aria-roledescription="Role description text" aria-errormessage="none"></div>
+        <img src="data:," alt="Alt text">
+        <input type="image" src="data:," alt="Image button alt">
+        <input type="submit" value="Submit value">
+        <select><option>Option text</option></select>
+        <div class="dropdown"><button>Toggle</button><ul class="dropdown-menu" style="display:none"><li>Menu item text</li></ul></div>
+        <p style="display:none">Hidden text</p>
+        <button aria-label="Hidden label" style="visibility:hidden">x</button>
+        <p>€</p><p>1234</p>
+      </main>`);
+
+    const read = await visibleUiText(page);
+    const seen = read.map(({ kind, text }) => `${kind}: ${text}`);
+
+    expect(seen.sort()).toEqual(
+      [
+        'page-title: Document title',
+        'text: Plain text',
+        'text: Toggle',
+        'text: Menu item text',
+        'placeholder: Placeholder text',
+        'aria-label: Label text',
+        'aria-description: Description text',
+        'aria-placeholder: Aria placeholder text',
+        'title: Title text',
+        'aria-valuetext: Value text',
+        'aria-roledescription: Role description text',
+        'alt: Alt text',
+        'alt: Image button alt',
+        'value: Submit value',
+        'option: Option text',
+      ].sort(),
+    );
+  });
+
+  test('a card with a picture holds data both scans skip, a card without one is the shop\'s own words', async ({ page }) => {
     await page.setContent(`
       <main>
         <div class="card"><img src="data:," alt="Claw hammer"><h5 class="card-title">Claw Hammer</h5><p class="card-text">A hammer for nails</p></div>
@@ -119,6 +163,7 @@ test.describe('The UI text read from a page', { tag: ['@i18n'] }, () => {
     expect(keys, 'the key scan reads the tile and the credit, not the product card').toEqual(expect.arrayContaining(['account.favorites.title', 'account.favorites.text', 'photo.credit']));
     expect(keys).not.toContain('Claw Hammer');
     expect(keys).not.toContain('A hammer for nails');
-    expect(strays, 'the stray-English scan keeps skipping every card title and text, and the credit').toEqual([]);
+    // Both scans skip the same product card; the stray-English scan also skips the credit (the same name in every language), and reads the tile.
+    expect(strays, 'the stray-English scan reads the tile, and skips the product card and the credit').toEqual(['account.favorites.title', 'account.favorites.text']);
   });
 });

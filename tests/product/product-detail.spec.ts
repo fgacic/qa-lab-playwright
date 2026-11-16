@@ -166,11 +166,14 @@ test.describe('Product detail', () => {
   });
 
   test.describe('when signed in (mocked session)', { tag: ['@mocked'] }, () => {
-    test('adding to favourites confirms it', async ({ signedInProductPage: productPage, apiMock }) => {
+    test('adding to favourites confirms it', async ({ signedInProductPage: productPage, product, apiMock }) => {
       await apiMock.use(mock.respond('POST', '/favorites', { id: FAVORITE_ID }, 201));
+      const asked = apiMock.waitForRequest('POST', '/favorites');
+      asked.catch(() => undefined);
 
       await productPage.addToFavourites();
 
+      expect((await asked).postDataJSON()).toEqual({ product_id: product.id });
       await expect(productPage.toast.message(MESSAGES.favouriteAdded)).toBeVisible();
     });
 
@@ -190,6 +193,8 @@ test.describe('Product detail', () => {
       await productPage.addToCart();
 
       await expect(productPage.toast.message(SERVER_MESSAGE)).toBeVisible();
+      // The header has rendered, so the cart link's absence is a fact and not a page still loading.
+      await expect(productPage.header.brandLink).toBeVisible();
       await expect(productPage.header.cartLink).toHaveCount(0);
     });
   });

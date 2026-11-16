@@ -55,6 +55,9 @@ export const fakeInvoice = (product: Product) => ({
   invoicelines: [{ id: '01QALABFAKELINE', quantity: INVOICE_QUANTITY, unit_price: product.price, product }],
 });
 
+/** What POST /invoices/guest answers once it has stored the order, for the mocked purchase paths. */
+export const acceptedGuestInvoice = { id: '01QALABFAKEINVOICE0000000', invoice_number: 'INV-2026999998' };
+
 export const fakeMessage = {
   id: '01QALABFAKEMESSAGE0000000',
   name: 'Testy McTestface',
@@ -87,16 +90,19 @@ export const MOCKED_PASSWORD = 'Qa-lab-mocked-1!';
 export const UNKNOWN_EMAIL = 'nobody@example.invalid';
 export const UNKNOWN_PASSWORD = 'not-a-real-password';
 
+/** One JWT segment: the object as base64url JSON, and back. The one helper for a spec that builds or reads a token. */
+export const base64Url = (value: object): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+export const fromBase64Url = <T>(segment: string): T => JSON.parse(Buffer.from(segment, 'base64url').toString()) as T;
+
 /** An unsigned JWT the SPA accepts: it only decodes the payload for `role` and `exp`. */
 export function fakeJwt(role: 'user' | 'admin' = 'user'): string {
-  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
-  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: fakeUser.id, role, iat: now, exp: now + 3600 })}.qa-lab-unsigned`;
+  return `${base64Url({ alg: 'HS256', typ: 'JWT' })}.${base64Url({ sub: fakeUser.id, role, iat: now, exp: now + 3600 })}.qa-lab-unsigned`;
 }
 
 /** When a JWT stops being valid, in epoch seconds: the counterpart of `fakeJwt`, for any token the SPA stores. */
 export function jwtExpiry(token: string): number {
-  const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as { exp?: number };
+  const payload = fromBase64Url<{ exp?: number }>(token.split('.')[1] ?? '');
   if (typeof payload.exp !== 'number') throw new Error('The token has no numeric "exp" claim.');
   return payload.exp;
 }

@@ -73,25 +73,27 @@ const noBranches = {
 
 // Things a spec may not write inline, each with the named helper that is the one place allowed to (the helpers live in
 // src/support and fixtures, which this block does not cover, so there is never a disable comment to hunt for):
-// - page.evaluate: code run inside the page is untyped, unretried and invisible to the report. A spec states what the user
+// - code run inside the page (evaluate and its relatives, below): it is untyped, unretried and invisible to the report. A spec states what the user
 //   sees; what the app stored or sent is read through `storedToken` (src/support/session.ts), the mock layer, or a helper
 //   such as `fetchStatus` (src/support/page-fetch.ts), which names what it does.
 // - a hard-coded http(s):// URL: addresses come from env.ts (BASE_URL, API_URL), so a spec cannot quietly aim at another
 //   server. A case table that needs a made-up host builds it with `httpUrl` (src/support/urls.ts).
-// - Math.random / Date.now: a spec's data is derived from `test-data.ts` (seeded and unique) and its timing from the
+// - Math.random / Date.now / new Date() / performance.now(): a spec's data is derived from `test-data.ts` (seeded and unique) and its timing from the
 //   framework, so a failure can be replayed. Timing under test goes through `elapsedMs` (src/support/page-fetch.ts).
 // - serial describes: tests that depend on each other's order hide which one broke and cannot be sharded or retried alone;
 //   arrange the state each test needs through the API instead.
-// `page.evaluate(...)`, and `somePageObject.page.evaluate(...)`.
-const PAGE_EVALUATE = "CallExpression[callee.property.name=/^(evaluate|evaluateHandle)$/][callee.object.name=/^page$/i], CallExpression[callee.property.name=/^(evaluate|evaluateHandle)$/][callee.object.property.name='page']";
+// Code run inside the page, on any object: `page.evaluate`, `locator.evaluate` / `evaluateAll`, `handle.evaluate` / `evaluateHandle`,
+// `page.$eval` / `$$eval`, `waitForFunction`. A name is matched whatever the receiver is called, because a locator, a frame or a
+// JSHandle (`message.args()[0].evaluate(...)`) is as untyped, unretried and invisible to the report as `page` is.
+const IN_PAGE_CODE = "CallExpression[callee.property.name=/^(evaluate|evaluateAll|evaluateHandle|\\$eval|\\$\\$eval|waitForFunction)$/]";
 const noInlineHazards = {
   files: ['tests/**/*.spec.ts'],
   rules: {
     'no-restricted-syntax': [
       'error',
       {
-        selector: PAGE_EVALUATE,
-        message: 'No page.evaluate in a spec: read what the app stored through a named helper (storedToken in @support/session, fetchStatus in @support/page-fetch) or assert what the user sees.',
+        selector: IN_PAGE_CODE,
+        message: 'No code run in the page in a spec (evaluate, evaluateAll, evaluateHandle, $eval, $$eval, waitForFunction): read what the app stored through a named helper (storedToken in @support/session, fetchStatus in @support/page-fetch, consoleArgsText in @support/console-guard for the arguments of a console message) or assert what the user sees.',
       },
       {
         selector: "Literal[value=/^https?:\\/\\//], TemplateElement[value.raw=/https?:\\/\\//]",
@@ -104,6 +106,14 @@ const noInlineHazards = {
       {
         selector: "MemberExpression[object.name='Date'][property.name='now']",
         message: 'No Date.now in a spec: time what you must with elapsedMs (@support/page-fetch); unique data comes from @support/test-data.',
+      },
+      {
+        selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+        message: 'No new Date() in a spec: it is the clock of the machine, so a failure cannot be replayed. A date under test is a fixed value or comes from @support/test-data; the page clock is page.clock.',
+      },
+      {
+        selector: "CallExpression[callee.object.name='performance'][callee.property.name='now']",
+        message: 'No performance.now() in a spec: time what you must with elapsedMs (@support/page-fetch).',
       },
       {
         selector: "MemberExpression[object.property.name='describe'][property.name='serial']",

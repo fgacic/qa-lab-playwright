@@ -152,7 +152,8 @@ const REPORTS = [
   { title: 'Total Sales Per Country', feed: '/reports/total-sales-per-country', columns: ['Country', 'Total Earned'] },
 ] as const;
 export type ReportTitle = (typeof REPORTS)[number]['title'];
-const REPORT_TITLES = REPORTS.map((r) => r.title);
+/** The four report titles, in page order. */
+export const REPORT_TITLES: readonly ReportTitle[] = REPORTS.map((r) => r.title);
 /** The column titles each report's table has, whatever it is answered with. */
 export const reportColumns = (title: ReportTitle): readonly string[] => REPORTS[REPORT_TITLES.indexOf(title)].columns;
 
@@ -222,15 +223,21 @@ export class AdminSalesReportPage {
   }
 
   /**
-   * The first year in the picker that is not the one selected, so a test that changes the year really changes it,
-   * whatever year the picker opens on or stops at (ADM-08). Call it once the options are drawn.
+   * The value of the first year in the picker that is not the one selected (a value against a value, never a label against
+   * a value), so a test that changes the year really changes it, whatever year the picker opens on or stops at (ADM-08).
+   * Call it once the options are drawn.
    */
   async anotherYear(): Promise<string> {
     const selected = await this.year.inputValue();
-    const years = await this.yearOptions.allTextContents();
-    const other = years.map((year) => year.trim()).find((year) => year !== selected);
+    const years = await Promise.all((await this.yearOptions.all()).map((option) => option.getAttribute('value')));
+    const other = years.find((year): year is string => year !== null && year !== selected);
     if (!other) throw new Error(`The year picker offers only the selected year (${selected}): there is no other year to pick.`);
     return other;
+  }
+
+  /** The year of the browser's own clock: the year the picker has to reach, and the one the page itself reads. */
+  async currentYear(): Promise<string> {
+    return String(await this.page.evaluate(() => new Date().getFullYear()));
   }
 
   /** Picks a year and returns the next report request that carries a `?year=`; the spec asserts which year it asked for. */

@@ -31,7 +31,8 @@ test.describe('Forgot password', () => {
 
   // The real refusal is a failed request on the shop's own log, so it runs on the self-hosted shop only;
   // the mocked twin below proves the same page behaviour everywhere, the live site included.
-  test('an unknown email is refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ forgotPasswordPage }) => {
+  test('an unknown email is refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ forgotPasswordPage, consoleGuard }) => {
+    consoleGuard.allow(/Failed to load resource: the server responded with a status of 422/, 'the one refusal this test provokes on purpose (POST /users/forgot-password): the browser logs every 4xx answer');
     await forgotPasswordPage.requestReset(UNKNOWN_EMAIL);
 
     await expect(forgotPasswordPage.alert).toHaveText('The selected email is invalid.');
@@ -73,8 +74,8 @@ test.describe('Forgot password', () => {
       await forgotPasswordPage.requestResetWithEnter(fakeUser.email);
 
       expect((await sent).postDataJSON()).toEqual({ email: fakeUser.email });
-      // The same answer as the button's: the form acknowledges the request. (Its wording is BUG-20's business.)
-      await expect(forgotPasswordPage.alert).toBeVisible();
+      // The same answer as the button's: the form acknowledges the request with some text. (Its wording is BUG-20's business.)
+      await expect(forgotPasswordPage.alert).toHaveText(/\S/);
     });
   });
 

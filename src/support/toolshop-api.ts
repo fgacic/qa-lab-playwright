@@ -32,6 +32,19 @@ export interface CartItem {
   quantity: number;
 }
 
+/** What `createProduct` needs: the fields the shop requires without a default of ours. */
+export interface NewProduct {
+  name: string;
+  description: string;
+  price: number;
+  category_id: string;
+  brand_id: string;
+  product_image_id: string;
+  is_location_offer?: boolean;
+  is_rental?: boolean;
+  co2_rating?: string;
+}
+
 /** A node of `GET /categories/tree`: a category with its subcategories. */
 export interface CategoryNode {
   id: string;
@@ -191,6 +204,27 @@ export class ToolshopApi {
     await this.send(() => this.request.delete(`${API_URL}/products/${productId}`, { headers: { authorization: `Bearer ${token}` } }));
   }
 
+  /**
+   * Creates a product as the admin. The shop requires a category, a brand and an image, so those are the caller's to name
+   * (`categoryTree`, `createBrand` and `GET /images` give them); the flags default to a plain, non-rental, non-location product.
+   */
+  @step('API (admin): create the product {1.name}')
+  async createProduct(token: string, product: NewProduct): Promise<{ id: string; name: string }> {
+    assertSelfHosted('create a product');
+    const data = { is_location_offer: false, is_rental: false, co2_rating: 'A', ...product };
+    const response = await this.send(() => this.request.post(`${API_URL}/products`, { data, headers: { authorization: `Bearer ${token}` } }));
+    return { name: product.name, id: ((await response.json()) as { id: string }).id };
+  }
+
+  /** The id of an image the shop holds, for a product that needs one. */
+  @step('API: first product image')
+  async firstImageId(): Promise<string> {
+    const response = await this.read(() => this.request.get(`${API_URL}/images`));
+    const [first] = (await response.json()) as { id: string }[];
+    if (!first) throw new Error(`${API_URL}/images listed no image, so a product cannot be created`);
+    return first.id;
+  }
+
   @step('API (admin): create the brand {1}')
   async createBrand(token: string, brand: { name: string; slug: string }): Promise<{ id: string; name: string; slug: string }> {
     assertSelfHosted('create a brand');
@@ -209,6 +243,24 @@ export class ToolshopApi {
   async deleteBrand(token: string, brandId: string): Promise<void> {
     assertSelfHosted('delete a brand');
     await this.send(() => this.request.delete(`${API_URL}/brands/${brandId}`, { headers: { authorization: `Bearer ${token}` } }));
+  }
+
+  /**
+   * The account with exactly this email, as the admin sees it (`GET /users/search` matches names and emails loosely, so the
+   * answer is filtered to the exact email), or undefined when there is none. For a cleanup that has only the email.
+   */
+  @step('API (admin): find the user {1}')
+  async findUserByEmail(token: string, email: string): Promise<{ id: string; email: string } | undefined> {
+    const response = await this.read(() =>
+      this.request.get(`${API_URL}/users/search`, { params: { q: email }, headers: { authorization: `Bearer ${token}` } }),
+    );
+    return ((await response.json()).data as { id: string; email: string }[]).find((user) => user.email.toLowerCase() === email.toLowerCase());
+  }
+
+  @step('API (admin): delete user {1}')
+  async deleteUser(token: string, userId: string): Promise<void> {
+    assertSelfHosted('delete a user');
+    await this.send(() => this.request.delete(`${API_URL}/users/${userId}`, { headers: { authorization: `Bearer ${token}` } }));
   }
 
   @step('API (admin): find the product named "{1}"')

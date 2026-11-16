@@ -78,6 +78,9 @@ export class BillingStep {
   async enterAddress(address: Address): Promise<void> {
     const { status, suggested } = await this.lookUp(address);
     if (status < 200 || status >= 300) throw new Error(`The postcode lookup for ${address.postalCode} ${address.houseNumber} answered ${status || 'nothing'}`);
+    // `lookUp` returned once the lookup's requests went quiet, so `suggested` is the answer the page applies last and each
+    // field is awaited for it. Reading the fields at once would race the page, which fills them a moment after the answer (a
+    // slower answer for an earlier input can still land later, BUG-41: the quiet window is what keeps it out of this read).
     for (const [field, key] of [[this.street, 'street'], [this.city, 'city'], [this.state, 'state']] as const) {
       const fromLookup = suggested[key];
       if (fromLookup) await expect(field.input).toHaveValue(fromLookup);

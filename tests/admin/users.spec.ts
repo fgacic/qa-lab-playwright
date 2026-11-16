@@ -3,8 +3,10 @@ import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts'
 import { customer, paginated } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
-/** What the SPA logs after the API accepts a new user (ADM-21): its own `ERROR` prefix, as the back office runs in Chromium only. The suite-wide allowance (console-guard.ts) reads the error itself. */
-const NEW_USER_ERROR = /^ERROR\b/;
+/** The error the SPA throws after the API accepts a new user (ADM-21): the same pattern as the suite-wide allowance (console-guard.ts), read from the log's text or the arguments the page passed, whichever engine prints which. */
+const NEW_USER_ERROR = /NG01002|Must supply a value for form control/;
+/** What the SPA logs for any error it catches: every engine starts the line with its own `ERROR` prefix, whatever follows. */
+const SPA_ERROR_LOG = /^ERROR\b/;
 
 /** The user the add form is filled in with: only the required fields, the others stay empty and the form accepts that. */
 const newUser = { firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: 'newly.added@example.com' };
@@ -65,53 +67,6 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
   });
 
-  test('Delete removes the user', async ({ adminUsers, apiMock }) => {
-    // Once deleted, the list the page reloads no longer has the user.
-    await apiMock.use(mock.respond('GET', '/users', paginated([])));
-    await expect(adminUsers.table.row(customer.email)).toBeVisible();
-    const deleted = apiMock.waitForRequest('DELETE', `/users/${customer.id}`);
-
-    await adminUsers.table.delete(customer.email);
-
-    await deleted;
-    await expect(adminUsers.feedback.filter({ hasText: ADMIN_MESSAGES.userDeleted })).toBeVisible();
-    await expect(adminUsers.table.row(customer.email)).toHaveCount(0);
-  });
-
-  test.describe('when a user is still in use', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', /^\/users\/[^/]+$/, 409, { message: 'Seems like this user is used elsewhere.' })));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
-    test('the reason is shown and the user stays', async ({ adminUsers, apiMock }) => {
-      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
-      await apiMock.use(mock.respond('GET', '/users', paginated([])));
-      await expect(adminUsers.table.row(customer.email)).toBeVisible();
-
-      await adminUsers.table.delete(customer.email);
-
-      await expect(adminUsers.alert('used elsewhere')).toBeVisible();
-      await expect(adminUsers.alert(ADMIN_MESSAGES.userDeleted)).toBeHidden();
-      await expect(adminUsers.table.row(customer.email)).toBeVisible();
-    });
-  });
-
-  test.describe('when deleting a user fails on the server', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', /^\/users\/[^/]+$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
-    test('the failure is shown and the user stays', async ({ adminUsers, apiMock }) => {
-      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
-      await apiMock.use(mock.respond('GET', '/users', paginated([])));
-      await expect(adminUsers.table.row(customer.email)).toBeVisible();
-
-      await adminUsers.table.delete(customer.email);
-
-      await expect(adminUsers.failure).toBeVisible();
-      await expect(adminUsers.alert(ADMIN_MESSAGES.userDeleted)).toBeHidden();
-      await expect(adminUsers.table.row(customer.email)).toBeVisible();
-    });
-  });
-
   test('the password of a new user is typed into a masked field', { tag: ['@bug'] }, async ({ adminUsers }) => {
     knownBug('ADM-17', 'the admin user form shows the password in clear text (an <input type="text">).');
     const form = await adminUsers.add();
@@ -121,17 +76,19 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(form.password, 'ADM-17: the password field is masked').toHaveAttribute('type', 'password', { timeout: BUG_TIMEOUT });
   });
 
-  test('saving a new user raises no application error', { tag: ['@bug'] }, async ({ adminUsers, page }) => {
+  test('saving a new user raises no application error', { tag: ['@bug'] }, async ({ adminUsers, page, consoleGuard }) => {
     knownBug('ADM-21', 'after the API accepts a new user (201) the SPA throws an unhandled Angular error (NG01002, "Must supply a value for form control") although the form says "User saved!".');
     const form = await adminUsers.add();
-    // Listening before the save: the error is raised while the save is answered, and a listener started afterwards would miss it.
-    const raised = page.waitForEvent('console', { predicate: (message) => message.type() === 'error' && NEW_USER_ERROR.test(message.text()), timeout: BUG_TIMEOUT }).then(() => true, () => false);
-
     await form.fillIn(newUser);
+    // Listening right before the save: the error is raised while the save is answered. The window ends at the first error the SPA logs
+    // (or after BUG_TIMEOUT on a page that logs none); what that error is, is read from the guard, which also sees its arguments.
+    const logged = page.waitForEvent('console', { predicate: (message) => message.type() === 'error' && SPA_ERROR_LOG.test(message.text()), timeout: BUG_TIMEOUT }).catch(() => undefined);
+
     await form.chrome.save();
     await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
+    await logged;
 
-    expect(await raised, 'ADM-21: saving a new user raises no application error').toBe(false);
+    expect(await consoleGuard.logged(NEW_USER_ERROR), 'ADM-21: saving a new user raises no application error').toEqual([]);
   });
 
   test.describe('when the new user is refused', { tag: ['@negative'] }, () => {

@@ -18,7 +18,12 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
     await expect(adminDashboard.salesChart).toBeVisible();
   });
 
-  test('the dashboard lists the orders awaiting fulfilment', async ({ adminDashboard, backOffice }) => {
+  test('the dashboard asks for the orders awaiting fulfilment and lists them', async ({ adminDashboard, backOffice, apiMock }) => {
+    // The fixture opened the page already; open it again to catch the request for this check.
+    const asked = apiMock.waitForRequest('GET', '/invoices');
+    await adminDashboard.open();
+
+    expect(new URL((await asked).url()).searchParams.get('in'), 'the request filters on the status').toBe(`status,${ORDER_STATUS}`);
     await expect(adminDashboard.latestOrders.row(backOffice.order.invoice_number)).toContainText(ORDER_STATUS);
   });
 
@@ -38,8 +43,15 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
   });
 
   // One test per section: a section that breaks fails alone, and the others still say whether they work.
-  for (const section of ADMIN_SECTIONS) {
+  for (const [index, section] of ADMIN_SECTIONS.entries()) {
+    // The page opens on the dashboard, so the menu is first used to move to the next section in the list (the last one wraps to the first):
+    // every section, the dashboard included, is then reached from a page that is not its own.
+    const startsFrom = ADMIN_SECTIONS[(index + 1) % ADMIN_SECTIONS.length];
+
     test(`the admin menu reaches ${section}`, async ({ adminDashboard, page }) => {
+      await adminDashboard.shell.header.openAdminSection(startsFrom);
+      await expect(page).toHaveURL(`/admin/${startsFrom.toLowerCase()}`);
+
       await adminDashboard.shell.header.openAdminSection(section);
 
       await expect(page).toHaveURL(`/admin/${section.toLowerCase()}`);

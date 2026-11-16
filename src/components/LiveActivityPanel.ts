@@ -24,6 +24,11 @@ export class LiveActivityPanel {
     this.items = this.window.getByTestId('live-activity-item');
   }
 
+  /** The listed sale of a product, by name. */
+  item(productName: string): Locator {
+    return this.items.filter({ hasText: productName });
+  }
+
   @step('Open the live shop activity')
   async open(): Promise<void> {
     await this.openButton.click();

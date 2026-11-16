@@ -83,6 +83,11 @@ export const ADMIN_CREDENTIALS = {
   password: process.env.ADMIN_PASSWORD || (IS_SELF_HOSTED ? SEEDED.admin.password : undefined),
 };
 
+/** Whether a URL is a call to the shop's API (and not to its UI, assets or a third party). */
+export function isApiUrl(url: string): boolean {
+  return url === API_URL || url.startsWith(`${API_URL}/`);
+}
+
 /**
  * The API path of a request URL, without the API's own prefix: "/products" both for
  * https://api.practicesoftwaretesting.com/products and for http://localhost:4200/api/products.

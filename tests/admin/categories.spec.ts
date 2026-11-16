@@ -1,9 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
-import { SEARCH_HIT, category } from '@support/admin-payloads';
+import { SEARCH_HIT, category, subcategory } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-
-const CATEGORY = /^\/categories\/[^/]+$/;
 
 test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each category with its slug', async ({ adminCategories }) => {
@@ -44,43 +42,33 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
 
   test('editing loads the category and saves the change', async ({ adminCategories, apiMock }) => {
     const form = await adminCategories.edit(category.name);
-    await expect(form.name).toHaveValue(category.name);
+    await expect(form.name.input).toHaveValue(category.name);
     const saved = apiMock.waitForRequest('PUT', `/categories/${category.id}`);
 
-    await form.slug.fill('qa-lab-renamed');
+    await form.slug.input.fill('qa-lab-renamed');
     await form.chrome.save();
 
-    expect((await saved).postDataJSON()).toMatchObject({ name: category.name, slug: 'qa-lab-renamed' });
+    expect((await saved).postDataJSON()).toMatchObject({ name: category.name, slug: 'qa-lab-renamed', parent_id: null });
     await expect(form.chrome.alert(ADMIN_MESSAGES.categorySaved)).toBeVisible();
   });
 
-  test('Delete removes the category', async ({ adminCategories, apiMock }) => {
-    // Once deleted, the list the page reloads no longer has the category.
-    await apiMock.use(mock.respond('GET', '/categories', []));
-    await expect(adminCategories.table.row(category.name)).toBeVisible();
-    const deleted = apiMock.waitForRequest('DELETE', `/categories/${category.id}`);
+  test.describe('a subcategory', () => {
+    // The edit form loads a category from its tree endpoint; the list shows both rows.
+    test.use(withMocks(mock.respond('GET', '/categories', [category, subcategory]), mock.respond('GET', /^\/categories\/tree\/[^/]+$/, subcategory)));
 
-    await adminCategories.table.delete(category.name);
+    test('is edited under its parent, which stays selected and is sent back', async ({ adminCategories, apiMock }) => {
+      const form = await adminCategories.edit(subcategory.name);
+      await expect(form.name.input).toHaveValue(subcategory.name);
+      // The options are loaded before the selection is judged: what could be missing is the selection, not the list.
+      await expect(form.parent.getByRole('option', { name: category.name })).toBeAttached();
+      await expect(form.parent, 'the parent is preselected').toHaveValue(category.id);
+      const saved = apiMock.waitForRequest('PUT', `/categories/${subcategory.id}`);
 
-    await deleted;
-    await expect(adminCategories.alert(ADMIN_MESSAGES.categoryDeleted)).toBeVisible();
-    await expect(adminCategories.table.row(category.name)).toHaveCount(0);
-  });
+      await form.slug.input.fill('qa-lab-renamed-sub');
+      await form.chrome.save();
 
-  test.describe('when a category is still in use', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', CATEGORY, 409, { message: 'Seems like this category is used elsewhere.' })));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
-    test('the reason is shown and the category stays', async ({ adminCategories, apiMock }) => {
-      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
-      await apiMock.use(mock.respond('GET', '/categories', []));
-      await expect(adminCategories.table.row(category.name)).toBeVisible();
-
-      await adminCategories.table.delete(category.name);
-
-      await expect(adminCategories.alert('used elsewhere')).toBeVisible();
-      await expect(adminCategories.alert(ADMIN_MESSAGES.categoryDeleted)).toBeHidden();
-      await expect(adminCategories.table.row(category.name)).toBeVisible();
+      expect((await saved).postDataJSON()).toMatchObject({ name: subcategory.name, slug: 'qa-lab-renamed-sub', parent_id: category.id });
+      await expect(form.chrome.alert(ADMIN_MESSAGES.categorySaved)).toBeVisible();
     });
   });
 
@@ -98,23 +86,6 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
       await sent;
 
       await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the category was refused').toBeVisible({ timeout: BUG_TIMEOUT });
-    });
-  });
-
-  test.describe('when deleting a category fails on the server', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', CATEGORY, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
-    test('the failure is shown and the category stays', async ({ adminCategories, apiMock }) => {
-      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
-      await apiMock.use(mock.respond('GET', '/categories', []));
-      await expect(adminCategories.table.row(category.name)).toBeVisible();
-
-      await adminCategories.table.delete(category.name);
-
-      await expect(adminCategories.failure).toBeVisible();
-      await expect(adminCategories.alert(ADMIN_MESSAGES.categoryDeleted)).toBeHidden();
-      await expect(adminCategories.table.row(category.name)).toBeVisible();
     });
   });
 

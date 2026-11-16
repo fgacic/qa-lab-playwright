@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { ATTRIBUTE_XSS_PAYLOAD, OBSERVATION_WINDOW_MS, ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
+import { ATTRIBUTE_XSS_PAYLOADS, OBSERVATION_WINDOW_MS, ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 
 /**
  * Positive control for the other security specs. A "nothing ran" result only means something if
@@ -57,14 +57,29 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
     });
   }
 
-  // The attribute payload is not HTML on its own (it is text until it lands inside a quoted attribute), so it gets its own control.
-  test('detects a payload that breaks out of an attribute, and counts the element it leaves', async ({ homePage, xss }) => {
-    await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
-    await xss.insertAsAttributeValue(ATTRIBUTE_XSS_PAYLOAD);
+  // An attribute payload is not HTML on its own (it is text until it lands in an attribute), so each gets a sink of its own, and a
+  // control: the same sink fed the neutralised value, which a safe page would produce, must show nothing.
+  for (const [name, attribute] of Object.entries(ATTRIBUTE_XSS_PAYLOADS)) {
+    test(`detects ${name}, and counts the element it leaves`, async ({ homePage, xss }) => {
+      await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+      await xss.expectNoInjectedElements();
 
-    await expect.poll(() => xss.injectedCount(), { message: 'the input that grew an onfocus attribute is one parsed payload' }).toBe(1);
-    await expect.poll(() => xss.executions(), 'autofocus ran the handler').toEqual(['7']);
-  });
+      await xss.insertInAttributeSink(attribute);
+
+      await expect.poll(() => xss.injectedCount(), { message: 'the sink grew one element that runs the hook' }).toBe(1);
+      await expect.poll(() => xss.executions(), 'the payload ran').not.toEqual([]);
+      await expect(xss.expectNotExecuted(), 'the negative check fails once something ran').rejects.toThrow(/script ran on the page/);
+    });
+
+    test(`stays quiet for ${name} once the value is neutralised`, async ({ homePage, xss }) => {
+      await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
+
+      await xss.insertInAttributeSink(attribute, { safe: true });
+
+      await xss.expectNoInjectedElements();
+      await xss.expectNotExecuted();
+    });
+  }
 
   test('counts payloads left inside an iframe and a shadow root', async ({ homePage, xss }) => {
     await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();

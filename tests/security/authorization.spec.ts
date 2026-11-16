@@ -3,7 +3,7 @@ import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { apiOnlyTest as base, expect } from '@fixtures';
 import { knownBug } from '@support/known-bug';
 import { API_URL } from '@support/env';
-import { fakeJwt } from '@support/payloads';
+import { base64Url, fakeJwt, fromBase64Url } from '@support/payloads';
 import { fakeCustomer, fakeGuest, uniqueEmail, type Customer } from '@support/test-data';
 import type { Product, ToolshopApi } from '@support/toolshop-api';
 
@@ -89,13 +89,18 @@ interface Account {
   customer: Customer;
 }
 
-async function newCustomer(world: World): Promise<Account> {
-  const { request, api } = world;
+async function newCustomer({ request, api, adminToken, cleanups }: World): Promise<Account> {
   const customer = fakeCustomer();
+  // The removal is registered before the registration is made, and finds the account by its e-mail: a registration whose answer never
+  // arrived, or a login that fails, still leaves nothing behind, and no id has to be known first.
+  cleanups.push(async () => {
+    const token = await adminToken();
+    const user = await api.findUserByEmail(token, customer.email);
+    if (user) await api.deleteUser(token, user.id);
+  });
   await api.registerCustomer(customer);
   const token = await api.login(customer.email, customer.password);
   const { id } = await (await call(request, 'GET', '/users/me', { token })).json();
-  removeLater(world, `/users/${id}`);
   return { id, token, customer };
 }
 
@@ -167,7 +172,6 @@ test.describe('API authorisation, read access (self-hosted only)', { tag: ['@sec
  */
 test.describe('API authorisation, forged tokens (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
   const ADMIN_PATH = '/users';
-  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
 
   /** The forgeries, as functions of a real admin token (`header.payload.signature`). */
   const FORGERIES: Record<string, (real: string) => string> = {
@@ -177,11 +181,11 @@ test.describe('API authorisation, forged tokens (self-hosted only)', { tag: ['@s
     },
     'the admin token with an altered payload and the old signature': (real) => {
       const [header, payload, signature] = real.split('.');
-      const claims = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Record<string, unknown>;
-      return `${header}.${encode({ ...claims, exp: (claims.exp as number) + 3600 })}.${signature}`;
+      const claims = fromBase64Url<Record<string, unknown>>(payload);
+      return `${header}.${base64Url({ ...claims, exp: (claims.exp as number) + 3600 })}.${signature}`;
     },
-    'the admin claims with alg "none" and no signature': (real) => `${encode({ typ: 'JWT', alg: 'none' })}.${real.split('.')[1]}.`,
-    'the admin claims with alg "none" and the old signature': (real) => `${encode({ typ: 'JWT', alg: 'none' })}.${real.split('.')[1]}.${real.split('.')[2]}`,
+    'the admin claims with alg "none" and no signature': (real) => `${base64Url({ typ: 'JWT', alg: 'none' })}.${real.split('.')[1]}.`,
+    'the admin claims with alg "none" and the old signature': (real) => `${base64Url({ typ: 'JWT', alg: 'none' })}.${real.split('.')[1]}.${real.split('.')[2]}`,
     'a made-up admin token that was never signed': () => fakeJwt('admin'),
     'text that is not a token at all': () => 'not.a.jwt',
   };
@@ -190,6 +194,20 @@ test.describe('API authorisation, forged tokens (self-hosted only)', { tag: ['@s
     const response = await call(request, 'GET', ADMIN_PATH, { token: await adminToken() });
 
     expect(response.status(), `GET ${ADMIN_PATH} as the admin answered`).toBe(200);
+  });
+
+  // The other direction: a real customer's token, with its claims promoted to admin and the old signature. The signature is what
+  // makes the claims the API's own, so it must not let a customer write their own role.
+  test('a customer token with its role changed to admin and the old signature is refused', async ({ request, api, adminToken, cleanups }) => {
+    const { token } = await newCustomer({ request, api, adminToken, cleanups });
+    const [header, payload, signature] = token.split('.');
+    const claims = fromBase64Url<Record<string, unknown>>(payload);
+    expect(claims.role, 'the customer token carries the role the forgery changes').toBe('user');
+    const forged = `${header}.${base64Url({ ...claims, role: 'admin' })}.${signature}`;
+
+    const response = await call(request, 'GET', ADMIN_PATH, { token: forged });
+
+    expect(response.status(), `GET ${ADMIN_PATH} with a customer token promoted to admin answered`).toBe(401);
   });
 
   for (const [name, forge] of Object.entries(FORGERIES)) {
@@ -335,6 +353,90 @@ test.describe('API authorisation, catalogue writes (self-hosted only)', { tag: [
       });
     }
   }
+});
+
+/**
+ * What a list holds for a customer: only their own rows. The other records are made by the test (a guest order and a contact
+ * message belong to nobody with an account, another customer's favourite to somebody else), and each is first read as the admin,
+ * so an absence in the customer's list is about who is asking and not about a record that was never made.
+ */
+test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
+  test('a customer lists no invoice that belongs to somebody else', async ({ request, api, adminToken, cleanups, catalog }) => {
+    const admin = await adminToken();
+    const order = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], fakeGuest());
+    const control = await call(request, 'GET', `/invoices/${order.id}`, { token: admin });
+    expect(control.status(), 'the admin can read the order, so it exists').toBe(200);
+    const { token } = await newCustomer({ request, api, adminToken, cleanups });
+
+    const listed = await (await call(request, 'GET', '/invoices', { token })).json();
+
+    expect((listed.data as { id: string }[]).map((invoice) => invoice.id), "a new customer's invoice list is empty: it holds no one else's order").toEqual([]);
+  });
+
+  test('a customer lists no contact message that somebody else sent', async ({ request, api, adminToken, cleanups }) => {
+    const admin = await adminToken();
+    const sender = `Authz scoping ${randomUUID().slice(0, 8)}`;
+    await api.sendContactMessage({ name: sender, email: uniqueEmail('authz'), subject: 'webmaster', message: 'Sent by the authorisation checks to see who can list it.' });
+    const inbox = await (await call(request, 'GET', '/messages?page=1', { token: admin })).json();
+    expect((inbox.data as { name: string }[]).map((message) => message.name), 'the admin sees the message in the first page of the inbox, so it exists').toContain(sender);
+    const { token } = await newCustomer({ request, api, adminToken, cleanups });
+
+    const listed = await (await call(request, 'GET', '/messages', { token })).json();
+
+    expect((listed.data as { name: string }[]).map((message) => message.name), "a new customer's message list holds no one else's message").toEqual([]);
+  });
+
+  test("a customer lists no favourite that is another customer's", async ({ request, api, adminToken, cleanups, catalog }) => {
+    const world = { request, api, adminToken, cleanups };
+    const owner = await newCustomer(world);
+    const other = await newCustomer(world);
+    await api.addFavorite(owner.token, (await catalog.inStock()).id);
+    // The favourite is removed before its owner goes (cleanups run last made first), or the account could not be deleted.
+    cleanups.push(async () => {
+      for (const { id } of (await (await call(request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[]) await call(request, 'DELETE', `/favorites/${id}`, { token: owner.token });
+    });
+    expect(await api.favoriteProductIds(owner.token), 'the owner holds the favourite, so it exists').toHaveLength(1);
+
+    const listed = await (await call(request, 'GET', '/favorites', { token: other.token })).json();
+
+    expect(listed, "the other customer's favourite list holds nothing of the owner's").toEqual([]);
+  });
+});
+
+/**
+ * Mass assignment: a profile update carries a `role`. Only the admin may set it, and a customer sending it must not become one.
+ * The control gives the admin the same body on a customer made for the test, and proves the field is honoured at all.
+ */
+test.describe('API authorisation, the role field of a profile (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
+  const bodyOf = ({ customer }: Account, role: string) => ({
+    first_name: customer.firstName,
+    last_name: customer.lastName,
+    dob: customer.dateOfBirth,
+    phone: customer.phone,
+    email: customer.email,
+    address: { street: customer.address.street, city: customer.address.city, state: customer.address.state, country: customer.address.country, postal_code: customer.address.postalCode },
+    role,
+  });
+  /** The role in the claims of a fresh sign-in: where the API itself says what the account may do. */
+  const roleOf = async (api: ToolshopApi, { customer }: Account) => fromBase64Url<{ role: string }>((await api.login(customer.email, customer.password)).split('.')[1]).role;
+
+  test('the admin can change the role of an account, so the field is honoured', async ({ request, api, adminToken, cleanups }) => {
+    const account = await newCustomer({ request, api, adminToken, cleanups });
+
+    const response = await call(request, 'PUT', `/users/${account.id}`, { token: await adminToken(), data: bodyOf(account, 'admin') });
+
+    expect(response.status(), 'the admin changed the role').toBe(200);
+    expect(await roleOf(api, account), 'a new sign-in carries the role').toBe('admin');
+  });
+
+  test('a customer cannot make themselves an admin through their own profile', async ({ request, api, adminToken, cleanups }) => {
+    const account = await newCustomer({ request, api, adminToken, cleanups });
+
+    const response = await call(request, 'PUT', `/users/${account.id}`, { token: account.token, data: bodyOf(account, 'admin') });
+
+    expect(REFUSED, `a customer sending role "admin" in their own profile got ${response.status()}`).toContain(response.status());
+    expect(await roleOf(api, account), 'the account is still a plain user').toBe('user');
+  });
 });
 
 /**

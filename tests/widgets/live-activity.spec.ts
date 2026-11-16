@@ -17,6 +17,7 @@ test.describe('Live shop activity', () => {
 
     await liveActivity.open();
 
+    await expect(liveActivity.window).toBeVisible();
     await expect(liveActivity.connection).toHaveAttribute('title', 'Live');
   });
 
@@ -53,6 +54,22 @@ test.describe('Live shop activity', () => {
       await expect(liveActivity.items).toHaveText([saw.name, hammer.name].map((name) => new RegExp(escapeRegExp(name))));
       await expect(liveActivity.salesCount).toHaveText('2');
       await expect(liveActivity.revenue).toHaveText(`$${revenue.toFixed(2)}`);
+    });
+  });
+
+  test.describe('when a sale takes the last of a product', { tag: ['@mocked'] }, () => {
+    const lastOne = fakeSale({ name: 'Qa Lab Last Hammer', sold_out: true });
+    const ordinary = fakeSale({ name: 'Qa Lab Plenty Saw' });
+    test.use(withMocks(mock.eventStream('/sales-stream', salesStream([lastOne, ordinary]))));
+
+    test('only that sale is marked as sold out', async ({ homePage }) => {
+      const { liveActivity } = homePage.shell;
+
+      await liveActivity.open();
+
+      await expect(liveActivity.items).toHaveCount(2);
+      await expect(liveActivity.item(lastOne.name)).toContainText(/sold out/i);
+      await expect(liveActivity.item(ordinary.name)).not.toContainText(/sold out/i);
     });
   });
 

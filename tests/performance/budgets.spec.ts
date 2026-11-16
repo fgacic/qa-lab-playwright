@@ -28,6 +28,13 @@ import type { Measurement, Vitals } from '@fixtures/performance';
  * Record the baseline anew after a deliberate change with `UPDATE_PERF_BASELINE=1 npm run test:perf`
  * (refused on a busy machine or from a failing run); the `ci` set comes from the record-perf-baseline workflow run.
  *
+ * INP has no baseline ratchet today: every recorded INP spread (32 to 48 ms, event timing rounds to 8 ms) is wider than the margin
+ * cap allows, so `vitals.baseline` leaves it out as noisy (and annotates it) and only the budget and the fixed ceiling hold it. A
+ * baseline for INP needs a quieter recording, or a lower noise floor with a reason; neither is claimed here.
+ *
+ * The perf pass is longer than it looks: each of the three slow-API pages is measured twice (5 throttled loads in its pin, 5 more in
+ * its baseline ratchet, on purpose: see below), and `npm run test:verify-bugs` runs the pins again in a pass of their own.
+ *
  * Scoped in playwright.config.ts: @perf runs in its own Chromium project, one worker and no
  * parallelism (LCP, layout-shift and longtask entries are Chromium's, and a busy CPU skews TBT
  * and INP), @self-hosted keeps it off the live site.
@@ -54,27 +61,39 @@ const CART_INPUTS = 1; // Proceed to checkout
 const CONTACT_INPUTS = 1; // Send
 
 /**
+ * How much slower than this machine a CI runner may be before a fixed ceiling is tripped: the time metrics (LCP, TBT, INP) are
+ * scaled by it on CI, until a `ci` baseline is recorded and committed (a shared runner is not a laptop, and no number measured on a
+ * runner exists yet to derive a ceiling from). It is not applied to CLS: a layout shift is the race between first paint and the
+ * API, decided by the throttled network and the 500 ms latency we set, not by how fast the CPU is. A scaled ceiling never goes
+ * above the budget (the budget is the limit that holds everywhere), so on CI the LCP ceilings meet it. Drop this once the CI baseline is in.
+ */
+const CI_SLOWDOWN = process.env.CI ? 1.5 : 1;
+const scaled = (ms: number, budget: number) => Math.min(Math.round(ms * CI_SLOWDOWN), budget);
+
+/**
  * Fixed ceilings, one per measurement, that hold on every machine with or without a recorded baseline. The CI baseline cannot be
  * recorded without a push, so on a runner these are what makes a perf test mean more than "inside Google's good limits".
- * Each is derived from the values recorded on an idle machine (tests/performance/baseline.json) with the margin stated here:
- * - LCP: the recorded median times 1.5, rounded up to 50 ms. A shared runner is slower than a laptop, but not by half again, and
- *   the result stays well under the 2 500 ms budget (recorded 1 252, 1 248, 1 288, 1 068, 1 064 ms).
+ * Each is derived from the values recorded on an idle machine (tests/performance/baseline.json) with the margin stated here;
+ * the time metrics are scaled on CI (CI_SLOWDOWN):
+ * - LCP: the recorded median times 1.5, rounded up to 50 ms, and well under the 2 500 ms budget. Recorded medians: home 1 248,
+ *   search 1 252, product 1 288, cart 1 064, contact 1 056 ms.
  * - TBT: 100 ms, half the 200 ms budget and twice the 50 ms noise floor. Recorded 0 on every page: the shop does not block the
  *   main thread under 4x throttling, and a 100 ms block is a real regression, not noise.
- * - INP proxy: 80 ms, the recorded median (16 to 24 ms) plus the widest margin the baseline allows (twice the 32 ms noise
- *   floor), rounded up. A slide to 80 ms is a quarter of the way to the 200 ms budget and already visible.
- * - CLS, on the slow API: the recorded median plus about 20%, rounded up to 0.01 (the cart's ceiling, below, is built the same way).
- *   The product page shifts 0.316 with a spread of 0.082 (the race between first paint and the API), so its ceiling allows the
- *   0.38 the same bug reaches in a bad sample.
+ * - INP proxy: 80 ms, 2.5 times the highest recorded median (32 ms, search; the others 16 to 24 ms, and event timing is rounded to 8 ms, so
+ *   one step of it moves a median by a quarter) and well under half the 200 ms budget. The
+ *   recorded INP spreads (32 to 48 ms) are all wider than the baseline's cap allows (see isNoisy in fixtures/performance.ts), so
+ *   INP has no baseline ratchet at all today: this ceiling and the budget are the only limits on it.
+ * - CLS, on the slow API: the recorded median plus about 20%, rounded up to 0.01 (recorded: home 0.258, product 0.316 with a
+ *   spread of 0.082 (the race between first paint and the API), contact 0.17, cart 0.107).
  */
 const CEILING: Record<string, Partial<Vitals>> = {
-  home: { lcp: 1_900, tbt: 100, inp: 80 },
-  search: { lcp: 1_900, tbt: 100, inp: 80 },
-  product: { lcp: 1_950, tbt: 100, inp: 80 },
-  cart: { lcp: 1_650, tbt: 100, inp: 80 },
-  contact: { lcp: 1_600, tbt: 100, inp: 80 },
+  home: { lcp: scaled(1_900, BUDGET.lcp), tbt: scaled(100, BUDGET.tbt), inp: scaled(80, BUDGET.inp) },
+  search: { lcp: scaled(1_900, BUDGET.lcp), tbt: scaled(100, BUDGET.tbt), inp: scaled(80, BUDGET.inp) },
+  product: { lcp: scaled(1_950, BUDGET.lcp), tbt: scaled(100, BUDGET.tbt), inp: scaled(80, BUDGET.inp) },
+  cart: { lcp: scaled(1_600, BUDGET.lcp), tbt: scaled(100, BUDGET.tbt), inp: scaled(80, BUDGET.inp) },
+  contact: { lcp: scaled(1_600, BUDGET.lcp), tbt: scaled(100, BUDGET.tbt), inp: scaled(80, BUDGET.inp) },
   'home-slow-api': { cls: 0.31 },
-  'product-slow-api': { cls: 0.4 },
+  'product-slow-api': { cls: 0.38 },
   'contact-slow-api': { cls: 0.21 },
   // The cart shifts by 0.107 in every sample (the same footer bug as PERF-01, a hair over the 0.1 budget): 0.13 is that plus about 20%,
   // room for a font or a pixel of rendering, well under the 0.17 the bug costs where it is unmistakable.
@@ -94,14 +113,14 @@ function expectNoWorseShift({ name, median }: Measurement, limit: Partial<Vitals
  * Speed and responsiveness: the page is loaded, used once, and judged by what that cost. The budgets are the
  * assertion that holds everywhere; the baseline limits below them are a ratchet, applied where one is recorded.
  */
-function expectResponsive({ name, median, observed, expectedInputs }: Measurement, limit: Partial<Vitals> | undefined) {
+function expectResponsive({ name, median, samples, observed, inputsPerSample, expectedInputs }: Measurement, limit: Partial<Vitals> | undefined) {
   expect.soft(observed.fcpObserved, 'First Contentful Paint was observed, which opens the TBT window').toBe(true);
   expect.soft(observed.lcpEntries, 'an LCP entry was observed').toBeGreaterThan(0);
   // What the scenario declared it does is what the page received, and the browser timed an interaction out of it: a click that
   // stopped landing would leave a load that is judged as if it had been used.
-  expect.soft(observed.inputs, 'the clicks and key presses the scenario makes reached the page').toBe(expectedInputs);
+  expect.soft(inputsPerSample, `every one of the ${samples.length} samples received the ${expectedInputs} click(s) and key press(es) the scenario makes`).toEqual(samples.map(() => expectedInputs));
   expect.soft(observed.interactions, 'an interaction was observed (event timing, which skips the quick ones)').toBeGreaterThan(0);
-  expect.soft(observed.interactions, 'no more interactions were timed than inputs were made').toBeLessThanOrEqual(observed.inputs);
+  expect.soft(observed.interactions, 'no more interactions were timed than inputs were made').toBeLessThanOrEqual(expectedInputs);
   expect.soft(observed.longTaskObserver, 'the browser reports long tasks, so a TBT of 0 was observed and not assumed').toBe(true);
   expect.soft(median.lcp, 'LCP (ms)').toBeLessThanOrEqual(BUDGET.lcp);
   expect.soft(median.tbt, 'TBT (ms)').toBeLessThanOrEqual(BUDGET.tbt);

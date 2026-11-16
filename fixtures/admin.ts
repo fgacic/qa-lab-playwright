@@ -41,6 +41,15 @@ export interface CreatedProducts {
   pending(): string[];
 }
 
+/**
+ * Users the back office's form is about to create on the real backend, removed when the test ends. The test names the email
+ * before it acts (`track`); teardown looks the account up by that exact email, so a user whose create response was never read, or
+ * one the API accepted although the form says otherwise (ADM-20 once fixed), is removed too and the shop's user list never grows.
+ */
+export interface CreatedUsers {
+  track(email: string): void;
+}
+
 /** Brands arranged through the admin API for a real-backend test, and removed when it ends (by slug, so a copy the UI made goes too). */
 export interface BrandFactory {
   create(): Promise<{ id: string; name: string; slug: string }>;
@@ -48,6 +57,7 @@ export interface BrandFactory {
 
 export interface AdminFixtures {
   createdProducts: CreatedProducts;
+  createdUsers: CreatedUsers;
   brandFactory: BrandFactory;
   adminSession: AdminSession;
   /** Which list `adminList` opens, for specs that run the same case over every list. */
@@ -124,6 +134,12 @@ function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
   ];
 }
 
+/**
+ * The cleanup fixtures (`createdProducts`, `createdUsers`, `brandFactory`) run their teardown after the test body, pass or fail.
+ * A pin wrapped in `knownBug` is `test.fail`, which accepts ANY failure, a teardown one included: under `VERIFY_BUGS=1`
+ * (scripts/verify-bugs.mjs) a pin whose cleanup failed is reported as failing "for another reason", not as reproducing its
+ * defect, so a leak cannot hide behind an expected failure there.
+ */
 export const test = mergeTests(adminTokenTest, mocksTest).extend<AdminFixtures>({
   adminSession: ['mocked', { option: true }],
   createdProducts: async ({ page, api, adminToken, adminSession }, use) => {
@@ -181,6 +197,19 @@ export const test = mergeTests(adminTokenTest, mocksTest).extend<AdminFixtures>(
     ]);
     failures.push(...outcomes.flatMap((r) => (r.status === 'rejected' ? [r.reason] : [])));
     if (failures.length) throw new AggregateError(failures, `Cleaning up the products this test created failed ${failures.length} time(s)`);
+  },
+  createdUsers: async ({ api, adminToken, adminSession }, use) => {
+    const emails = new Set<string>();
+    await use({ track: (email) => void emails.add(email) });
+    if (adminSession !== 'storage-state') return; // the mocked back office creates nothing real
+    // Every removal is attempted whatever the others do, and every failure is reported at once, like the product cleanup.
+    const outcomes = await Promise.allSettled([...emails].map(async (email) => {
+      const token = await adminToken();
+      const user = await api.findUserByEmail(token, email);
+      if (user) await api.deleteUser(token, user.id);
+    }));
+    const failures = outcomes.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
+    if (failures.length) throw new AggregateError(failures, 'Cleaning up the users this test created failed');
   },
   brandFactory: async ({ api, adminToken }, use) => {
     const made = new Set<string>(); // slugs, so a brand the UI saved under the same slug is removed as well

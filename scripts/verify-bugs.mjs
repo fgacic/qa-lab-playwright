@@ -40,10 +40,15 @@ const BROWSER_OF = { firefox: 'firefox', webkit: 'webkit' };
 const work = mkdtempSync(join(tmpdir(), 'verify-bugs-'));
 process.on('exit', () => rmSync(work, { recursive: true, force: true }));
 
+// The command that runs Playwright. `VERIFY_BUGS_PLAYWRIGHT` replaces it with a node script that stands in for it:
+// the one seam tests/framework/verify-bugs.spec.ts uses to drive this orchestration (rerun, live-only listing, the perf pass)
+// without running a real suite. Never set outside that test.
+const RUNNER = process.env.VERIFY_BUGS_PLAYWRIGHT ? [process.execPath, [process.env.VERIFY_BUGS_PLAYWRIGHT]] : ['npx', ['playwright']];
+
 /** Runs `npx playwright test ...args` and returns its JSON report. Stale output never survives: it is deleted first. */
 function playwright(args, name, env = {}) {
   const out = join(work, name);
-  const run = spawnSync('npx', ['playwright', 'test', ...args, '--reporter=json', `--output=${join(work, 'artifacts')}`], {
+  const run = spawnSync(RUNNER[0], [...RUNNER[1], 'test', ...args, '--reporter=json', `--output=${join(work, 'artifacts')}`], {
     stdio: ['ignore', 'ignore', 'inherit'],
     env: { ...process.env, ...env, PLAYWRIGHT_JSON_OUTPUT_NAME: out },
   });

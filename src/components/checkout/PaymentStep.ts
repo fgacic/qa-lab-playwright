@@ -10,6 +10,14 @@ export const PAYMENT_METHODS = {
 } as const;
 export type PaymentMethod = keyof typeof PAYMENT_METHODS;
 
+/** The first option of the method menu, which is no method but the prompt to choose one. */
+export const PAYMENT_METHOD_PROMPT = 'Choose your payment method';
+
+/** The options of the Buy Now Pay Later plan menu: its prompt, then the plans by their number of months (the option values). */
+export const INSTALMENT_PROMPT = 'Choose your monthly installments';
+export const INSTALMENT_PLANS = ['3', '6', '9', '12'] as const;
+export const instalmentOptionText = (months: string) => `${months} Monthly Installments`;
+
 /** The labels of the method-specific inputs, word for word. */
 export const PAYMENT_FIELDS = {
   bankName: 'Bank Name',
@@ -80,6 +88,12 @@ export class PaymentStep {
   @step('Confirm the order')
   async confirm(): Promise<void> {
     await this.confirmButton.click();
+  }
+
+  /** A shopper who double-clicks "Check payment": both clicks reach the button before the page can react to the first. */
+  @step('Check the payment with a double click')
+  async checkPaymentWithDoubleClick(): Promise<void> {
+    await this.checkPaymentButton.dblclick();
   }
 
   /** A shopper who double-clicks Confirm: both clicks reach the button before the page can react to the first. */

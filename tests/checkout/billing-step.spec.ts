@@ -29,7 +29,8 @@ test.describe('Checkout: billing address step', () => {
     await checkout.signIn.continueAsGuest(fakeGuest());
   });
 
-  test('with an address from the real postcode lookup, Proceed stays disabled while the street, the city or the state is empty', { tag: ['@negative'] }, async ({ checkout }) => {
+  // The real lookup is a third-party service the shared live site may not reach: this one runs on the self-hosted shop only, and the mocked twin below holds the same page behaviour everywhere.
+  test('with an address from the real postcode lookup, Proceed stays disabled while the street, the city or the state is empty', { tag: ['@negative', '@self-hosted'] }, async ({ checkout }) => {
     const { billing } = checkout;
     await expect(billing.lookupHint).toHaveText(TEXT.hint);
     await expect(billing.proceedButton).toBeDisabled();
@@ -48,6 +49,24 @@ test.describe('Checkout: billing address step', () => {
 
   test.describe('when the postcode lookup finds the address', { tag: ['@mocked'] }, () => {
     test.use(withMocks(postcodeLookupMock));
+
+    test('browser Back from the billing step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {
+      const [{ product }] = cartItems;
+      // The cart opened from the shop, so there is a page to go Back to; the steps are then walked again from the cart.
+      await checkout.header.goHomeViaLogo();
+      await checkout.header.openCart();
+      await checkout.cart.proceed();
+      await checkout.signIn.continueAsGuest(fakeGuest());
+      await expect(checkout.billing.heading).toBeVisible();
+
+      await page.goBack();
+      await expect(page).toHaveURL('/');
+      await page.goForward();
+
+      await expect(page).toHaveURL(/\/checkout$/);
+      await expect(checkout.cart.table.row(product.name).title, 'the cart still holds its line').toBeVisible();
+      await expect(checkout.billing.heading, 'the billing step is not resumed half way').toBeHidden();
+    });
 
     test('street, city and state are filled in', async ({ checkout }) => {
       const { status } = await checkout.billing.lookUp(fakeAddress());
@@ -110,6 +129,9 @@ test.describe('Checkout: billing address step', () => {
     const { billing } = checkout;
     // The answer for the first house number is held back until the one for the second has been
     // served, as a slow network can do; nothing here waits for a fixed time.
+    // This is a route of its own and not `apiMock.delay` on purpose: the two answers differ by the house number in the query, which
+    // a mock answers by method and path only (a sequence would be spent by any stray lookup of a half-filled field), and a delay
+    // is a timer, so it would only make the first answer *probably* later than the second. The release below makes the order exact.
     let secondServed!: () => void;
     const secondIsServed = new Promise<void>((resolve) => (secondServed = resolve));
     await page.route(/\/postcode-lookup/, async (route) => {

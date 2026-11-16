@@ -7,6 +7,9 @@ import { fakeAddress, fakeCustomer } from '@support/test-data';
  * RUN_ACCOUNT_TESTS=1, because it creates accounts on a public shop.
  */
 test.describe('Real account', { tag: ['@account'] }, () => {
+  // The customers made here stay behind: the shop's API has no call a customer can use to delete an account, and
+  // the admin-side cleanup is not worth a session per test. Their emails are unique per run (`fakeCustomer`), so
+  // they never collide, and a reset of the self-hosted database (see README) clears them.
   test.describe('a new customer', () => {
     // Starts signed out, whatever the project's storageState holds.
     test.use({ storageState: { cookies: [], origins: [] } });

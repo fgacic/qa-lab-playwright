@@ -1,10 +1,14 @@
-import { expect, test as base, type JSHandle } from '@playwright/test';
-import { describeError, SUITE_WIDE_ALLOWANCES, unexpectedErrors, type Allowance, type BrowserError } from '@support/console-guard';
+import { expect, type Page } from '@playwright/test';
+import { apiPath, isApiUrl } from '@support/env';
+import { consoleArgsText, describeError, SUITE_WIDE_ALLOWANCES, unexpectedErrors, type Allowance, type ApiAnswer, type BrowserError } from '@support/console-guard';
+import { test as mocksTest } from './mocks';
 
 export interface ConsoleGuard {
   /**
-   * Declares an error this test provokes on purpose (a mocked failure the SPA logs, a defect a pin documents). The pattern
-   * is recorded as a test annotation. A pinned defect's error is allowed here only, never suite-wide.
+   * Declares an error this test provokes on purpose (a mocked failure the SPA logs, an error of a defect no suite-wide
+   * allowance covers). The pattern is recorded as a test annotation. The defects that have a pin of their own are allowed
+   * suite-wide (src/support/console-guard.ts), but only on the route of the page that raises them, and the "Unauthorized" echo of
+   * `GET /users/me` only in a test whose browser received that 401; everything else is declared here, per test.
    */
   allow(pattern: RegExp, reason: string): void;
   /**
@@ -25,21 +29,25 @@ export interface ConsoleGuardFixtures {
  * Listens on the context, so every page, popup and iframe of the test is covered. See src/support/console-guard.ts for
  * the suite-wide allowances.
  */
-export const test = base.extend<ConsoleGuardFixtures>({
+export const test = mocksTest.extend<ConsoleGuardFixtures>({
   consoleGuard: [
-    async ({ context }, use, testInfo) => {
+    async ({ context, apiMock }, use, testInfo) => {
       const seen: BrowserError[] = [];
       const allowances: Allowance[] = [...SUITE_WIDE_ALLOWANCES];
+      const answered: ApiAnswer[] = [];
       const reading: Promise<void>[] = [];
+      context.on('response', (response) => {
+        if (isApiUrl(response.url())) answered.push({ method: response.request().method(), pathname: apiPath(response.url()), status: response.status() });
+      });
       context.on('console', (message) => {
         if (message.type() !== 'error') return;
-        const error: BrowserError = { kind: 'console', text: message.text(), url: message.location().url || undefined };
+        const error: BrowserError = { kind: 'console', text: message.text(), url: message.location().url || undefined, route: routeOf(message.page()) };
         seen.push(error);
-        reading.push(serialiseArgs(message.args()).then((args) => void (error.args = args)));
+        reading.push(consoleArgsText(message.args()).then((args) => void (error.args = args)));
       });
       context.on('weberror', (webError) => {
         const { message, stack } = webError.error();
-        seen.push({ kind: 'pageerror', text: stack ?? message });
+        seen.push({ kind: 'pageerror', text: stack ?? message, route: routeOf(webError.page()) });
       });
       await use({
         async logged(pattern) {
@@ -52,21 +60,18 @@ export const test = base.extend<ConsoleGuardFixtures>({
         },
       });
       await Promise.all(reading);
-      expect(unexpectedErrors(seen, allowances).map(describeError), 'errors the browser logged or threw during the test').toEqual([]);
+      expect(unexpectedErrors(seen, allowances, apiMock.answers, answered).map(describeError), 'errors the browser logged or threw during the test').toEqual([]);
     },
     { auto: true },
   ],
 });
 
-/** What the page passed to `console.error`, as text: an Error by its name and message, anything else as JSON. A handle the page already closed reads as nothing. */
-async function serialiseArgs(args: readonly JSHandle[]): Promise<string> {
-  const values = await Promise.all(
-    args.map((arg) =>
-      arg.jsonValue().then(
-        (value: unknown) => (value instanceof Error ? `${value.name}: ${value.message}` : JSON.stringify(value)),
-        () => '',
-      ),
-    ),
-  );
-  return values.join(' ');
+/** The path of the page an error came from, read when it arrives (the page may have moved on by the time the test ends). */
+function routeOf(page: Page | null): string | undefined {
+  if (!page) return undefined;
+  try {
+    return new URL(page.url()).pathname;
+  } catch {
+    return undefined; // about:blank has a path, but a page that is already gone has no URL to read
+  }
 }

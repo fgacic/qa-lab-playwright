@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { failureFeedback } from '@support/feedback';
-import { contactSubjectSlug, emptyProductPage, listOf } from '@support/payloads';
+import { CONTACT_SUBJECTS, contactSubjectSlug, emptyProductPage, listOf } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 /** What the visitor asks for, and what the assistant answers when it finds something. */
@@ -12,6 +12,8 @@ const EMAIL_PROMPT = 'What is your email address?';
 const SUBJECT_PROMPT = 'Please select a subject for your ticket:';
 const DESCRIPTION_PROMPT = 'Please describe your issue (minimum 50 characters):';
 const ATTACHMENT_PROMPT = 'Would you like to add an attachment?';
+/** The subject the ticket dialogue picks: any of the contact form's, named from the same list. */
+const TICKET_SUBJECT = CONTACT_SUBJECTS[1].label;
 
 test.describe('Chat assistant', () => {
   test('opens with a greeting and a menu, and closes again', async ({ homePage }) => {
@@ -112,7 +114,7 @@ test.describe('Chat assistant', () => {
       await expect(chat.reply(EMAIL_PROMPT)).toBeVisible();
       await chat.send(guest.email);
       await expect(chat.reply(SUBJECT_PROMPT)).toBeVisible();
-      await chat.pick('Webmaster');
+      await chat.pick(TICKET_SUBJECT);
       await expect(chat.reply(DESCRIPTION_PROMPT)).toBeVisible();
       await chat.send(CONTACT_MESSAGE);
       await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
@@ -123,9 +125,59 @@ test.describe('Chat assistant', () => {
       expect((await sent).postDataJSON()).toMatchObject({
         name: `${guest.firstName} ${guest.lastName}`,
         email: guest.email,
-        subject: contactSubjectSlug('Webmaster'),
+        subject: contactSubjectSlug(TICKET_SUBJECT),
         message: CONTACT_MESSAGE,
       });
+    });
+  });
+
+  test.describe('a support ticket the API refuses', { tag: ['@mocked', '@negative'] }, () => {
+    test.use(withMocks(mock.fail('POST', '/messages', 500)));
+
+    test('the assistant says the ticket was not submitted, with the reason', async ({ homePage, apiMock }) => {
+      const { chat } = homePage.shell;
+      const guest = fakeGuest();
+      await chat.open();
+      await chat.choose('Create support ticket');
+      await chat.send(guest.firstName);
+      await chat.send(guest.lastName);
+      await chat.send(guest.email);
+      await chat.pick(TICKET_SUBJECT);
+      await chat.send(CONTACT_MESSAGE);
+      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
+      const answered = apiMock.waitForResponse('POST', '/messages');
+      await chat.pick('Skip');
+
+      expect((await answered).response.status()).toBe(500);
+      await expect(chat.reply('There was an error submitting your ticket:')).toBeVisible();
+      await expect(chat.reply('Server Error')).toBeVisible();
+      await expect(chat.reply("Your support ticket has been submitted successfully! We'll get back to you soon.")).toBeHidden();
+    });
+  });
+
+  test.describe('a support ticket whose request never arrives', { tag: ['@mocked', '@negative', '@bug'] }, () => {
+    test.use(withMocks(mock.abort('POST', '/messages')));
+
+    test('the assistant gives a reason a visitor can read, not the word "true"', async ({ homePage, apiMock }) => {
+      knownBug('BUG-55', 'a ticket whose request is aborted (no answer at all) is followed by the literal text "true" after "There was an error submitting your ticket:".');
+      const { chat } = homePage.shell;
+      const guest = fakeGuest();
+      await chat.open();
+      await chat.choose('Create support ticket');
+      await chat.send(guest.firstName);
+      await chat.send(guest.lastName);
+      await chat.send(guest.email);
+      await chat.pick(TICKET_SUBJECT);
+      await chat.send(CONTACT_MESSAGE);
+      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
+      const sent = apiMock.waitForRequest('POST', '/messages');
+      await chat.pick('Skip');
+      await sent;
+      // Precondition, true whether or not the bug is fixed: the ticket is reported as failed, and not as submitted.
+      await expect(chat.reply('There was an error submitting your ticket:')).toBeVisible();
+      await expect(chat.reply("Your support ticket has been submitted successfully! We'll get back to you soon.")).toBeHidden();
+
+      await expect(chat.reply('true'), 'BUG-55: the reason after the error is not the literal "true"').toBeHidden({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -170,6 +222,9 @@ test.describe('Chat assistant', () => {
       await apiMock.expectNoRequest('POST', '/messages');
       // After the window above, so "hidden" means the next question was not asked, not that it has not arrived yet.
       await expect(chat.reply(SUBJECT_PROMPT)).toBeHidden();
+      // Still waiting for the email: the same question's answer, corrected, is what moves the dialogue on.
+      await chat.send(fakeGuest().email);
+      await expect(chat.asked(SUBJECT_PROMPT)).toHaveCount(1);
     });
 
     test('a description under 50 characters is asked for again', async ({ homePage, apiMock }) => {
@@ -178,7 +233,7 @@ test.describe('Chat assistant', () => {
       await chat.send(guest.firstName);
       await chat.send(guest.lastName);
       await chat.send(guest.email);
-      await chat.pick('Webmaster');
+      await chat.pick(TICKET_SUBJECT);
       await expect(chat.reply(DESCRIPTION_PROMPT)).toBeVisible();
 
       await chat.send('too short');
@@ -187,6 +242,9 @@ test.describe('Chat assistant', () => {
       await apiMock.expectNoRequest('POST', '/messages');
       // After the window above, so "hidden" means the next question was not asked, not that it has not arrived yet.
       await expect(chat.reply(ATTACHMENT_PROMPT)).toBeHidden();
+      // Still waiting for the description: a long enough one is what moves the dialogue on.
+      await chat.send(CONTACT_MESSAGE);
+      await expect(chat.asked(ATTACHMENT_PROMPT)).toHaveCount(1);
     });
   });
 

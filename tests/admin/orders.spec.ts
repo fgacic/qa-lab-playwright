@@ -2,7 +2,7 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { ADMIN_MESSAGES, alertAppears, allowLoggedFailure } from '@pages/admin/alerts';
 import { ORDER_STATUSES } from '@pages/admin/AdminPages';
 import { ORDER_STATUS, orderLine, orderPayment, paginated } from '@support/admin-payloads';
-import { knownBug } from '@support/known-bug';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each order with status and total', async ({ adminOrders, backOffice }) => {
@@ -66,7 +66,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
 
       // A server error is not "not found": any other wording, an alert or nothing would do. The pin only refuses the wrong claim,
       // and the claim may be drawn a moment after the link, so it is watched for over a window.
-      expect(await alertAppears(order.notFoundNotice), 'ADM-13: a failed order load does not say the invoice does not exist').toBe(false);
+      expect(await alertAppears(order.notFoundNotice, BUG_TIMEOUT), 'ADM-13: a failed order load does not say the invoice does not exist').toBe(false);
     });
   });
 

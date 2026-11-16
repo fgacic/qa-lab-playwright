@@ -7,11 +7,14 @@ export class InvoicesPage {
   readonly title: Locator;
   readonly table: Locator;
   readonly invoiceRows: Locator;
+  /** What an account with no invoices should say, as the favorites and messages pages do (BUG-48: this page says nothing). */
+  readonly emptyState: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
     this.title = page.getByTestId('page-title');
     this.table = page.getByRole('table');
+    this.emptyState = page.getByText(/no invoices|no orders/i);
     this.invoiceRows = this.table.getByRole('row').filter({ hasText: /INV-\d+/ });
   }
 

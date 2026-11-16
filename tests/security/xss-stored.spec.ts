@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test as base } from '@fixtures';
+import { HomePage } from '@pages/HomePage';
 import { ProfilePage } from '@pages/account/ProfilePage';
-import { ATTRIBUTE_XSS_PAYLOAD, XSS_PAYLOADS } from '@fixtures/security';
+import { ATTRIBUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { API_URL } from '@support/env';
+import { escapeRegExp } from '@support/regexp';
 import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 
 /**
@@ -10,13 +12,11 @@ import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/
  * the user themselves. These submit attack strings, so they only ever run against the
  * self-hosted Toolshop, our own environment, never the public site (@self-hosted).
  *
- * Cleanup: the brand and the product are deleted again through the admin API after every test (fixtures `brandNames` and
- * `productIds`), pass or fail, and a failed cleanup fails the test. Two kinds of record are deliberately left behind,
- * all uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt for
- * every CI run (the same trade-off as tests/admin-e2e):
- * - one contact message per contact test: the API cannot delete a message (DELETE /messages/{id} answers 405);
- * - the customer registered by the last test: it carries the payload in its name by design, and the suite has no
- *   admin client call that deletes a user. It cannot collide with anything, its e-mail is unique per run.
+ * Cleanup: the brand, the product and the customer are deleted again through the admin API after every test (fixtures
+ * `brandNames`, `productIds` and `customerEmails`), pass or fail, and a failed cleanup fails the test. One kind of record is
+ * deliberately left behind, uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
+ * for every CI run (the same trade-off as tests/admin-e2e): a contact message per contact test, because the API cannot
+ * delete a message (DELETE /messages/{id} answers 405).
  */
 const payload = XSS_PAYLOADS['img onerror'];
 const breakout = XSS_PAYLOADS['svg onload, breaking out of an attribute'];
@@ -33,34 +33,40 @@ const uniqueKey = () => randomUUID().slice(0, 8);
 /**
  * What a test saved in the shared database is removed again by the admin API, whether an assertion failed or not, and even
  * when the save went out but its answer never arrived: a brand is found by the name the test declared before saving, a
- * product by the id the test arranged. A cleanup that fails fails the test, so a leak is never silent.
+ * product by the id the test arranged, a customer by the e-mail the test registered with. A cleanup that fails fails the test,
+ * so a leak is never silent.
  */
-const test = base.extend<{ brandNames: Set<string>; productIds: Set<string> }>({
-  brandNames: async ({ request, adminToken }, use) => {
+const test = base.extend<{ brandNames: Set<string>; productIds: Set<string>; customerEmails: Set<string> }>({
+  brandNames: async ({ request, api, adminToken }, use) => {
     const names = new Set<string>();
     await use(names);
     if (!names.size) return;
-    const authorization = `Bearer ${await adminToken()}`;
+    const token = await adminToken();
     const brands = (await (await request.get(`${API_URL}/brands`)).json()) as { id: string; name: string }[];
-    const failures: unknown[] = [];
-    for (const { id, name } of brands.filter((brand) => names.has(brand.name))) {
-      const response = await request.delete(`${API_URL}/brands/${id}`, { headers: { authorization } });
-      if (!response.ok()) failures.push(new Error(`Could not remove the brand "${name}": DELETE answered ${response.status()}`));
-    }
+    const outcomes = await Promise.allSettled(brands.filter((brand) => names.has(brand.name)).map((brand) => api.deleteBrand(token, brand.id)));
+    const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
     if (failures.length) throw new AggregateError(failures, 'Cleaning up the brands this test saved failed');
   },
   productIds: async ({ api, adminToken }, use) => {
     const ids = new Set<string>();
     await use(ids);
-    const failures: unknown[] = [];
-    for (const id of ids) {
-      try {
-        await api.deleteProduct(await adminToken(), id);
-      } catch (error) {
-        failures.push(error);
-      }
-    }
+    const outcomes = await Promise.allSettled([...ids].map(async (id) => api.deleteProduct(await adminToken(), id)));
+    const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
     if (failures.length) throw new AggregateError(failures, 'Cleaning up the products this test made failed');
+  },
+  customerEmails: async ({ api, adminToken }, use) => {
+    const emails = new Set<string>();
+    await use(emails);
+    const token = await adminToken();
+    const outcomes = await Promise.allSettled(
+      [...emails].map(async (email) => {
+        // Found by e-mail: a registration whose answer never arrived has no id the test could have kept. None found means nothing was saved.
+        const user = await api.findUserByEmail(token, email);
+        if (user) await api.deleteUser(token, user.id);
+      }),
+    );
+    const failures = outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
+    if (failures.length) throw new AggregateError(failures, 'Cleaning up the customers this test registered failed');
   },
 });
 
@@ -102,7 +108,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     await xss.expectNotExecuted();
   });
 
-  test('a brand name is shown as text where the admin and the storefront list it', async ({ adminBrands, adminProducts, homePage, brandNames, xss }) => {
+  test('a brand name is shown as text where the admin and the storefront list it', async ({ adminBrands, adminProducts, newVisitor, brandNames, xss }) => {
     const name = `Qa Lab ${payload} ${uniqueKey()}`;
     brandNames.add(name); // before the save, so the fixture removes it even if the save's answer never arrives
     // Both lists are fixtures here, so the page may be on either: start from the brands.
@@ -123,43 +129,51 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     await expect(productForm.brand.getByRole('option', { name, exact: true })).toHaveCount(1);
     await xss.expectNoInjectedElements();
 
-    // 3. The storefront's filter sidebar, which any visitor sees: the same brand, listed for shoppers.
-    await homePage.open();
-    await expect(homePage.filters.brand(name)).toBeVisible();
-    await xss.expectNoInjectedElements();
+    // 3. The storefront's filter sidebar, as a shopper sees it: a context of their own with nobody signed in, not the admin's.
+    const shopper = new HomePage(await newVisitor());
+    await shopper.open();
+    await expect(shopper.filters.brand(name)).toBeVisible();
+    await xss.expectNoInjectedElements(shopper.page);
 
     await xss.expectNotExecuted();
   });
 
   // Attribute context: a product's name is also the `alt` of its picture, so a name that closes the quote would add an attribute
   // of its own. The product is the test's own (a rental, which the shop's default list does not show, so no catalogue spec sees it).
-  test('a product name is shown as text, in the picture attribute that carries it too', async ({ request, catalog, adminToken, productIds, productPage, xss }) => {
-    const template = await catalog.inStock();
-    const name = `Qa Lab ${ATTRIBUTE_XSS_PAYLOAD} ${uniqueKey()}`;
-    const created = await request.post(`${API_URL}/products`, {
-      headers: { authorization: `Bearer ${await adminToken()}`, accept: 'application/json' },
-      data: { name, description: 'Made by the stored-input checks.', price: 1.5, category_id: template.category.id, brand_id: template.brand.id, product_image_id: template.product_image.id, is_location_offer: false, is_rental: true },
+  for (const [kind, { payload: attributePayload }] of Object.entries(ATTRIBUTE_XSS_PAYLOADS)) {
+    test(`a product name with ${kind} is shown as text, in the picture attribute that carries it too`, async ({ api, catalog, adminToken, productIds, productPage, xss }) => {
+      const template = await catalog.inStock();
+      const name = `Qa Lab ${attributePayload} ${uniqueKey()}`;
+      const { id } = await api.createProduct(await adminToken(), {
+        name,
+        description: 'Made by the stored-input checks.',
+        price: 1.5,
+        category_id: template.category.id,
+        brand_id: template.brand.id,
+        product_image_id: template.product_image.id,
+        is_rental: true,
+      });
+      productIds.add(id);
+
+      await productPage.open(id);
+
+      // The heading is the name, and the "ECO" badge the product carries (a new product has a CO2 rating): nothing else may follow the name.
+      await expect(productPage.name).toHaveText(new RegExp(`^\\s*${escapeRegExp(name)}\\s*(?:ECO\\s*)?$`));
+      // The picture is found by the whole name as its alt text: a quote that closed the attribute early would have cut it short.
+      await expect(productPage.image(name)).toBeVisible();
+      await xss.expectNoInjectedElements();
+      await xss.expectNotExecuted();
     });
-    expect(created.status(), 'the admin could create the product with this name').toBe(201);
-    const { id } = (await created.json()) as { id: string };
-    productIds.add(id);
-
-    await productPage.open(id);
-
-    await expect(productPage.name).toHaveText(name);
-    // The picture is found by the whole name as its alt text: a quote that closed the attribute early would have cut it short.
-    await expect(productPage.image(name)).toBeVisible();
-    await xss.expectNoInjectedElements();
-    await xss.expectNotExecuted();
-  });
+  }
 });
 
 test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@security', '@account', '@self-hosted'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] }, xssWatch: true });
 
-  test('a name chosen at registration is shown in the header and on the profile as text', async ({ registerPage, xss }) => {
+  test('a name chosen at registration is shown in the header and on the profile as text', async ({ registerPage, customerEmails, xss }) => {
     // The API caps a first name at 40 characters; this payload stays under it.
     const customer = { ...fakeCustomer(), firstName: `Qa${breakout}` };
+    customerEmails.add(customer.email); // before the registration, so the fixture removes the account even if its answer never arrives
 
     const loginPage = await registerPage.register(customer);
     const account = await loginPage.login(customer.email, customer.password);

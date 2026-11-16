@@ -1,5 +1,6 @@
 import { expect, test } from '@fixtures';
-import { knownBug } from '@support/known-bug';
+import { consoleArgsText } from '@support/console-guard';
+import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { escapeRegExp } from '@support/regexp';
 
@@ -84,15 +85,17 @@ test.describe('Unknown route segments, uncaught errors (read-only)', { tag: ['@s
     const logged: Promise<string>[] = [];
     // The error object's own message, not the console text: Firefox prints an object it logged as `JSHandle@object`.
     page.on('console', (message) => {
-      if (message.type() !== 'error') return;
-      logged.push(Promise.all(message.args().map((arg) => arg.evaluate((value) => (value instanceof Error ? `${value.name}: ${value.message}` : String(value))))).then((texts) => texts.join(' ')));
+      if (message.type() === 'error') logged.push(consoleArgsText(message.args()));
     });
+    const thrownSoFar = async () => (await Promise.all(logged)).filter((text) => /TypeError/.test(text) && CATEGORY_TYPE_ERROR.test(text));
 
     await categoryPage.open('qa-lab-no-such-category');
     // Precondition, true whether or not the bug is fixed: the page drew for the slug (its answer was waited for in `open`).
     await expect(categoryPage.title).toBeVisible();
+    // The error is logged a moment after the page draws, so a read right now could miss it and pass a broken page. Give it the pin's
+    // window to arrive (settled, not awaited for success: on a fixed site none does, and the window runs out into the assertion below).
+    await Promise.allSettled([expect.poll(thrownSoFar, { timeout: BUG_TIMEOUT }).not.toEqual([])]);
 
-    const thrown = (await Promise.all(logged)).filter((text) => /TypeError/.test(text) && CATEGORY_TYPE_ERROR.test(text));
-    expect(thrown, 'SEC-13: the category page threw for an unknown slug').toEqual([]);
+    expect(await thrownSoFar(), 'SEC-13: the category page threw for an unknown slug').toEqual([]);
   });
 });

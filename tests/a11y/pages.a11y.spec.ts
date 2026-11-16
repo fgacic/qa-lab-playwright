@@ -19,9 +19,10 @@ import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
 import { postcodeLookupMock } from '@fixtures/pages';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { brand, customer } from '@support/admin-payloads';
-import { KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
+import { diffFindings, KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
 import { IS_SELF_HOSTED } from '@support/env';
 import { horizontalOverflow } from '@support/page-metrics';
+import { acceptedGuestInvoice } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
@@ -43,23 +44,8 @@ async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<vo
     for (const finding of scan.findings) fs.appendFileSync(process.env.A11Y_RECORD, JSON.stringify({ page, ...finding }) + '\n');
     return;
   }
-  // A known violation is known on the pages it was recorded on, and for exactly as many elements as it was recorded with:
-  // more is a spread (a new violation), fewer is a fix the baseline must record.
-  // Elements counted from the shop's seed data are compared exactly only on the self-hosted shop, whose seed is fixed (KnownViolation.seedDependent).
-  const problems = scan.findings.flatMap((f) => {
-    const known = KNOWN_VIOLATIONS.find((k) => k.rule === f.rule && k.target === f.target && k.pages.includes(page));
-    if (!known) return [`${f.rule} (${f.impact}) on ${f.target}`];
-    // A known violation that got worse (or better) by axe's own rating is a change of kind, not of count.
-    if (f.impact !== known.impact) return [`${known.id} changed impact: ${f.rule} on ${f.target} is now ${f.impact}, known as ${known.impact}`];
-    if (known.seedDependent && !IS_SELF_HOSTED) return [];
-    if (f.nodes > known.nodes) return [`${known.id} spreads: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}`];
-    if (f.nodes < known.nodes) return [`${known.id} shrank: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${known.nodes}: partly fixed, update the baseline`];
-    return [];
-  });
-  // A known violation that was recorded on this page and is no longer found is fixed here.
-  const fixedHere = KNOWN_VIOLATIONS.filter((k) => k.pages.includes(page) && !scan.findings.some((f) => f.rule === k.rule && f.target === k.target)).map(
-    (k) => `${k.id} fixed here: ${k.rule} on ${k.target} is gone from ${page}, update the baseline`,
-  );
+  // The decision (new, spread, shrank, impact, fixed) is `diffFindings`, table-tested in tests/framework/a11y-ratchet.spec.ts.
+  const { problems, fixed: fixedHere } = diffFindings(KNOWN_VIOLATIONS, scan.findings, page, { selfHosted: IS_SELF_HOSTED });
   // Soft, so a test that scans several states reports every state's violations, not just the first.
   expect.soft(problems, `new accessibility violations on ${page}`).toEqual([]);
   expect.soft(fixedHere, `accessibility violations fixed on ${page}`).toEqual([]);
@@ -156,7 +142,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
 
   test.describe('order confirmation (mocked order)', { tag: ['@mocked'] }, () => {
     // The check and the order are writes: answered by mocks, so no order is ever placed (the write guard refuses any other).
-    test.use(withMocks(postcodeLookupMock, mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.respond('POST', '/invoices/guest', { id: '01QALABFAKEINVOICE0000000', invoice_number: 'INV-2026999998' }, 201)));
+    test.use(withMocks(postcodeLookupMock, mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201)));
 
     test('order confirmation', async ({ checkout, a11y }) => {
       await checkout.checkOutAsGuest(fakeGuest(), fakeAddress());

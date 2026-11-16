@@ -1,5 +1,6 @@
 // eslint.config.mjs counts a call to any listed `expect*` helper as an assertion (`playwright/expect-expect`). A stale name would
 // let a test with no assertion pass the lint; an unlisted helper would make a test that does assert fail it. No browser: this reads files.
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -44,5 +45,54 @@ test.describe('the lint configuration', { tag: ['@framework'] }, () => {
 
   test('the list has no duplicates', () => {
     expect(new Set(ASSERTION_HELPERS).size).toBe(ASSERTION_HELPERS.length);
+  });
+});
+
+/** The lint messages the spec-only hazard rules (eslint.config.mjs) raise on each sample, from a node process that loads the config as ESLint does. */
+function lintSamples(samples: string[]): string[][] {
+  const run = spawnSync(process.execPath, [join(ROOT, 'tests', 'framework', 'probe', 'lint-samples.mjs')], { input: JSON.stringify(samples), encoding: 'utf8', timeout: 60_000 });
+  expect(run.error, 'the lint run started').toBeUndefined();
+  expect(run.status, run.stderr).toBe(0);
+  return JSON.parse(run.stdout) as string[][];
+}
+
+const IN_PAGE = 'No code run in the page in a spec (evaluate, evaluateAll, evaluateHandle, $eval, $$eval, waitForFunction)';
+const REFUSED: [code: string, message: string][] = [
+  ['page.evaluate(() => 1)', IN_PAGE],
+  ['this.page.evaluate(() => 1)', IN_PAGE],
+  ['locator.evaluate((el) => el.id)', IN_PAGE],
+  ['page.locator("a").evaluateAll((els) => els.length)', IN_PAGE],
+  ['message.args()[0].evaluate((v) => v)', IN_PAGE],
+  ['handle.evaluateHandle((v) => v)', IN_PAGE],
+  ['page.$eval("a", (el) => el.id)', IN_PAGE],
+  ['page.$$eval("a", (els) => els.length)', IN_PAGE],
+  ['page.waitForFunction(() => true)', IN_PAGE],
+  ['frame.waitForFunction(() => true)', IN_PAGE],
+  ['const at = new Date();', 'No new Date() in a spec'],
+  ['const t = performance.now();', 'No performance.now() in a spec'],
+  ['const t = Date.now();', 'No Date.now in a spec'],
+  ['const r = Math.random();', 'No Math.random in a spec'],
+];
+const ALLOWED = [
+  'const at = new Date("2026-01-02T03:04:05Z"); const n = new Date(0); await page.clock.install({ time: at });',
+  'await expect(page.getByRole("button")).toBeVisible(); const t = await storedToken(page); await consoleArgsText(args);',
+  'const ms = await elapsedMs(() => page.goto("/"));',
+];
+
+test.describe('the hazard rules for specs', { tag: ['@framework'] }, () => {
+  let refused: string[][];
+  let allowed: string[][];
+  test.beforeAll(() => {
+    [refused, allowed] = [lintSamples(REFUSED.map(([code]) => code)), lintSamples(ALLOWED)];
+  });
+
+  REFUSED.forEach(([code, message], i) => {
+    test(`${code} is refused`, () => {
+      expect(refused[i]).toEqual([message]);
+    });
+  });
+
+  test('a fixed date and the helpers that are allowed are not refused', () => {
+    expect(allowed).toEqual(ALLOWED.map(() => []));
   });
 });

@@ -84,3 +84,44 @@ export type AxId = (typeof ENTRIES)[number]['id'];
 export type PinnedViolation = KnownViolation & { id: AxId };
 
 export const KNOWN_VIOLATIONS: PinnedViolation[] = ENTRIES.map((entry) => ({ ...known(entry), id: entry.id }));
+
+/** What a scan found for one rule on one kind of element: the part of a scan's finding the ratchet compares. */
+export interface ScanFinding {
+  rule: string;
+  target: string;
+  impact: string;
+  /** How many elements the finding covers in this scan. */
+  nodes: number;
+}
+
+/** The verdict of the ratchet on one scan: `problems` are findings that are new or changed, `fixed` are known violations that are gone. */
+export interface FindingsDiff {
+  problems: string[];
+  fixed: string[];
+}
+
+/**
+ * The ratchet's decision, pure so it can be table-tested (tests/framework/a11y-ratchet.spec.ts) without a browser. A finding is
+ * known only on the scans it was recorded on (`pages`) and for exactly as many elements as it was recorded with:
+ * - not in the baseline, or in the baseline but not for this scan: a new violation;
+ * - a different axe impact: a change of kind (escalated or eased), not of count;
+ * - more elements: it spread; fewer: it was partly fixed and the baseline must record that;
+ * - a seed-dependent violation is held to its count only on the self-hosted shop, whose seed is fixed (`seedDependent`);
+ *   elsewhere it only has to be found where it was recorded, which the `fixed` list still checks;
+ * - a known violation recorded for this scan and absent from the findings is fixed here.
+ */
+export function diffFindings(known: readonly KnownViolation[], findings: readonly ScanFinding[], scan: ScanName, { selfHosted }: { selfHosted: boolean }): FindingsDiff {
+  const problems = findings.flatMap((f) => {
+    const entry = known.find((k) => k.rule === f.rule && k.target === f.target && k.pages.includes(scan));
+    if (!entry) return [`${f.rule} (${f.impact}) on ${f.target}`];
+    if (f.impact !== entry.impact) return [`${entry.id} changed impact: ${f.rule} on ${f.target} is now ${f.impact}, known as ${entry.impact}`];
+    if (entry.seedDependent && !selfHosted) return [];
+    if (f.nodes > entry.nodes) return [`${entry.id} spreads: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${entry.nodes}`];
+    if (f.nodes < entry.nodes) return [`${entry.id} shrank: ${f.rule} on ${f.target} now hits ${f.nodes} elements, known for ${entry.nodes}: partly fixed, update the baseline`];
+    return [];
+  });
+  const fixed = known
+    .filter((k) => k.pages.includes(scan) && !findings.some((f) => f.rule === k.rule && f.target === k.target))
+    .map((k) => `${k.id} fixed here: ${k.rule} on ${k.target} is gone from ${scan}, update the baseline`);
+  return { problems, fixed };
+}

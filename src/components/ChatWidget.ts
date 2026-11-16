@@ -32,6 +32,11 @@ export class ChatWidget {
     return this.window.getByText(text).last();
   }
 
+  /** Every time the assistant has said this, in order: a question asked again shows up as a second one. */
+  asked(text: string): Locator {
+    return this.window.getByText(text, { exact: true });
+  }
+
   /** A line the visitor typed, echoed in the transcript. */
   said(text: string): Locator {
     return this.window.getByText(text, { exact: true });

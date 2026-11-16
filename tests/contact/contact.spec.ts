@@ -6,9 +6,12 @@ import type { ApiMock } from '@support/api-mock';
 import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
+/** The subject a test uses when it does not care which one, and a second one for the test that does. */
+const [DEFAULT_SUBJECT, OTHER_SUBJECT] = [CONTACT_SUBJECTS[1].label, CONTACT_SUBJECTS[0].label];
+
 const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
   from: fakeGuest(),
-  subject: 'Webmaster',
+  subject: DEFAULT_SUBJECT,
   message: CONTACT_MESSAGE,
   ...overrides,
 });
@@ -80,7 +83,7 @@ test.describe('Contact form', () => {
   // The same journey twice: the real write lands in the shop's inbox, so that run is on our own Toolshop only;
   // the mocked twin answers the write itself, so it also runs on the public site.
   const sendsAndAcknowledges = async ({ contactPage, apiMock }: { contactPage: ContactPage; apiMock: ApiMock }) => {
-    const contact = message({ subject: 'Customer service', attachment: textFile('empty.txt', '') });
+    const contact = message({ subject: OTHER_SUBJECT, attachment: textFile('empty.txt', '') });
     const sent = apiMock.waitForRequest('POST', '/messages');
 
     await contactPage.send(contact);

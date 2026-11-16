@@ -51,6 +51,7 @@ test.describe('Checkout: sign-in step', () => {
     await checkout.signIn.signIn(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
     await expect(checkout.signIn.loginError).toHaveText(TEXT.loginRefused);
+    await expect(checkout.signIn.signInTab).toHaveAttribute('aria-selected', 'true');
     await expect(checkout.billing.heading).toBeHidden();
   });
 
@@ -61,6 +62,7 @@ test.describe('Checkout: sign-in step', () => {
       await checkout.signIn.signIn(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
       await expect(checkout.signIn.loginError).toHaveText(TEXT.loginRefused);
+      await expect(checkout.signIn.signInTab).toHaveAttribute('aria-selected', 'true');
       await expect(checkout.billing.heading).toBeHidden();
     });
 
@@ -83,6 +85,7 @@ test.describe('Checkout: sign-in step', () => {
       await checkout.signIn.signIn(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
       await expect(checkout.signIn.loginError).toHaveText(TEXT.accountLocked);
+      await expect(checkout.signIn.signInTab).toHaveAttribute('aria-selected', 'true');
       await expect(checkout.billing.heading).toBeHidden();
     });
   });

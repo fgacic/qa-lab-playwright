@@ -16,7 +16,10 @@ import { httpsUrl } from '@support/urls';
  * site would send, not just that the header exists. Plain HTTP, no browser: the file runs on the browserless `apiOnlyTest`,
  * and a challenge is recognised by Cloudflare's `cf-mitigated: challenge` response header.
  *
- * Defect ids: SEC-01..06 are the pins below; the next free one is SEC-13 (the registry in docs/COVERAGE.md is the source).
+ * Defect ids: SEC-01..06 are the pins below; the next free one is SEC-14 (the registry in docs/COVERAGE.md is the source).
+ *
+ * The whole file is `@live-only`: it never runs on the CI gate, which is the self-hosted target (the nginx there is ours, not the
+ * product's). It runs in the nightly live run only, so a change here is not exercised by a pull request.
  */
 
 /** The directives of a Content-Security-Policy, by name (lower-cased), each with its source list. */
@@ -119,17 +122,17 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
 // Not pins, so a describe of their own without @bug (verify-bugs.mjs treats every @bug test as a pin that must fail).
 test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['@security', '@live-only'] }, () => {
   // The checks below are not pins: nothing is known about the live site's answer yet, so each states the behaviour a
-  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-13) then.
+  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-14) then.
   // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
 
-  test('every cookie the shop and its API set is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
+  test('every cookie the shop and its API set, if any, is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {
     // Both must have answered (a challenge skips): a block page or an error sets no cookies, and "none" would read as "all fine".
     const api = await request.get(`${API_URL}/status`);
     skipIfChallengedResponse(api);
     expect(api.status(), 'the API answered before its cookies are judged').toBeLessThan(400);
     const answers = [await shopAnswer(request, testInfo), api];
     const cookies = answers.flatMap((answer) => answer.headersArray().filter(({ name }) => name.toLowerCase() === 'set-cookie').map(({ value }) => value));
-    // A shop that sets no cookie has nothing to misconfigure, but the count is recorded so "none" is a stated fact and not an unread loop.
+    // A shop that sets no cookie has nothing to misconfigure (hence "if any" in the title), but the count is recorded so "none" is a stated fact and not an unread loop.
     testInfo.annotations.push({ type: 'cookies inspected', description: String(cookies.length) });
 
     for (const cookie of cookies) {

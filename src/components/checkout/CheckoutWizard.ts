@@ -16,15 +16,22 @@ export class CheckoutWizard {
   readonly billing: BillingStep;
   readonly payment: PaymentStep;
   readonly confirmation: Locator;
+  private readonly root: Locator;
 
   constructor(page: Page) {
     const root = page.locator('body');
+    this.root = root;
     this.indicator = new StepIndicator(root);
     this.cart = new CartStep(root);
     this.signIn = new SignInStep(root);
     this.billing = new BillingStep(root);
     this.payment = new PaymentStep(root);
     this.confirmation = root.getByText(/^Thanks for your order! Your invoice number is INV-\d+\.$/);
+  }
+
+  /** The confirmation for exactly this invoice number, word for word. */
+  confirmationFor(invoiceNumber: string): Locator {
+    return this.root.getByText(`Thanks for your order! Your invoice number is ${invoiceNumber}.`, { exact: true });
   }
 
   /** The invoice number in the confirmation, once it is shown. */

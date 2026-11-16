@@ -11,6 +11,7 @@ export const ASSERTION_HELPERS = [
   'expectNotExecuted',
   'expectNoWorseShift',
   'expectPageText',
+  'expectPicturesNamed',
   'expectReflows',
   'expectResponsive',
   'expectVerdict',

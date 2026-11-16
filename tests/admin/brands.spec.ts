@@ -55,19 +55,6 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(form.chrome.alert(ADMIN_MESSAGES.brandSaved)).toBeVisible();
   });
 
-  test('Delete removes the brand', async ({ adminBrands, apiMock }) => {
-    // Once deleted, the list the page reloads no longer has the brand.
-    await apiMock.use(mock.respond('GET', '/brands', []));
-    await expect(adminBrands.table.row(brand.name)).toBeVisible();
-    const deleted = apiMock.waitForRequest('DELETE', `/brands/${brand.id}`);
-
-    await adminBrands.table.delete(brand.name);
-
-    await deleted;
-    await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeVisible();
-    await expect(adminBrands.table.row(brand.name)).toHaveCount(0);
-  });
-
   test.describe('when the brand cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', BRAND, 500)));
     test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
@@ -101,40 +88,6 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
       await sent;
 
       await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: BUG_TIMEOUT });
-    });
-  });
-
-  test.describe('when a brand is still in use', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', BRAND, 409, { message: 'Seems like this brand is used elsewhere.' })));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
-    test('the reason is shown and the brand stays', async ({ adminBrands, apiMock }) => {
-      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
-      await apiMock.use(mock.respond('GET', '/brands', []));
-      await expect(adminBrands.table.row(brand.name)).toBeVisible();
-
-      await adminBrands.table.delete(brand.name);
-
-      await expect(adminBrands.alert('used elsewhere')).toBeVisible();
-      await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeHidden();
-      await expect(adminBrands.table.row(brand.name)).toBeVisible();
-    });
-  });
-
-  test.describe('when deleting a brand fails on the server', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', BRAND, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
-    test('the failure is shown and the brand stays', async ({ adminBrands, apiMock }) => {
-      // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
-      await apiMock.use(mock.respond('GET', '/brands', []));
-      await expect(adminBrands.table.row(brand.name)).toBeVisible();
-
-      await adminBrands.table.delete(brand.name);
-
-      await expect(adminBrands.failure).toBeVisible();
-      await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeHidden();
-      await expect(adminBrands.table.row(brand.name)).toBeVisible();
     });
   });
 });

@@ -41,6 +41,7 @@ jobs:
       - uses: ./.github/actions/setup-suite
         with:
           browsers: ${{ matrix.project == 'mobile' && 'chromium' || matrix.project }}
+          save-browsers: 'true' # max-parallel is 1: the jobs run one after the other, so none races another for the entry
       - run: npx playwright test --project=${{ matrix.project }}
         env:
           REPORT_ID: live-${{ matrix.project }}

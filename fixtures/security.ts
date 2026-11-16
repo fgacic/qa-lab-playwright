@@ -33,11 +33,37 @@ export const ROUTE_XSS_PAYLOADS = {
 } as const;
 
 /**
- * A payload for a value that lands inside a quoted HTML attribute (an `alt`, a `title`, an input's `value`): it closes the
- * quote and adds an attribute of its own, with no angle bracket, which is what a filter that only strips tags lets through.
- * `autofocus` makes the event handler run without a click. The same under 40 characters as the rest.
+ * A payload for a value that lands in an HTML attribute (an `alt`, a `title`, an `href`, an input's `value`), with the sink it
+ * is the control for: what a vulnerable page would build from it. Each calls `__qaLabXssHit`, so a hit says which one ran.
+ * - quote break: closes the quote and adds a handler of its own, with no angle bracket, which is what a filter that only strips
+ *   tags lets through; `autofocus` is what makes it run without a click (the control focuses the element itself, see
+ *   `insertInAttributeSink`);
+ * - srcdoc: the same break, adding a `srcdoc` to an iframe, whose script the browser runs;
+ * - `javascript:` URL: a value that is itself the whole URL of a link, which runs when the link is followed (`activate`);
+ * - entity-encoded: the quote arrives as `&quot;` and a sink that decodes entities before it builds the attribute turns it into a real one.
+ * Each is under 40 characters, like the rest.
  */
-export const ATTRIBUTE_XSS_PAYLOAD = '" autofocus onfocus=__qaLabXssHit(7) x="';
+export interface AttributePayload {
+  payload: string;
+  /** The markup a vulnerable page would build around the value. */
+  sink: (value: string) => string;
+  /** Whether the payload only runs once the sink's link is followed. */
+  activate?: 'click';
+  /** What a safe page puts in the sink instead (the control): escaping for a text attribute, a scheme check for a URL. */
+  neutralise: (value: string) => string;
+}
+const escapeAttribute = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+export const ATTRIBUTE_XSS_PAYLOADS: Record<string, AttributePayload> = {
+  'a quote that adds a focus handler': { payload: '" autofocus onfocus=__qaLabXssHit(7) x="', sink: (value) => `<input value="${value}">`, neutralise: escapeAttribute },
+  'a quote that adds a srcdoc': { payload: '" srcdoc="<script>__qaLabXssHit(8)</script>" x="', sink: (value) => `<iframe title="${value}"></iframe>`, neutralise: escapeAttribute },
+  'a javascript: URL': { payload: 'javascript:__qaLabXssHit(9)', sink: (value) => `<a href="${value}">link</a>`, activate: 'click', neutralise: (value) => `#${encodeURIComponent(value)}` },
+  'an entity-encoded quote': {
+    payload: '&quot; autofocus onfocus=__qaLabXssHit(10) x=&quot;',
+    // A sink that decodes entities before it puts the text in the attribute: the one place `&quot;` becomes a quote.
+    sink: (value) => `<input value="${value.replaceAll('&quot;', '"')}">`,
+    neutralise: escapeAttribute,
+  },
+};
 
 /**
  * How long a negative result is observed before it is believed. "Nothing ran" cannot be polled
@@ -126,13 +152,24 @@ export class XssSentinel {
     await this.page.evaluate((markup) => document.body.insertAdjacentHTML('beforeend', markup), html);
   }
 
-  /** Builds `<input value="...">` from a string, the way a sink that puts a value into a quoted attribute would. */
-  async insertAsAttributeValue(value: string): Promise<void> {
-    await this.page.evaluate((text) => {
-      const holder = document.createElement('div');
-      holder.innerHTML = `<input value="${text}">`;
-      document.body.append(holder);
-    }, value);
+  /**
+   * Builds the markup a vulnerable sink would make from an attribute payload (`ATTRIBUTE_XSS_PAYLOADS`) and puts it in the page.
+   * An element with `autofocus` is focused here, explicitly: whether a browser autofocuses an element inserted after load differs by
+   * engine, and the control is about the sentinel seeing a handler run, not about the browser's focus rules. A link that needs following is clicked.
+   */
+  async insertInAttributeSink({ payload, sink, activate, neutralise }: AttributePayload, { safe = false }: { safe?: boolean } = {}): Promise<void> {
+    // The control: the value is neutralised the way a safe page would, so the same sink must leave nothing to run or to count.
+    const value = safe ? neutralise(payload) : payload;
+    await this.page.evaluate(
+      ([markup, follow]) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = markup;
+        document.body.append(holder);
+        holder.querySelector<HTMLElement>('[autofocus]')?.focus();
+        if (follow) holder.querySelector<HTMLElement>('a')?.click();
+      },
+      [sink(value), activate === 'click'] as const,
+    );
   }
 
   /** Leaves one payload in an iframe's document and another in an open shadow root, the two places a plain query does not look. */
@@ -231,18 +268,23 @@ export class XssSentinel {
    * `<img>` payload by `src="x"`: see the caveat on XSS_PAYLOADS. A closed shadow root cannot be read from outside, and a
    * cross-origin frame cannot be entered: the sentinel's hit record is what covers those.
    */
-  async injectedCount(): Promise<number> {
-    return this.page.evaluate(() => {
+  async injectedCount(page: Page = this.page): Promise<number> {
+    return page.evaluate(() => {
       // Elements, not matches, so an `<img src=x onerror=hook>` that two of the rules recognise is one payload.
       const count = (root: Document | ShadowRoot): number => {
         const found = new Set<Element>(root.querySelectorAll('img[src="x"]'));
         for (const script of root.querySelectorAll('script')) if (script.textContent?.includes('__qaLabXssHit')) found.add(script);
         let nested = 0;
         for (const element of root.querySelectorAll('*')) {
-          // Any event-handler attribute that calls the hook: `onload` of an svg, `onfocus` of an element a quote was broken out of.
-          if ([...element.attributes].some((attribute) => /^on/i.test(attribute.name) && attribute.value.includes('__qaLabXssHit'))) found.add(element);
+          // Any attribute that runs the hook: an event handler (`onload` of an svg, `onfocus` of an element a quote was broken out of),
+          // a `srcdoc` that carries it, or a `javascript:` URL.
+          const runsHook = (attribute: Attr) =>
+            attribute.value.includes('__qaLabXssHit') && (/^on/i.test(attribute.name) || attribute.name === 'srcdoc' || /^\s*javascript:/i.test(attribute.value));
+          const framesHook = element instanceof HTMLIFrameElement && element.srcdoc.includes('__qaLabXssHit');
+          if ([...element.attributes].some(runsHook)) found.add(element);
           if (element.shadowRoot) nested += count(element.shadowRoot);
-          if (element instanceof HTMLIFrameElement && element.contentDocument) nested += count(element.contentDocument);
+          // A srcdoc frame is counted by its attribute: its document is the same payload, parsed, and would count twice.
+          if (element instanceof HTMLIFrameElement && element.contentDocument && !framesHook) nested += count(element.contentDocument);
         }
         return found.size + nested;
       };
@@ -251,8 +293,8 @@ export class XssSentinel {
   }
 
   /** A snapshot: it passes the instant the DOM holds no parsed payload and says nothing about what is still to run. */
-  async expectNoInjectedElements(): Promise<void> {
-    await expect.poll(() => this.injectedCount(), { message: 'a payload was parsed into elements' }).toBe(0);
+  async expectNoInjectedElements(page: Page = this.page): Promise<void> {
+    await expect.poll(() => this.injectedCount(page), { message: 'a payload was parsed into elements' }).toBe(0);
   }
 }
 
@@ -264,7 +306,13 @@ export interface SecurityFixtures {
    */
   xssWatch: boolean;
   xss: XssSentinel;
-  /** The contact page, opened by somebody else: a browser context of their own with nobody signed in. */
+  /**
+   * A browser context of somebody else: nobody signed in, no storage, watched like the test's own. Opens a page in it on every call;
+   * the contexts are closed after the test. For a test that saves a payload as one user and must see it shown to another.
+   * Self-hosted only: its users go on to submit and read real records.
+   */
+  newVisitor: () => Promise<Page>;
+  /** The contact page as a visitor sees it: `newVisitor`'s page, on /contact. The visitor is the sender of a message; nothing here views anything as a victim. */
   visitorContactPage: ContactPage;
 }
 
@@ -282,18 +330,25 @@ export const test = base.extend<SecurityFixtures>({
     },
     { auto: true },
   ],
-  visitorContactPage: async ({ browser, baseURL, xss, xssWatch }, use) => {
-    // Its users submit attack strings through a real form: our own shop only.
-    if (!IS_SELF_HOSTED) throw new Error('visitorContactPage submits real contact messages: it only runs against the self-hosted Toolshop.');
-    const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+  newVisitor: async ({ browser, baseURL, xss, xssWatch }, use) => {
+    // Its users submit and read attack strings through real forms: our own shop only.
+    if (!IS_SELF_HOSTED) throw new Error('newVisitor reaches real records: it only runs against the self-hosted Toolshop.');
+    const contexts: BrowserContext[] = [];
     try {
-      // Their context is watched like the test's own, before their page is created.
-      if (xssWatch) await xss.watch(visitor);
-      const contactPage = new ContactPage(await visitor.newPage());
-      await contactPage.open();
-      await use(contactPage);
+      await use(async () => {
+        const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+        contexts.push(visitor);
+        // Watched like the test's own, before their page is created.
+        if (xssWatch) await xss.watch(visitor);
+        return visitor.newPage();
+      });
     } finally {
-      await visitor.close();
+      await Promise.all(contexts.map((context) => context.close()));
     }
+  },
+  visitorContactPage: async ({ newVisitor }, use) => {
+    const contactPage = new ContactPage(await newVisitor());
+    await contactPage.open();
+    await use(contactPage);
   },
 });

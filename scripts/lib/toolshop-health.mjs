@@ -11,7 +11,8 @@ const get = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeou
  */
 export async function probe({ api, ui }) {
   const products = await get(`${api}/products`, { method: 'QUERY', headers: { 'content-type': 'application/json' }, body: '{"page":"1"}' });
-  if (!products.ok || (await products.json()).total < 1) return 'API has no products yet';
+  // `!(total >= 1)`, not `total < 1`: an answer with no usable `total` (undefined, null, a string) is an unseeded shop too.
+  if (!products.ok || !((await products.json()).total >= 1)) return 'API has no products yet';
   const page = await get(ui);
   if (!page.ok || !(await page.text()).includes('<app-root')) return 'UI not serving the app';
   return 'ok';

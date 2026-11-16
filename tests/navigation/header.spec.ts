@@ -46,14 +46,16 @@ test.describe('Header navigation', () => {
   }
 
   test('the cart link is absent while the cart is empty', { tag: ['@negative'] }, async ({ homePage }) => {
-    await expect(homePage.grid.cards.first()).toBeVisible();
+    // The brand link is the anchor: the header has rendered, so a cart link that is missing is absent for good and not merely late.
+    await expect(homePage.header.brandLink).toBeVisible();
     await expect(homePage.header.cartLink).toHaveCount(0);
   });
 
   test.describe('with a quantity of two in the cart', () => {
     test.use({ cartItems: async ({ catalog }, use) => use([{ product: await catalog.inStock(), quantity: 2 }]) });
 
-    test('the cart link shows the item count and opens the cart', async ({ checkout, page }) => {
+    test('the cart link shows the item count and opens the cart', async ({ checkout, catalog, page }) => {
+      const product = await catalog.inStock();
       await expect(checkout.header.cartLink).toHaveText('2');
 
       await checkout.header.goHomeViaLogo();
@@ -62,6 +64,7 @@ test.describe('Header navigation', () => {
 
       await expect(page).toHaveURL('/checkout');
       await expect(checkout.cart.table.rows).toHaveCount(1);
+      await expect(checkout.cart.table.row(product.name).quantity).toHaveValue('2');
     });
   });
 

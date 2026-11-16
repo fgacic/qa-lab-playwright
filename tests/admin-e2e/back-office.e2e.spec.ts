@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { APIRequestContext } from '@playwright/test';
 import { expect, test } from '@fixtures';
 import type { AdminProductForm } from '@pages/admin/AdminForms';
 import type { AdminListPage } from '@pages/admin/AdminListPage';
@@ -8,6 +7,7 @@ import type { HomePage } from '@pages/HomePage';
 import { API_URL } from '@support/env';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
+import { contactSubjectSlug } from '@support/payloads';
 
 /**
  * Real back-office journeys against the real admin API, signed in from the `admin` project's
@@ -21,14 +21,19 @@ import { fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
  * a product asks for `createdProducts`: it takes the id from the create response as it arrives and deletes
  * it in teardown, pass or fail, so even a test that times out waiting cannot leak one. The API cannot delete a guest order or a contact
  * message (DELETE /invoices/{id} and /messages/{id} answer 405), so those two tests leave one
- * uniquely named record each behind: they are tagged @self-hosted, never run on the live site,
- * and are harmless on the throwaway database of the self-hosted target, which is rebuilt for
- * every CI run. (Arranging them through the API is also refused on a shop that is not ours.)
+ * record each behind, named so that it can be told from anyone's data (`LEFTOVER`: the guest's last name, the sender's name).
+ * They are tagged @self-hosted, never run on the live site, and rely on the throwaway database of the
+ * self-hosted target: CI builds and seeds it fresh for every job, and a local one is rebuilt with
+ * `scripts/toolshop.sh reseed`. Nothing else in the suite counts orders or messages, so the leftovers cost no spec anything.
+ * (Arranging them through the API is also refused on a shop that is not ours.) A user the form creates is removed by `createdUsers`.
  */
 test.use({ adminSession: 'storage-state' });
 
 /** Unique per test and per repeat, so parallel workers and retries never find each other's data. */
 const unique = () => randomUUID().slice(0, 8);
+
+/** What marks the records no API call can remove (a guest order, a contact message) as this suite's. */
+const LEFTOVER = 'QaLab leftover';
 
 const PRODUCT_DESCRIPTION = 'Created by the qa-lab suite; removed when the test ends.';
 
@@ -55,13 +60,6 @@ async function repriceProduct(adminProducts: AdminListPage<AdminProductForm>, na
   await edit.price.fill(price);
   await edit.chrome.save();
   await expect(edit.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
-}
-
-/** Removes a user the API accepted, if there is one: once ADM-20 is fixed the form creates it, and the shop's user list must not grow. */
-async function removeUser(request: APIRequestContext, token: string, id: string | undefined): Promise<void> {
-  if (!id) return;
-  const response = await request.delete(`${API_URL}/users/${id}`, { headers: { authorization: `Bearer ${token}` } });
-  if (!response.ok()) throw new Error(`Could not remove the user ${id}: DELETE answered ${response.status()}`);
 }
 
 /** The shop's own search for a product name: the way a shopper would look for it. */
@@ -138,30 +136,60 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(form.chrome.alert('already exists'), 'ADM-12: the form says why the brand was refused').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
+  test('a brand is renamed in the back office and the real API lists the new name', async ({ adminBrands, brandFactory, api, apiMock }) => {
+    const brand = await brandFactory.create();
+    const renamed = `${brand.name} renamed`;
+    await adminBrands.open();
+    await adminBrands.search.searchFor(brand.name);
+    const form = await adminBrands.edit(brand.name);
+    await expect(form.name.input).toHaveValue(brand.name); // the load has finished: it would overwrite what is typed
+    const saved = apiMock.waitForResponse('PUT', `/brands/${brand.id}`);
+
+    await form.name.input.fill(renamed);
+    await form.chrome.save();
+
+    expect((await saved).response.ok(), 'the real API accepted the rename').toBe(true);
+    await expect(form.chrome.alert(ADMIN_MESSAGES.brandSaved)).toBeVisible();
+    await expect.poll(async () => (await api.listBrands()).find(({ id }) => id === brand.id)?.name, 'the real API lists the brand under its new name').toBe(renamed);
+  });
+
+  test('a brand deleted in the back office is gone from the real API', async ({ adminBrands, brandFactory, api, apiMock }) => {
+    const brand = await brandFactory.create();
+    await adminBrands.open();
+    await adminBrands.search.searchFor(brand.name);
+    await expect(adminBrands.table.row(brand.name)).toBeVisible();
+    const deleted = apiMock.waitForResponse('DELETE', `/brands/${brand.id}`);
+
+    await adminBrands.table.delete(brand.name);
+
+    expect((await deleted).response.ok(), 'the real API accepted the delete').toBe(true);
+    await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeVisible();
+    await expect(adminBrands.table.row(brand.name)).toHaveCount(0);
+    expect((await api.listBrands()).map(({ id }) => id), 'the real API no longer lists the brand').not.toContain(brand.id);
+  });
+
   // The API does accept this user when it is registered with the fields it names (probed on the self-hosted shop); what it refuses is what the form sends.
-  test('a user added in the back office is created by the real API', { tag: ['@self-hosted', '@negative', '@bug'] }, async ({ adminUsers, apiMock, request, adminToken }) => {
+  test('a user added in the back office is created by the real API', { tag: ['@self-hosted', '@negative', '@bug'] }, async ({ adminUsers, apiMock, createdUsers, consoleGuard }) => {
     knownBug('ADM-20', 'the back office cannot create a user: the add form sends empty `enabled` and `failed_login_attempts` values, and the real API answers 500 "Something went wrong".');
+    consoleGuard.allow(/^Failed to load resource: the server responded with a status of 500/, 'ADM-20: the real API answers the add form with the 500 the pin is about');
     const customer = fakeCustomer();
+    createdUsers.track(customer.email); // removed in teardown, whatever the form and the API do
     const form = await adminUsers.add();
-    const answered = apiMock.waitForResponse<{ id?: string }>('POST', '/users/register');
+    const answered = apiMock.waitForResponse('POST', '/users/register');
 
     await form.fillIn({
       firstName: customer.firstName, lastName: customer.lastName, dateOfBirth: customer.dateOfBirth, email: customer.email, phone: customer.phone, password: customer.password,
       street: customer.address.street, city: customer.address.city, state: customer.address.state, postalCode: customer.address.postalCode, country: customer.address.country,
     });
     await form.chrome.save();
-    const { response, json } = await answered;
+    const { response } = await answered;
 
-    try {
-      expect(response.status(), 'ADM-20: the real API accepts the user the add form sends').toBe(201);
-      await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved), 'ADM-20: the form confirms the new user').toBeVisible({ timeout: BUG_TIMEOUT });
-    } finally {
-      await removeUser(request, await adminToken(), json?.id);
-    }
+    expect(response.status(), 'ADM-20: the real API accepts the user the add form sends').toBe(201);
+    await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved), 'ADM-20: the form confirms the new user').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
   test('an order placed by a guest can be marked as shipped', { tag: ['@self-hosted'] }, async ({ api, catalog, adminOrders }) => {
-    const { invoice_number } = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], fakeGuest());
+    const { invoice_number } = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], { ...fakeGuest(), lastName: `${LEFTOVER} ${unique()}` });
 
     await adminOrders.search.searchFor(invoice_number);
     const order = await adminOrders.edit(invoice_number);
@@ -173,9 +201,9 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   });
 
   test('a contact message arrives in the inbox and can be taken in progress', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, request, adminToken }) => {
-    const sender = `Qa Lab Sender ${unique()}`;
-    const text = `Sent by the qa-lab suite at ${new Date().toISOString()}, long enough to be a real message.`;
-    await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: 'webmaster', message: text });
+    const sender = `${LEFTOVER} sender ${unique()}`;
+    const text = `Sent by the qa-lab suite (${unique()}) and safe to delete, long enough to be a real message.`;
+    await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: contactSubjectSlug('Webmaster'), message: text });
 
     // The inbox lists newest first, 15 to a page, and has no search: the row is on page 1 unless 15 newer messages
     // arrive first. Reading page 1 from the API first makes that precondition explicit instead of a timeout on a row.

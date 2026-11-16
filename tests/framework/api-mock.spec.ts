@@ -97,7 +97,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     await openBlankPage(page);
     await send(page, 'GET', '/brands'); // the page's own load
 
-    const before = apiMock.mark();
+    const before = await apiMock.mark();
 
     expect(apiMock.requestsTo('GET', '/brands'), 'without a mark the earlier request counts').toBe(1);
     expect(apiMock.requestsTo('GET', '/brands', { since: before })).toBe(0);

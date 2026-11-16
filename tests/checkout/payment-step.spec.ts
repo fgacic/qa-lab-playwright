@@ -1,8 +1,9 @@
-import { PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHODS } from '@components/checkout/PaymentStep';
+import { INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/pages';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { acceptedGuestInvoice } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /**
@@ -15,6 +16,9 @@ const PLAIN_TEXT = 'QA Lab';
 /** The instalment plan the passing BNPL check chooses. */
 const INSTALMENT_PLAN = '6';
 
+/** Letters and digits in the shape the gift card field accepts (16), so it is no card number: the typed value only has to survive a switch of method. */
+const PLAIN_GIFT_CARD = 'qalabqalabqalab1';
+
 /** `length` characters that are neither digits nor letters. */
 const junkOf = (length: number) => '!'.repeat(length);
 
@@ -22,10 +26,9 @@ const junkOf = (length: number) => '!'.repeat(length);
 const PAYMENT_PASSED = { message: 'Payment was successful' };
 const paymentPasses = mock.respond('POST', '/payment/check', PAYMENT_PASSED);
 
-/** What the shop answers an accepted guest order with (201), as far as the page reads it. */
 /** The cart itself: once an order is placed the page deletes it (answered here, so the real cart is untouched). */
 const CART = /^\/carts\/[^/]+$/;
-const ORDER_ACCEPTED = { id: '01QALABFAKEINVOICE0000000', invoice_number: 'INV-2026999998' };
+/** What the shop answers an accepted guest order with (201), as far as the page reads it. */
 
 test.describe('Checkout: payment step', () => {
   // None of these is about the postcode lookup, so it is answered by a mock: an outage of the real
@@ -36,8 +39,25 @@ test.describe('Checkout: payment step', () => {
     await checkout.proceedToPayment(fakeGuest(), fakeAddress());
   });
 
+  test('browser Back from the payment step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {
+    const [{ product }] = cartItems;
+    // The cart opened from the shop, so there is a page to go Back to; the steps are then walked again from the cart.
+    await checkout.header.goHomeViaLogo();
+    await checkout.header.openCart();
+    await checkout.proceedToPayment(fakeGuest(), fakeAddress());
+    await expect(checkout.payment.heading).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL('/');
+    await page.goForward();
+
+    await expect(page).toHaveURL(/\/checkout$/);
+    await expect(checkout.cart.table.row(product.name).title, 'the cart still holds its line').toBeVisible();
+    await expect(checkout.payment.heading, 'the payment step is not resumed half way').toBeHidden();
+  });
+
   test('offers the five payment methods', async ({ checkout }) => {
-    await expect(checkout.payment.method.getByRole('option')).toHaveText(['Choose your payment method', ...Object.values(PAYMENT_METHODS)]);
+    await expect(checkout.payment.method.getByRole('option')).toHaveText([PAYMENT_METHOD_PROMPT, ...Object.values(PAYMENT_METHODS)]);
     await expect(checkout.payment.checkPaymentButton).toBeDisabled();
   });
 
@@ -85,7 +105,7 @@ test.describe('Checkout: payment step', () => {
     await payment.field(FIELD.instalments).selectOption(INSTALMENT_PLAN);
 
     await expect(payment.checkPaymentButton).toBeEnabled();
-    await expect(payment.field(FIELD.instalments).getByRole('option')).toHaveText(['Choose your monthly installments', '3 Monthly Installments', '6 Monthly Installments', '9 Monthly Installments', '12 Monthly Installments']);
+    await expect(payment.field(FIELD.instalments).getByRole('option')).toHaveText([INSTALMENT_PROMPT, ...INSTALMENT_PLANS.map(instalmentOptionText)]);
   });
 
   test.describe('when the payment check passes for Buy Now Pay Later', { tag: ['@mocked'] }, () => {
@@ -157,12 +177,46 @@ test.describe('Checkout: payment step', () => {
     });
   }
 
+  test('switching to another method and back empties the details typed for the first', { tag: ['@negative', '@bug'] }, async ({ checkout }) => {
+    knownBug('BUG-52', 'the details typed for a payment method stay in the form when another method is chosen, and are still there when the shopper comes back to the first.');
+    const { payment } = checkout;
+    await payment.choose('gift-card');
+    await payment.field(FIELD.giftCardNumber).fill(PLAIN_GIFT_CARD);
+    await expect(payment.field(FIELD.giftCardNumber)).toHaveValue(PLAIN_GIFT_CARD);
+    await payment.choose('credit-card');
+
+    await payment.choose('gift-card');
+
+    await expect(payment.field(FIELD.giftCardNumber), 'BUG-52: coming back to a method finds its fields empty').toBeEmpty({ timeout: BUG_TIMEOUT });
+  });
+
   test('Credit Card cannot be checked while its fields are empty', { tag: ['@negative', '@bug'] }, async ({ checkout }) => {
     knownBug('BUG-16', 'with Credit Card chosen and every field empty, "Check payment" is enabled.');
     await checkout.payment.choose('credit-card');
     await expect(checkout.payment.field(FIELD.cardNumber)).toBeEmpty();
 
     await expect(checkout.payment.checkPaymentButton, 'BUG-16: Check payment stays disabled while every card field is empty').toBeDisabled({ timeout: BUG_TIMEOUT });
+  });
+
+  test.describe('when Check payment is double-clicked', { tag: ['@mocked', '@bug'] }, () => {
+    // The order is answered too: if the second click lands on Confirm, which replaces the button, no real write can happen.
+    test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
+
+    // The answer is held back so that both clicks of the double click land while the check is still pending. Answered at once, the
+    // page may already have replaced the button when WebKit delivers the second click, and one check would be sent whatever the page does.
+    const CHECK_ANSWER_DELAY_MS = 500;
+
+    test('a double click on Check payment sends one check', async ({ checkout, apiMock }) => {
+      knownBug('BUG-53', 'a double click on "Check payment" sends the check twice.');
+      await apiMock.delay('POST', '/payment/check', () => true, CHECK_ANSWER_DELAY_MS);
+      await checkout.payment.choose('cash-on-delivery');
+      const before = await apiMock.mark();
+
+      await checkout.payment.checkPaymentWithDoubleClick();
+
+      await expect(checkout.payment.successMessage).toHaveText(PAYMENT_PASSED.message);
+      expect(apiMock.requestsTo('POST', '/payment/check', { since: before }), 'BUG-53: one check is sent for one decision').toBe(1);
+    });
   });
 
   test.describe('when the payment check is declined', { tag: ['@mocked'] }, () => {
@@ -191,7 +245,7 @@ test.describe('Checkout: payment step', () => {
 
   test.describe('when the order is accepted', { tag: ['@mocked'] }, () => {
     // The twin of the self-hosted order in purchase-flow: the same page behaviour on every target, with no order placed.
-    test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', ORDER_ACCEPTED, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
+    test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
 
     test('the confirmation names the invoice number the shop issued', async ({ checkout, apiMock }) => {
       const placed = apiMock.waitForRequest('POST', '/invoices/guest');
@@ -200,7 +254,7 @@ test.describe('Checkout: payment step', () => {
       await checkout.payment.payOnDelivery();
 
       expect((await placed).postDataJSON(), 'the order is placed for the chosen payment method').toMatchObject({ payment_method: 'cash-on-delivery' });
-      await expect(checkout.wizard.confirmation).toHaveText(`Thanks for your order! Your invoice number is ${ORDER_ACCEPTED.invoice_number}.`);
+      await expect(checkout.wizard.confirmationFor(acceptedGuestInvoice.invoice_number)).toBeVisible();
       await cartDropped;
     });
   });

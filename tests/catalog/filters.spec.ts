@@ -30,7 +30,13 @@ const SEED = {
   brand: 'MightyCraft Hardware',
   /** A brand that sells in `otherCategory`. */
   hammerBrand: 'ForgeFlex Tools',
+  /** The shop's two brands, and a category of a different parent than `otherCategory`. */
+  brands: ['ForgeFlex Tools', 'MightyCraft Hardware'],
+  powerCategory: 'Drill',
 } as const;
+/** The slider test lowers the max to `CROSSED_MAX`, then presses the min up to `CROSSED_MIN`, past it. */
+const CROSSED_MAX = 85;
+const CROSSED_MIN = 90;
 
 /** How long the answer for an earlier price step is held back in the BUG-30 test. */
 const LATE_ANSWER_MS = 2_000;
@@ -105,6 +111,30 @@ test.describe('Product filters', () => {
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
   });
 
+  test('two brands together show the products of either', async ({ homePage, apiMock }) => {
+    const [first, second] = SEED.brands;
+    await homePage.filters.filterByBrand(first);
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => String(body.by_brand).split(',').length === 2);
+
+    await homePage.filters.filterByBrand(second);
+
+    const { json: found } = await results;
+    expect(found.total, 'the catalogue should contain products of both brands').toBeGreaterThan(0);
+    expect(new Set(found.data.map((p) => p.brand.name)), 'the answer holds the products of both brands').toEqual(new Set(SEED.brands));
+    await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
+  });
+
+  test('categories of different parents combine: the products of either', async ({ homePage, apiMock }) => {
+    await homePage.filters.filterByCategory(SEED.otherCategory);
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => String(body.by_category).split(',').length === 2);
+
+    await homePage.filters.filterByCategory(SEED.powerCategory);
+
+    const { json: found } = await results;
+    expect(new Set(found.data.map((p) => p.category.name)), `the answer holds ${SEED.otherCategory} and ${SEED.powerCategory} products`).toEqual(new Set([SEED.otherCategory, SEED.powerCategory]));
+    await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
+  });
+
   test('unticking a filter restores the unfiltered list', async ({ homePage, apiMock }) => {
     const narrowed = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => !!body.by_category);
     await homePage.filters.filterByCategory(SEED.category);
@@ -166,6 +196,19 @@ test.describe('Product filters', () => {
     await expect(homePage.grid.names).toHaveText(found.data.map((p) => p.name));
     await expect(homePage.filters.minPrice).toHaveAttribute('aria-valuenow', String(MIN_PRICE));
     await expect(homePage.filters.maxPrice).toHaveAttribute('aria-valuenow', String(MAX_PRICE));
+  });
+
+  test('the minimum handle never ends above the maximum one', { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
+    await apiMock.serialize('QUERY', '/products');
+    const { filters } = homePage;
+    await filters.setMaxPrice(CROSSED_MAX);
+
+    // The key presses go past the max handle: the slider either stops the min there or carries the max along.
+    await settleRequests(homePage.page, '/products', () => filters.setMinPrice(CROSSED_MIN));
+
+    const [min, max] = await Promise.all([filters.minPrice, filters.maxPrice].map(async (handle) => Number(await handle.getAttribute('aria-valuenow'))));
+    expect(min, 'the min handle is never above the max handle').toBeLessThanOrEqual(max);
+    await expect.poll(async () => (await homePage.grid.priceValues()).filter((price) => price < min || price > max), 'prices on the grid outside the range').toEqual([]);
   });
 
   test('the grid shows the last price step, even when an earlier answer arrives late', { tag: ['@bug'] }, async ({ homePage, apiMock }) => {
