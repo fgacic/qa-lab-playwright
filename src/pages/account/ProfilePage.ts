@@ -46,6 +46,11 @@ export class ProfilePage {
     this.qrCode = page.locator('qrcode');
   }
 
+  /** The alert that says `text` (a string or a pattern), so a spec names the message and not the filter. */
+  alert(text: string | RegExp): Locator {
+    return this.alerts.filter({ hasText: text });
+  }
+
   @step('Open my profile')
   async open(): Promise<void> {
     await this.shell.goto('/account/profile');

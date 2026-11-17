@@ -1,3 +1,5 @@
+import { expect, type Locator } from '@playwright/test';
+
 /** The smallest side, in pixels, of a bar of a sales chart: gridlines are thinner, lettering is shorter. */
 export const MIN_BAR = 20;
 
@@ -9,10 +11,14 @@ export interface DrawnChart {
 
 /**
  * Reads the bars off a chart <canvas>: a bar is a run of non-white pixels at least `minBar` tall and `minBar` wide
- * (gridlines and lettering are neither). Runs in the page (`locator.evaluate`), so it uses nothing outside itself.
+ * (gridlines, lettering and the swatches of the legend are none of them; `minBar` is in CSS pixels). Runs in the page (`locator.evaluate`), so it uses nothing outside itself.
  */
-export function measureBars(canvas: HTMLCanvasElement, minBar: number): DrawnChart {
+export function measureBars(canvas: HTMLCanvasElement, cssMinBar: number): DrawnChart {
   const { width, height } = canvas;
+  // The canvas is drawn in device pixels (a Retina WebKit canvas is twice as wide as it is on screen), so the smallest bar is too: the
+  // 12 px swatches of the legend are 24 px there and must stay below it.
+  const shown = canvas.getBoundingClientRect().width;
+  const minBar = Math.round(cssMinBar * (shown > 0 ? width / shown : 1));
   const { data } = canvas.getContext('2d')!.getImageData(0, 0, width, height);
   const inked = (x: number, y: number) => {
     const at = (y * width + x) * 4;
@@ -44,4 +50,24 @@ export function measureBars(canvas: HTMLCanvasElement, minBar: number): DrawnCha
     }
   }
   return { anyInk, bars };
+}
+
+/**
+ * The heights, in pixels and left to right, of the bars a chart <canvas> has drawn, once its animation has ended. A <canvas>
+ * has nothing to read and the app colours each bar at random, so the picture is measured, not compared (`measureBars`). The
+ * chart is taken as finished when two reads 250 ms apart agree on the bars and something is drawn at all (axes are drawn even
+ * for a report that is empty or failed, so a blank canvas is a chart that has not started).
+ */
+export async function drawnBars(chart: Locator): Promise<number[]> {
+  let previous = '';
+  let bars: number[] = [];
+  await expect.poll(async () => {
+    const read = await chart.evaluate(measureBars, MIN_BAR);
+    const key = JSON.stringify(read);
+    const settled = read.anyInk && key === previous;
+    previous = key;
+    bars = read.bars;
+    return settled;
+  }, { message: 'the chart finished drawing', intervals: [250] }).toBe(true);
+  return bars;
 }

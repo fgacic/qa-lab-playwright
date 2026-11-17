@@ -32,7 +32,7 @@ async function missedInTabOrder(page: Page, targets: { name: string; control: Lo
       await page.keyboard.press('Tab');
       // Polled for a moment, so a stop that takes the focus late still counts; a control that never gets it is reported below.
       try {
-        await expect.poll(() => focusWithin(control), { timeout: TAB_SETTLE_MS }).toBe(true);
+        await expect(focusWithin(control)).toHaveCount(1, { timeout: TAB_SETTLE_MS });
         reached = true;
       } catch {
         // Not here: the next press of Tab, if the stretch allows one.
@@ -263,7 +263,7 @@ test.describe('Keyboard: menus and widgets', { tag: ['@a11y', '@axe'] }, () => {
     await page.keyboard.press('Enter');
     await expect(chat.window).toBeVisible();
 
-    await expect.poll(() => focusWithin(chat.window), { message: 'AX-14: the keyboard focus is inside the chat window once it is open', timeout: BUG_TIMEOUT }).toBe(true);
+    await expect(focusWithin(chat.window), 'AX-14: the keyboard focus is inside the chat window once it is open').toHaveCount(1, { timeout: BUG_TIMEOUT });
   });
 });
 

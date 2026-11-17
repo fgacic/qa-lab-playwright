@@ -32,7 +32,7 @@ test.describe('Forgot password', () => {
   // The real refusal is a failed request on the shop's own log, so it runs on the self-hosted shop only;
   // the mocked twin below proves the same page behaviour everywhere, the live site included.
   test('an unknown email is refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ forgotPasswordPage, consoleGuard }) => {
-    consoleGuard.allow(/Failed to load resource: the server responded with a status of 422/, 'the one refusal this test provokes on purpose (POST /users/forgot-password): the browser logs every 4xx answer');
+    consoleGuard.allowStatus(422, '/users/forgot-password', 'the one refusal this test provokes on purpose: the shop does not know the email, and the browser logs every 4xx answer');
     await forgotPasswordPage.requestReset(UNKNOWN_EMAIL);
 
     await expect(forgotPasswordPage.alert).toHaveText('The selected email is invalid.');

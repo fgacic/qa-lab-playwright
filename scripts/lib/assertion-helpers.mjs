@@ -6,6 +6,7 @@ export const ASSERTION_HELPERS = [
   'expectFixed',
   'expectLoads',
   'expectNoInjectedElements',
+  'expectNoneLogged',
   'expectNoNewViolations',
   'expectNoRequest',
   'expectNoSidewaysScroll',
@@ -15,4 +16,5 @@ export const ASSERTION_HELPERS = [
   'expectReflows',
   'expectResponsive',
   'expectVerdict',
+  'expectWithinWeight',
 ];

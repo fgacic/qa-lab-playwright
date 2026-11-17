@@ -1,5 +1,4 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ProductPage } from '@pages/ProductPage';
 import { REPORT_TITLES, reportColumns } from '@pages/admin/AdminReports';
 import { ADMIN_MESSAGES, appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
 import { category, paginated, product, reports } from '@support/admin-payloads';
@@ -7,6 +6,10 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { storedToken } from '@support/session';
 import { httpsUrl } from '@support/urls';
 
+/** Each figure of an average-sales report is drawn as two bars side by side: the average and the amount of orders. */
+const BARS_PER_FIGURE = 2;
+/** How many bars the chart of each period must draw for the mocked report. */
+const SALES_BARS = { month: reports.averageSalesPerMonth.length * BARS_PER_FIGURE, week: reports.averageSalesPerWeek.length * BARS_PER_FIGURE } as const;
 /** A payment endpoint the settings accept: made up, on example.com. */
 const PAYMENT_ENDPOINT = httpsUrl('payments.example.com', '/check');
 
@@ -55,15 +58,16 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
     });
   });
 
-  // A <canvas> has nothing to read, so the chart itself is only proved to be there; what the page does with a
-  // year is proved on the request it sends.
+  // A <canvas> has nothing to read, so the bars the app drew are measured (AdminSalesReportPage.drawnBars), one per entry of
+  // the answer; what the page does with a year is proved on the request it sends.
   for (const period of ['month', 'week'] as const) {
     test.describe(`average sales per ${period}`, () => {
       test.use({ adminSalesPeriod: period });
 
-      test(`the ${period} report has a chart area`, async ({ adminSalesReport }) => {
+      test(`the ${period} report draws its bars`, async ({ adminSalesReport }) => {
         await expect(adminSalesReport.heading).toBeVisible();
-        await expect(adminSalesReport.chart).toBeVisible();
+
+        expect(await adminSalesReport.drawnBars(), `two bars (average, orders) per ${period} of the report`).toHaveLength(SALES_BARS[period]);
       });
 
       test(`picking a year asks the API for that year's ${period} report`, async ({ adminSalesReport }) => {
@@ -84,7 +88,7 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
 
       test(`an empty ${period} report keeps its chart area and raises no alert`, async ({ adminSalesReport }) => {
         await expect(adminSalesReport.heading).toBeVisible();
-        await expect(adminSalesReport.chart).toBeVisible();
+        expect(await adminSalesReport.drawnBars(), 'an empty report draws axes and no bars').toEqual([]);
         await expect(adminSalesReport.yearOptions).not.toHaveCount(0);
 
         expect(await appearsWithin(adminSalesReport.failure), `no failure message appears on an empty ${period} report`).toBe(false);
@@ -169,10 +173,10 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(sort.getByRole('option', { name: /CO₂/ })).toHaveCount(0);
   });
 
-  test('settings reach the shop: switching the eco-friendly badge off removes it from an eco product in the shop', async ({ adminSettings, apiMock }) => {
+  test('settings reach the shop: switching the eco-friendly badge off removes it from an eco product in the shop', async ({ adminSettings, shop, apiMock }) => {
     const eco = { ...product, is_eco_friendly: true };
     await apiMock.use(mock.respond('GET', /^\/products\/[^/]+$/, eco), mock.respond('GET', /^\/products\/[^/]+\/related$/, []));
-    const shopProduct = new ProductPage(adminSettings.page);
+    const shopProduct = shop.product;
     await expect(adminSettings.ecoBadge, 'the badge starts switched on').toBeChecked();
     await shopProduct.open(eco.id);
     await expect(shopProduct.ecoBadge, 'the shop shows the badge while it is on').toHaveText('ECO');

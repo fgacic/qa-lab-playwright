@@ -26,6 +26,9 @@ test.describe('the answer gate', { tag: ['@framework'] }, () => {
   for (const [name, engine] of Object.entries(ENGINES)) {
     for (const guarded of [false, true]) {
       test(`on ${name}, a double click reaches ${guarded ? 'a guarded handler once' : 'an unguarded handler twice'} while the answer is held`, async () => {
+        // Deliberately outside the project's `browser` fixture: the project runs Chromium only, and this positive control must run the same
+        // page on all three engines. It needs none of the project's `use` (no trace, locale or test-id attribute): the page is inline HTML
+        // and every locator is by role or text, so a failure's message (with the counts) is the evidence.
         const browser = await engine.launch();
         try {
           const page = await browser.newPage();

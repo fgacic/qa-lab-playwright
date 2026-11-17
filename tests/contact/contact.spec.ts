@@ -10,17 +10,18 @@ import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 /** The subject a test uses when it does not care which one, and a second one for the test that does. */
 const [DEFAULT_SUBJECT, OTHER_SUBJECT] = [CONTACT_SUBJECTS[1].label, CONTACT_SUBJECTS[0].label];
 
+const MIN_MESSAGE_LENGTH = 50;
+const MIN_LENGTH_ERROR = `Message must be minimal ${MIN_MESSAGE_LENGTH} characters`;
+/** A message of exactly `length` characters, for the boundary around the form's 50-character minimum. */
+const messageOfLength = (length: number) => 'a'.repeat(length);
+const textFile = (name: string, content: string) => ({ name, mimeType: 'text/plain', buffer: Buffer.from(content) });
+
 const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
   from: fakeGuest(),
   subject: DEFAULT_SUBJECT,
   message: CONTACT_MESSAGE,
   ...overrides,
 });
-/** A message of exactly `length` characters, for the boundary around the form's 50-character minimum. */
-const messageOfLength = (length: number) => 'a'.repeat(length);
-const MIN_MESSAGE_LENGTH = 50;
-const MIN_LENGTH_ERROR = `Message must be minimal ${MIN_MESSAGE_LENGTH} characters`;
-const textFile = (name: string, content: string) => ({ name, mimeType: 'text/plain', buffer: Buffer.from(content) });
 
 test.describe('Contact form', () => {
   // The "Select a subject *" placeholder is disabled and hidden, so it is not an option to pick.

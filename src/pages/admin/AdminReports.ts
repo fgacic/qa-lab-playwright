@@ -1,8 +1,10 @@
 import type { Locator, Page, Request } from '@playwright/test';
+import { drawnBars } from '@support/admin-chart';
 import { apiPath } from '@support/env';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 import { reportedFailure } from './alerts';
+import { ADMIN_REPORT_PATHS } from './admin-sections';
 
 /** The four tables of the statistics page, in page order, with the request that fills each. */
 const REPORTS = [
@@ -59,7 +61,7 @@ export class AdminStatisticsPage {
   async open(): Promise<void> {
     const answered = Promise.all(REPORTS.map(({ feed }) => this.page.waitForResponse((r) => r.request().method() === 'GET' && apiPath(r.url()) === feed)));
     answered.catch(() => undefined); // a failed navigation is reported by goto; this only keeps the rejection from going unhandled
-    await this.shell.goto('/admin/reports/statistics');
+    await this.shell.goto(ADMIN_REPORT_PATHS.statistics);
     await answered;
   }
 }
@@ -85,12 +87,18 @@ export class AdminSalesReportPage {
     this.failure = reportedFailure(page);
   }
 
+  /** The heights of the bars the report's chart has drawn, once its animation has ended (`drawnBars` in admin-chart). */
+  @step('Measure the bars of the report')
+  async drawnBars(): Promise<number[]> {
+    return drawnBars(this.chart);
+  }
+
   /** Returns once the report's data has been answered, so a later wait cannot catch this first load. */
   @step('Open the average sales report')
   async open(): Promise<void> {
     const answered = this.page.waitForResponse((r) => r.request().method() === 'GET' && apiPath(r.url()) === this.feed);
     answered.catch(() => undefined); // a failed navigation is reported by goto; this only keeps the rejection from going unhandled
-    await this.shell.goto(`/admin/reports/average-sales-per-${this.period}`);
+    await this.shell.goto(ADMIN_REPORT_PATHS[this.period]);
     await answered;
   }
 

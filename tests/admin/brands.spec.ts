@@ -1,6 +1,6 @@
 import { expect, mock, test } from '@fixtures';
 import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
-import { REFUSED_STATUSES, SEARCH_HIT, brand } from '@support/admin-payloads';
+import { REFUSED_STATUSES, SEARCH_HIT, SEARCH_TERM, brand } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
@@ -18,9 +18,9 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     await apiMock.use(mock.respond('QUERY', '/brands/search', [match]));
     const sent = apiMock.waitForRequest('QUERY', '/brands/search');
 
-    await adminBrands.search.searchFor('hit');
+    await adminBrands.search.searchFor(SEARCH_TERM);
 
-    expect((await sent).postDataJSON()).toEqual({ q: 'hit' });
+    expect((await sent).postDataJSON()).toEqual({ q: SEARCH_TERM });
     await expect(adminBrands.table.row(match.name)).toContainText(match.slug);
     await expect(adminBrands.table.row(brand.name)).toHaveCount(0);
   });

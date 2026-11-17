@@ -1,7 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
 import { REFUSED_STATUSES, customer, paginated } from '@support/admin-payloads';
-import { consoleArgsText } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** The error the SPA throws after the API accepts a new user (ADM-21): the same pattern as the suite-wide allowance (console-guard.ts), read from the log's text or the arguments the page passed, whichever engine prints which. */
@@ -9,6 +8,14 @@ const NEW_USER_ERROR = /NG01002|Must supply a value for form control/;
 /** The user the add form is filled in with: only the required fields, the others stay empty and the form accepts that. */
 const newUser = { firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: 'newly.added@example.com' };
 
+/** What the API says for an email another customer already has: the mocked body and the text the form must show. */
+const EMAIL_TAKEN = 'A customer with this email address already exists.';
+/** The heading of the form that adds a user. */
+const ADD_USER = 'Add User';
+/** The fields the add form cannot be saved without (Postal code, State, Phone and Password are optional). */
+const REQUIRED_FIELDS = ['First Name', 'Last Name', 'Date of birth', 'Street', 'City', 'Country', 'Email'];
+/** What a user who has never failed to sign in shows in the form. */
+const NO_FAILED_ATTEMPTS = '0';
 /** The first name an edit gives the user. */
 const RENAMED = 'Renamed';
 
@@ -43,12 +50,11 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
 
   test('a new user needs the required fields', { tag: ['@negative'] }, async ({ adminUsers }) => {
     const form = await adminUsers.add();
-    await expect(form.chrome.heading).toHaveText('Add User');
+    await expect(form.chrome.heading).toHaveText(ADD_USER);
 
     await form.chrome.save();
 
-    // Postal code, State, Phone and Password are optional on this form, so they are not listed.
-    for (const field of ['First Name', 'Last Name', 'Date of birth', 'Street', 'City', 'Country', 'Email']) {
+    for (const field of REQUIRED_FIELDS) {
       await expect(form.chrome.required(field), field).toBeVisible();
     }
   });
@@ -57,7 +63,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     const form = await adminUsers.edit(customer.email);
     await expect(form.email).toHaveValue(customer.email);
     await expect(form.enabled).toBeChecked();
-    await expect(form.failedLoginAttempts).toHaveValue('0');
+    await expect(form.failedLoginAttempts).toHaveValue(NO_FAILED_ATTEMPTS);
     const saved = apiMock.waitForRequest('PUT', `/users/${customer.id}`);
 
     await form.firstName.fill(RENAMED);
@@ -71,31 +77,24 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the password of a new user is typed into a masked field', { tag: ['@bug'] }, async ({ adminUsers }) => {
     knownBug('ADM-17', 'the admin user form shows the password in clear text (an <input type="text">).');
     const form = await adminUsers.add();
-    await expect(form.chrome.heading).toHaveText('Add User');
+    await expect(form.chrome.heading).toHaveText(ADD_USER);
     await expect(form.password).toBeVisible();
 
     await expect(form.password, 'ADM-17: the password field is masked').toHaveAttribute('type', 'password', { timeout: BUG_TIMEOUT });
   });
 
-  test('saving a new user raises no application error', { tag: ['@bug'] }, async ({ adminUsers, page, consoleGuard }) => {
+  test('saving a new user raises no application error', { tag: ['@bug'] }, async ({ adminUsers, consoleGuard }) => {
     knownBug('ADM-21', 'after the API accepts a new user (201) the SPA throws an unhandled Angular error (NG01002, "Must supply a value for form control") although the form says "User saved!".');
     const form = await adminUsers.add();
     await form.fillIn(newUser);
-    // Listening right before the save: the error is raised while the save is answered. The window ends at the error itself
-    // (or after BUG_TIMEOUT on a page that never logs it). Engines put it in the text or only in the arguments, so both are read.
-    const logged = page
-      .waitForEvent('console', { predicate: async (message) => message.type() === 'error' && NEW_USER_ERROR.test(`${message.text()} ${await consoleArgsText(message.args())}`), timeout: BUG_TIMEOUT })
-      .catch(() => undefined);
-
     await form.chrome.save();
     await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
-    await logged;
 
-    expect(await consoleGuard.logged(NEW_USER_ERROR), 'ADM-21: saving a new user raises no application error').toEqual([]);
+    await expect(consoleGuard.expectNoneLogged(NEW_USER_ERROR), 'ADM-21: saving a new user raises no application error').resolves.toBeUndefined();
   });
 
   test.describe('when the new user is refused', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('POST', '/users/register', 422, { email: ['A customer with this email address already exists.'] })));
+    test.use(withMocks(mock.fail('POST', '/users/register', 422, { email: [EMAIL_TAKEN] })));
 
     test('a refused new user shows the API\'s reason and is not reported as saved', async ({ adminUsers }) => {
       const form = await adminUsers.add();
@@ -103,7 +102,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
       await form.fillIn({ ...newUser, email: customer.email });
       await form.chrome.save();
 
-      await expect(form.chrome.alert('A customer with this email address already exists.')).toBeVisible();
+      await expect(form.chrome.alert(EMAIL_TAKEN)).toBeVisible();
       await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeHidden();
     });
   });
@@ -125,7 +124,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   test.describe('when the email is already taken', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, 422, { email: ['A customer with this email address already exists.'] })));
+    test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, 422, { email: [EMAIL_TAKEN] })));
 
     test('a taken email on an edit shows the API\'s reason', async ({ adminUsers }) => {
       const form = await adminUsers.edit(customer.email);
@@ -133,7 +132,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
 
       await form.chrome.save();
 
-      await expect(form.chrome.alert('A customer with this email address already exists.')).toBeVisible();
+      await expect(form.chrome.alert(EMAIL_TAKEN)).toBeVisible();
     });
   });
 

@@ -1,11 +1,12 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
+import { ProductPage } from '@pages/ProductPage';
+import { CART } from '@support/cart-routes';
 import { UNKNOWN_PRODUCT_ID } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { FAVORITE_ID } from '@support/payloads';
 import { escapeRegExp } from '@support/regexp';
-import type { Product } from '@support/toolshop-api';
 
 /** What the shop tells the shopper, word for word. */
 const MESSAGES = {
@@ -110,7 +111,7 @@ test.describe('Product detail', () => {
   // creates to arrange other specs. It holds no account, no order and no personal data, so the
   // smoke test runs there for real instead of behind a mock that would prove nothing.
   test('Add to cart puts the chosen quantity in the cart', { tag: ['@smoke'] }, async ({ productPage, product, apiMock }) => {
-    const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
+    const added = apiMock.waitForRequest('POST', CART);
 
     await productPage.addToCart(ADDED_QUANTITY);
 
@@ -244,10 +245,17 @@ test.describe('Product detail', () => {
   });
 
   test.describe('an id no product has', { tag: ['@negative', '@bug'] }, () => {
-    // The page opens on the id, not on a product of the catalogue: the fixture's product is replaced by the unknown id.
-    test.use({ product: async ({}, use) => use({ id: UNKNOWN_PRODUCT_ID } as Product) });
+    // The page opens on the id, not on a product of the catalogue: the page fixture is replaced by one that opens the unknown id.
+    test.use({
+      productPage: async ({ page }, use) => {
+        const productPage = new ProductPage(page);
+        await productPage.open(UNKNOWN_PRODUCT_ID);
+        await use(productPage);
+      },
+    });
 
-    test('the page says the product is unavailable', async ({ productPage }) => {
+    test('the page says the product is unavailable', async ({ productPage, consoleGuard }) => {
+      consoleGuard.allowStatus(404, /^\/products\/[^/]+$/, 'the page opens an id the shop does not know, and the browser logs the 404 it is answered with');
       knownBug('BUG-11', UNAVAILABLE_SUMMARY, { absence: true });
       // Holds whether or not the page explains itself: nothing can be bought on it.
       await expect(productPage.addToCartButton).toBeHidden();

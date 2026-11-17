@@ -1,5 +1,5 @@
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
-import { expect, mock, test } from '@fixtures';
+import { expect, mock, test as base } from '@fixtures';
 import type { Catalog } from '@fixtures/api';
 import type { ConsoleGuard } from '@fixtures/console-guard';
 import type { BrowserContext, Page } from '@playwright/test';
@@ -50,6 +50,11 @@ interface Arrangement {
   api: ToolshopApi;
 }
 
+/** The five fixtures every test below hands to `arrange`, as one: a test asks for `arrangement` and nothing else it does not use itself. */
+const test = base.extend<{ arrangement: Arrangement }>({
+  arrangement: async ({ context, consoleGuard, apiMock, catalog, api }, use) => use({ context, consoleGuard, apiMock, catalog, api }),
+});
+
 /** What a visit needs, done once: the path to open and a way to open it in a fresh tab. */
 interface Scene {
   path: string;
@@ -67,6 +72,7 @@ async function arrange(visit: Visit, { context, consoleGuard, apiMock, catalog, 
   // The clock belongs to the context, so every tab of the visit has it from its first script on: it runs as usual until `freezeClock`.
   if (visit.fades) await context.clock.install();
   if (visit.logs) consoleGuard.allow(visit.logs.pattern, visit.logs.reason);
+  if (visit.refused) consoleGuard.allowStatus(visit.refused.status, visit.refused.path, visit.refused.reason);
   if (visit.signedIn) await apiMock.use(mock.respond('GET', '/users/me', fakeUser));
   if (visit.mocks) await apiMock.use(...(typeof visit.mocks === 'function' ? await visit.mocks(catalog) : visit.mocks));
   const ids = visit.compared ? [(await catalog.inStock()).id, (await catalog.outOfStock()).id] : undefined;
@@ -94,6 +100,29 @@ async function arrange(visit: Visit, { context, consoleGuard, apiMock, catalog, 
   };
 }
 
+/** Opens the visit's page in `startsIn` and takes it to the state the visit is about: loaded, its content drawn, its form submitted, its steps run. */
+async function reachVisitState(page: Page, visit: Visit, path: string, startsIn: Language): Promise<void> {
+  await page.goto(path, { waitUntil: 'domcontentloaded' });
+  await skipIfBotChallenge(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', startsIn);
+  for (const content of visit.ready(page)) await expect(content.first()).toBeVisible();
+  if (visit.submit) {
+    await page.getByTestId(visit.submit.button).click();
+    await expect(page.getByTestId(visit.submit.error).first()).toBeVisible();
+  }
+  await visit.drive?.(page);
+  await visit.witness?.(page);
+  // The toast is drawn: stop its timer, so the settled reads of the caller see it however long they take.
+  if (visit.fades) await freezeClock(page);
+}
+
+/** Chooses `language` in the header's language menu, as a visitor does, and waits for the page to say it applied. */
+async function switchLanguage(page: Page, language: Language): Promise<void> {
+  await page.getByTestId('language-select').click();
+  await page.getByTestId(`lang-${language}`).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', language);
+}
+
 /**
  * The UI text of the page as a returning visitor who chose `language` sees it, once its own
  * content is there, the language is applied and the text has stopped changing. A visit whose steps
@@ -108,18 +137,7 @@ async function readPage(language: Language, visit: Visit, scene: Scene, readFor:
   // Watched from before the navigation, so the settled read knows when the page's own requests are answered.
   const traffic = watchDataTraffic(page);
   try {
-    await page.goto(scene.path, { waitUntil: 'domcontentloaded' });
-    await skipIfBotChallenge(page);
-    await expect(page.locator('html')).toHaveAttribute('lang', startsIn);
-    for (const content of visit.ready(page)) await expect(content.first()).toBeVisible();
-    if (visit.submit) {
-      await page.getByTestId(visit.submit.button).click();
-      await expect(page.getByTestId(visit.submit.error).first()).toBeVisible();
-    }
-    await visit.drive?.(page);
-    await visit.witness?.(page);
-    // The toast is drawn: stop its timer, so the settled reads below see it however long they take.
-    if (visit.fades) await freezeClock(page);
+    await reachVisitState(page, visit, scene.path, startsIn);
     // The state must still be drawn when the sample is in, not only when the steps ended: before and after the read bracket it.
     const sample = async () => {
       const read = await settledUiText(page, traffic, readFor);
@@ -131,9 +149,7 @@ async function readPage(language: Language, visit: Visit, scene: Scene, readFor:
       await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU.en);
       english = await sample();
       expectPageText(english, visit, 'en');
-      await page.getByTestId('language-select').click();
-      await page.getByTestId(`lang-${language}`).click();
-      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      await switchLanguage(page, language);
     }
     // Language-specific evidence that the translation file is applied, not only that the page has rendered.
     await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU[language]);
@@ -199,16 +215,16 @@ const strayEnglish = (texts: UiText[], english: Set<string>, visit: Visit, langu
 test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
   for (const visit of VISITS) {
     for (const language of LANGUAGES) {
-      test(`${visit.name} in ${language}: no translation key leaks`, async ({ context, consoleGuard, apiMock, catalog, api }) => {
-        const scene = await arrange(visit, { context, consoleGuard, apiMock, catalog, api });
+      test(`${visit.name} in ${language}: no translation key leaks`, async ({ arrangement }) => {
+        const scene = await arrange(visit, arrangement);
         // Read for keys: everything but the shop's real data, so the footer, the sliders and the shared wording are looked at too.
         const { texts } = await readPage(language, visit, scene, 'keys');
         expect(leakedKeys(texts, visit, language), `translation keys shown on ${visit.name} in ${language}`).toEqual([]);
       });
 
       if (language === 'en') continue;
-      test(`${visit.name} in ${language}: no stray English`, async ({ context, consoleGuard, apiMock, catalog, api }) => {
-        const { english, texts } = await bothRenderings(language, visit, { context, consoleGuard, apiMock, catalog, api });
+      test(`${visit.name} in ${language}: no stray English`, async ({ arrangement }) => {
+        const { english, texts } = await bothRenderings(language, visit, arrangement);
 
         expect(strayEnglish(texts, english, visit, language), `English text left on ${visit.name} in ${language}`).toEqual([]);
       });
@@ -225,10 +241,10 @@ test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
 test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, () => {
   const spoiled = { removed: 'header.menu.home', english: 'header.menu.contact', label: 'pages.comparison.add' };
 
-  test('a key missing from the German file is a leak, and a value left in English is stray English', async ({ context, consoleGuard, apiMock, catalog, api, request }) => {
+  test('a key missing from the German file is a leak, and a value left in English is stray English', async ({ arrangement, request }) => {
     const home = visitNamed('home');
     const english = (await (await request.get('/assets/i18n/en.json')).json()) as Record<string, unknown>;
-    await context.route('**/assets/i18n/de.json', async (route) => {
+    await arrangement.context.route('**/assets/i18n/de.json', async (route) => {
       const response = await route.fetch();
       const file = (await response.json()) as Record<string, unknown>;
       const menu = (file.header as { menu: Record<string, string> }).menu;
@@ -237,7 +253,6 @@ test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, (
       menu.contact = (english.header as { menu: Record<string, string> }).menu.contact;
       await route.fulfill({ response, json: file });
     });
-    const arrangement = { context, consoleGuard, apiMock, catalog, api };
 
     const { texts: keyRead } = await readPage('de', home, await arrange(home, arrangement), 'keys');
     const { english: englishRead, texts } = await bothRenderings('de', home, arrangement);
@@ -253,10 +268,10 @@ test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, (
 test.describe('Known untranslated text', { tag: ['@i18n', '@bug'] }, () => {
   for (const known of KNOWN) {
     for (const language of languagesOf(known)) {
-      test(`${known.id}: ${known.title} is translated in ${language}`, async ({ context, consoleGuard, apiMock, catalog, api }) => {
+      test(`${known.id}: ${known.title} is translated in ${language}`, async ({ arrangement }) => {
         knownBug(known.id, known.summary);
         const visit = visitNamed(known.visit);
-        const { english, texts } = await bothRenderings(language, visit, { context, consoleGuard, apiMock, catalog, api });
+        const { english, texts } = await bothRenderings(language, visit, arrangement);
 
         // Identical to the English rendering: a fixed site shows nothing here, and so does a renamed string.
         const stillEnglish = texts

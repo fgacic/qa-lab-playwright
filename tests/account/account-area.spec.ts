@@ -91,7 +91,9 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   test.describe('when the session is refused', { tag: ['@negative', '@bug'] }, () => {
     test.use(withMocks(mock.fail('GET', '/invoices', 401, { error: 'Unauthorized' })));
 
-    test('the customer lands on the login page', async ({ invoicesPage: _, shop, page, apiMock }) => {
+    test('the customer lands on the login page', async ({ invoicesPage, shop, apiMock }) => {
+      // The `invoicesPage` fixture opened /account/invoices with the refused token; its page is the one asserted on below.
+      const { page } = invoicesPage;
       knownBug('BUG-56', 'a 401 on an account call sends the SPA to "/#/auth/login", which is not a route: the home page is shown at that address instead of the login form.');
       // Precondition, true whether or not the bug is fixed: the page asked for its list and was refused. (Not "the invoices page is
       // showing": the SPA leaves it as soon as the refusal arrives, so its heading is there only for a moment, or never.)

@@ -35,7 +35,8 @@ test.describe('Product comparison', () => {
 
   test('pressing Compare again takes a product back out', async ({ homePage }) => {
     await homePage.grid.waitForLoaded();
-    const first = homePage.grid.first();
+    const [name] = await homePage.grid.productNames();
+    const first = homePage.grid.card(name);
     await first.compareButton.click();
     await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(1));
 
@@ -69,12 +70,13 @@ test.describe('Product comparison', () => {
 
   test('Clear All in the bar empties the selection', async ({ homePage }) => {
     await homePage.grid.waitForLoaded();
-    await homePage.grid.first().compareButton.click();
+    const [name] = await homePage.grid.productNames();
+    await homePage.grid.compare(name);
 
     await homePage.compareBar.clearAll();
 
     await expect(homePage.compareBar.root).toBeHidden();
-    await expect(homePage.grid.first().compareButton).toHaveAttribute('aria-pressed', 'false');
+    await expect(homePage.grid.card(name).compareButton).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('the product page adds the product to the comparison', async ({ productPage, product }) => {
@@ -184,7 +186,7 @@ test.describe('Product comparison', () => {
       // Let the first load finish: a reload that cuts a lazy chunk off mid-import makes WebKit and Firefox log an error of their own.
       await expect(comparisonPage.title).toBeVisible();
       // Reload with the mocked answer awaited: an empty state only means something once the data has arrived.
-      await Promise.all([apiMock.waitForResponse('POST', '/graphql'), comparisonPage.page.reload({ waitUntil: 'domcontentloaded' })]);
+      await Promise.all([apiMock.waitForResponse('POST', '/graphql'), comparisonPage.reload()]);
 
       await expect(comparisonPage.emptyState).toBeVisible();
     });

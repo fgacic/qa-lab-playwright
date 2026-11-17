@@ -79,6 +79,10 @@ export const REFUSED_STATUSES = [409, 500] as const;
 
 /** A record the mocked search answers with: not in the full list, so a table that shows it has really been replaced. */
 export const SEARCH_HIT = 'Qa Lab Search Hit';
+/** The term a search is run with when the answer is mocked (what is typed does not matter, what is sent does). */
+export const SEARCH_TERM = 'hit';
+/** A term nothing matches: the "no results" search. */
+export const NO_MATCH = 'no such record';
 
 /** The payment of the mocked order: the API's method code and the label the order page shows for it. */
 export const orderPayment = { method: 'cash-on-delivery', label: 'Cash on Delivery' };

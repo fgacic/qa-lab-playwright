@@ -1,22 +1,15 @@
 // Every defect id the code pins appears in docs/COVERAGE.md, and every id the document lists is pinned in the
 // code. The two are written by hand, so without this a pin can be added with no row, or a row left behind
 // after its pin was deleted. No browser: this reads files.
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { sourcesUnder } from './source-files';
 import { KNOWN } from '@support/i18n-baseline';
 import { KNOWN_VIOLATIONS } from '@support/a11y-baseline';
 
 const ID = /(?:BUG|A11Y|ADM|AX|I18N|SEC|PERF)-\d+/;
 const ROOT = join(__dirname, '..', '..');
-
-function sourcesUnder(dir: string): string[] {
-  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return sourcesUnder(path);
-    return entry.name.endsWith('.ts') ? [path] : [];
-  });
-}
 
 /** Ids passed to `knownBug(...)`, given as a table row's `id:` or as a baseline `pin:`, in specs and baselines. */
 function pinnedInCode(): Set<string> {

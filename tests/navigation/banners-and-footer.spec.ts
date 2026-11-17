@@ -71,6 +71,7 @@ test.describe('Banners and footer', () => {
     const { banners } = homePage.shell;
     await banners.openTestingGuide();
     await expect(banners.guideStep(1)).toBeVisible();
+    // A one-shot read of the step count, safe: the assertion above waited for step 1, so the progress line is drawn and its total is fixed.
     const last = await banners.guideStepCount();
     for (let step = 2; step <= last; step++) {
       await banners.guideNext.click();

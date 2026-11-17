@@ -29,12 +29,11 @@ const UNISSUED_CART_ID = '01zzzzzzzzzzzzzzzzzzzzzzzz';
 
 test.describe('API authorisation, carts (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
   test('a cart id that was never issued is answered 404, to an anonymous caller and to a customer', async ({ request, api, adminToken, cleanups }) => {
-    // Made up from the id's alphabet: the answer is about the id, not the shape of the path.
-    const unissued = UNISSUED_CART_ID;
+    // UNISSUED_CART_ID is made up from the id's alphabet: the answer is about the id, not the shape of the path.
     const { token } = await newCustomer({ request, api, adminToken, cleanups });
 
-    const anonymous = await call(request, 'GET', `/carts/${unissued}`);
-    const customer = await call(request, 'GET', `/carts/${unissued}`, { token });
+    const anonymous = await call(request, 'GET', `/carts/${UNISSUED_CART_ID}`);
+    const customer = await call(request, 'GET', `/carts/${UNISSUED_CART_ID}`, { token });
 
     expect([anonymous.status(), customer.status()], 'GET /carts/{id} of an id nobody was given, as an anonymous caller and as a customer').toEqual([404, 404]);
   });
@@ -80,8 +79,9 @@ test.describe('API authorisation, carts (self-hosted only)', { tag: ['@security'
       // What the owner is left with: the cart, with only their own line, however the three answers read.
       const after = await call(request, 'GET', `/carts/${id}`, { token: owner.token });
       expect.soft(after.status(), 'SEC-15: the owner still has the cart after the other customer touched it').toBe(200);
-      // A cart that is gone answers with a message and no lines, which this reads as an empty cart (the status above says why).
-      const left = ((await after.json().catch(() => ({}))) as Partial<Cart>).cart_items ?? [];
+      // A cart that is gone answers with a JSON message and no lines, which this reads as an empty cart (the status above says why);
+      // an answer that is not JSON at all is not swallowed, it fails the test.
+      const left = ((await after.json()) as Partial<Cart>).cart_items ?? [];
       expect.soft(left.map((item) => `${item.product.id} x${item.quantity}`), 'SEC-15: the owner\'s cart holds only the line they added').toEqual([`${product.id} x1`]);
     });
   });

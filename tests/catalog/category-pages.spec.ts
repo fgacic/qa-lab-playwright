@@ -1,6 +1,7 @@
 import { SORT, SORT_OPTIONS } from '@components/FilterPanel';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
+import type { ApiMock } from '@support/api-mock';
 import { CATEGORIES, HAND_TOOLS, SPECIAL_TOOLS, UNKNOWN_CATEGORY_SLUG } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -10,10 +11,13 @@ import type { ProductPage } from '@support/toolshop-api';
 /** The category pages, hand-tools first, are long enough to run to several pages: sort and pager are tried there. */
 const PAGED = HAND_TOOLS;
 
+/** The product list the shop answers for a category slug: set up before the page opens, so the answer cannot be missed. */
+const answerFor = (apiMock: ApiMock, slug: string) => apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
+
 test.describe('Category pages', () => {
   for (const { slug, title } of CATEGORIES) {
     test(`/category/${slug} lists that category's products`, async ({ categoryPage, apiMock }) => {
-      const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
+      const results = answerFor(apiMock, slug);
 
       await categoryPage.open(slug);
 
@@ -24,7 +28,7 @@ test.describe('Category pages', () => {
     });
 
     test(`/category/${slug} lists every product of its subcategories`, async ({ categoryPage, apiMock, api }) => {
-      const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
+      const results = answerFor(apiMock, slug);
       const parent = (await api.categoryTree()).find((node) => node.slug === slug);
       expect(parent, `the category tree should contain "${slug}"`).toBeDefined();
 
@@ -37,7 +41,7 @@ test.describe('Category pages', () => {
     });
 
     test(`every card of /category/${slug} shows a picture with the product name as alt text`, async ({ categoryPage, apiMock }) => {
-      const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.by_category_slug === slug);
+      const results = answerFor(apiMock, slug);
       await categoryPage.open(slug);
       const { json: found } = await results;
 

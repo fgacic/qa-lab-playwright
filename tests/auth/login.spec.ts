@@ -7,6 +7,9 @@ import { storedToken } from '@support/session';
 const PENDING_TOTP = 'qa-lab-pending-totp';
 const TOTP_CODE = '123456';
 const WRONG_TOTP_CODE = '000000';
+/** What the shop's refusals say, typed once for the mock and the assertion. */
+const REFUSED = 'Invalid email or password';
+const LOCKED = 'Account locked, too many failed attempts. Please contact the administrator.';
 
 /**
  * Real requests in this file use only obviously fake credentials (UNKNOWN_EMAIL, UNKNOWN_PASSWORD).
@@ -40,7 +43,7 @@ test.describe('Login', () => {
   test('unknown credentials are refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ loginPage, page }) => {
     await loginPage.login(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
-    await expect(loginPage.error).toHaveText('Invalid email or password');
+    await expect(loginPage.error).toHaveText(REFUSED);
     await expect(page).toHaveURL('/auth/login');
   });
 
@@ -51,7 +54,7 @@ test.describe('Login', () => {
     test('the shopper is told so and stays on the login page', { tag: ['@smoke'] }, async ({ loginPage, page }) => {
       await loginPage.login(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
 
-      await expect(loginPage.error).toHaveText('Invalid email or password');
+      await expect(loginPage.error).toHaveText(REFUSED);
       await expect(page).toHaveURL('/auth/login');
     });
   });
@@ -175,12 +178,12 @@ test.describe('Login', () => {
   });
 
   test.describe('when the account is locked', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.fail('POST', '/users/login', 423, { error: 'Account locked, too many failed attempts. Please contact the administrator.' })));
+    test.use(withMocks(mock.fail('POST', '/users/login', 423, { error: LOCKED })));
 
     test('the API reason is shown', async ({ loginPage }) => {
       await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
 
-      await expect(loginPage.error).toHaveText('Account locked, too many failed attempts. Please contact the administrator.');
+      await expect(loginPage.error).toHaveText(LOCKED);
     });
   });
 

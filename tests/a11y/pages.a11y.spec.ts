@@ -39,8 +39,11 @@ async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<vo
   if (process.env.A11Y_RECORD) {
     // A recording is a deliberate local act: on CI it would turn every violation into "known".
     if (process.env.CI) throw new Error('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
-    // Loud, because every scan below asserts nothing in this mode: a green run of a recording says nothing about the shop.
-    test.info().annotations.push({ type: 'A11Y_RECORD', description: `recording ${scan.findings.length} finding(s) on "${page}" to ${process.env.A11Y_RECORD}: NOTHING WAS ASSERTED, this is not a test run` });
+    // A recording asserts nothing about the shop, so it must never read as a pass: the test is failed (soft, so every state still records)
+    // and annotated, and the file is the output. Rebuilding the baseline is not a test run.
+    const note = `recording ${scan.findings.length} finding(s) on "${page}" to ${process.env.A11Y_RECORD}: NOTHING WAS ASSERTED, this is not a test run`;
+    test.info().annotations.push({ type: 'A11Y_RECORD', description: note });
+    expect.soft(false, `A11Y_RECORD is set: ${note}`).toBe(true);
     for (const finding of scan.findings) fs.appendFileSync(process.env.A11Y_RECORD, JSON.stringify({ page, ...finding }) + '\n');
     return;
   }
@@ -325,7 +328,7 @@ test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '
     await expect(profilePage.firstName.input).not.toHaveValue('');
     await profilePage.firstName.input.fill('');
     await profilePage.update();
-    const notice = profilePage.alerts.filter({ hasText: 'Please correct the highlighted fields before saving.' });
+    const notice = profilePage.alert('Please correct the highlighted fields before saving.');
     await expectNoNewViolations(await a11y.scan('account profile with errors', { ready: [notice, profilePage.firstName.input] }), 'account profile with errors');
   });
 

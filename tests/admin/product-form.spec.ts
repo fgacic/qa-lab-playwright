@@ -5,6 +5,9 @@ import { ADM_14, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
 import { REFUSED_STATUSES, brand, category, product, spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
+/** The headings of the form that adds a product and of the one that edits it. */
+const ADD_PRODUCT = 'Add Product';
+const EDIT_PRODUCT = 'Edit Product';
 const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
 
 /** What an edit changes (the price) and fills in because the edit form does not load it (the stock: ADM-05). */
@@ -16,7 +19,7 @@ const PRODUCT = /^\/products\/[^/]+$/;
 /** Opens the Add Product form and waits for it to be drawn, so that what a test fills in is not lost to a form that is still being built. */
 async function openAddForm(products: AdminListPage<AdminProductForm>): Promise<AdminProductForm> {
   const form = await products.add();
-  await expect(form.chrome.heading).toHaveText('Add Product');
+  await expect(form.chrome.heading).toHaveText(ADD_PRODUCT);
   return form;
 }
 
@@ -99,7 +102,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   test('editing loads the product and its specifications', async ({ adminProducts, backOffice }) => {
     const form = await adminProducts.edit(backOffice.product.id);
 
-    await expect(form.chrome.heading).toHaveText('Edit Product');
+    await expect(form.chrome.heading).toHaveText(EDIT_PRODUCT);
     await expect(form.chrome.id).toHaveValue(backOffice.product.id);
     await expect(form.name).toHaveValue(backOffice.product.name);
     await expect(form.price).toHaveValue(String(backOffice.product.price));
@@ -159,7 +162,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
 
       const form = await adminProducts.edit(backOffice.product.id);
       await failed;
-      await expect(form.chrome.heading).toHaveText('Edit Product');
+      await expect(form.chrome.heading).toHaveText(EDIT_PRODUCT);
 
       // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording.
       await expect(form.chrome.failure, 'ADM-14: a failed product load tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });

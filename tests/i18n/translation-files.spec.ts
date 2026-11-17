@@ -26,7 +26,7 @@ const I18N_28 = ['pages.comparison.remove-product'];
 
 test.describe('Translation files agree with English', { tag: ['@i18n'] }, () => {
   /** Every file as a map of key to value, the English one measured against by the others. */
-  const filesOf = async (request: APIRequestContext) => {
+  const loadFiles = async (request: APIRequestContext) => {
     const loaded = await Promise.all(
       LANGUAGES.map(async (language) => {
         const response = await request.get(`/assets/i18n/${language}.json`);
@@ -38,6 +38,10 @@ test.describe('Translation files agree with English', { tag: ['@i18n'] }, () => 
     expect(files.get('en')!.size, 'the English file holds keys at all').toBeGreaterThan(100);
     return files;
   };
+  // The files are static for the run, and each of the five tests below reads them: fetched once per worker (a plain map, no request
+  // context kept), and dropped again if the fetch failed so the next test tries afresh.
+  let loadedFiles: ReturnType<typeof loadFiles> | undefined;
+  const filesOf = (request: APIRequestContext) => (loadedFiles ??= loadFiles(request).catch((error) => ((loadedFiles = undefined), Promise.reject(error))));
   const others = LANGUAGES.filter((language) => language !== 'en');
 
   /** What each language lacks and what it has that English does not, as the English file is the one the others are measured against. */

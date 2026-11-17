@@ -31,7 +31,7 @@ test.describe('Chat assistant', () => {
     await chat.open();
     await expect(chat.greeting).toBeVisible();
     for (const action of ['Find a product', 'Order a product', 'Checkout', 'Create support ticket'] as const) {
-      await expect(chat.action(action)).toBeVisible();
+      await expect.soft(chat.action(action), action).toBeVisible();
     }
     await expect(chat.openButton).toBeHidden();
 
@@ -109,16 +109,26 @@ test.describe('Chat assistant', () => {
     await expect(chat.action('Find a product')).toBeVisible();
   });
 
-  test('Enter in the message box sends it as the button does', async ({ homePage, apiMock }) => {
-    const { chat } = homePage.shell;
-    await chat.open();
-    await chat.choose('Find a product');
-    const searched = apiMock.waitForRequest('QUERY', '/products/search');
+  test.describe('Enter in the message box', { tag: ['@mocked'] }, () => {
+    test.use({
+      apiMocks: async ({ catalog }, use) => {
+        const product = await catalog.inStock();
+        await use({ routes: [mock.respond('QUERY', '/products/search', { ...listOf([product]), per_page: 9 })] });
+      },
+    });
 
-    await chat.sendWithEnter(SEARCH_TERM);
+    test('sends the message as the button does and the assistant answers', async ({ homePage, apiMock }) => {
+      const { chat } = homePage.shell;
+      await chat.open();
+      await chat.choose('Find a product');
+      const searched = apiMock.waitForRequest('QUERY', '/products/search');
 
-    expect((await searched).postDataJSON()).toMatchObject({ q: SEARCH_TERM });
-    await expect(chat.line(SEARCH_TERM)).toBeVisible();
+      await chat.sendWithEnter(SEARCH_TERM);
+
+      expect((await searched).postDataJSON()).toMatchObject({ q: SEARCH_TERM });
+      await expect(chat.line(SEARCH_TERM)).toBeVisible();
+      await expect(chat.reply(FOUND_REPLY)).toBeVisible();
+    });
   });
 
   test('Escape closes the chat', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {

@@ -1,7 +1,7 @@
 import { expect, test } from '@fixtures';
 import type { Page } from '@playwright/test';
 import { BUG_TIMEOUT } from '@support/known-bug';
-import { applyTextSpacing, bodyLetterSpacing, clippedText, horizontalOverflow } from '@support/page-metrics';
+import { applyTextSpacing, clippedText, horizontalOverflow } from '@support/page-metrics';
 
 /**
  * Two more things axe cannot say, because it reads one page at one size with one set of styles: the page at twice the size
@@ -105,6 +105,6 @@ test.describe('With the text spacing of WCAG 1.4.12', { tag: ['@a11y', '@axe'] }
     await applyTextSpacing(page);
 
     expect(before, 'a box that hides its overflow and holds more than it shows, and no scrolling box or box that fits').toEqual(['div "A sentence much longer than its box"']);
-    expect(await bodyLetterSpacing(page), 'the spacing is applied to the page').not.toBe('normal');
+    await expect(page.locator('body'), 'the spacing is applied to the page').not.toHaveCSS('letter-spacing', 'normal');
   });
 });

@@ -25,6 +25,9 @@ export interface Visit {
   /**
    * The fewest strings of the route itself (not the header and footer) a read of this page must find, about four fifths of what it
    * showed when counted. A read that found only a few would find few defects too: the content was missed, or the page did not render.
+   * To recount after the shop's copy changes: run the visit in English and count the entries of `texts` whose `part` is 'page' (the
+   * count `expectPageText` in completeness.spec.ts compares), then take about four fifths of it, rounded down. The test names the
+   * count it found when it falls short, so a figure that drifted too high shows up as a failure with the number to use.
    */
   pageStrings: number;
   /**
@@ -34,6 +37,8 @@ export interface Visit {
   fades?: true;
   /** An error the page logs on purpose in this state (a refused request the shop answers as it should), declared to the console guard. */
   logs?: { pattern: RegExp; reason: string };
+  /** An answer the shop gives to a request of this visit as it should (the 404 of an id it does not know); the guard allows the browser's line for it. */
+  refused?: { status: number; path: string; reason: string };
   /** The page needs a cart with a product in it: made through the API before the page opens. */
   cart?: boolean;
   /** The page needs two products selected for comparison, as the comparison bar leaves them in the tab. */
@@ -127,6 +132,7 @@ export const VISITS: Visit[] = [
   {
     name: 'product not found', pageStrings: 1,
     logs: { pattern: /^Failed to load resource: the server responded with a status of 500/, reason: 'the one request this visit makes that fails is the related products of an id the shop does not know: it answers 500, and the browser logs the failed request' },
+    refused: { status: 404, path: `/products/${NO_SUCH_PRODUCT_ID}`, reason: 'the visit asks for a product id the shop does not know: it answers 404, and the browser logs the failed request' },
     // There is no 404 page: an unknown route redirects home (BUG-02). An unknown product id is the nearest error state.
     path: `/product/${NO_SUCH_PRODUCT_ID}`,
     // All the page draws is the "Related products" heading.

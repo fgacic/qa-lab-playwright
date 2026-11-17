@@ -65,8 +65,8 @@ export class ProductPage {
   /** The ids of the related products, read from their links (`/product/<id>`), once they have rendered. */
   async relatedIds(): Promise<string[]> {
     await this.relatedProducts.first().waitFor();
-    const hrefs = await this.relatedProducts.evaluateAll((links) => links.map((link) => link.getAttribute('href') ?? ''));
-    return hrefs.map((href) => href.split('/').pop() ?? '');
+    const hrefs = await Promise.all((await this.relatedProducts.all()).map((link) => link.getAttribute('href')));
+    return hrefs.map((href) => (href ?? '').split('/').pop() ?? '');
   }
 
   /** The name a related product's card shows. */

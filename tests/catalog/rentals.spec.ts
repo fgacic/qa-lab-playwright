@@ -2,6 +2,7 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { CART } from '@support/cart-routes';
 import { SUITE_OWNED_NAME } from '@support/catalog-terms';
 import { emptyProductPage } from '@support/payloads';
 
@@ -35,7 +36,7 @@ test.describe('Rentals', () => {
   test('a rental goes into the cart as one unit of that product', async ({ catalog, rentalsPage, apiMock }) => {
     const rental = await catalog.rental();
     const product = await rentalsPage.openRental(rental.name);
-    const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
+    const added = apiMock.waitForRequest('POST', CART);
 
     await product.addToCart();
 

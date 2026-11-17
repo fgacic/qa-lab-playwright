@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { ATTRIBUTE_XSS_PAYLOADS, OBSERVATION_WINDOW_MS, ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
+import { ATTRIBUTE_XSS_PAYLOADS, OBSERVATION_WINDOW_MS, ROUTE_XSS_PAYLOADS, SENTINEL_CONTROL_HIT, XSS_PAYLOADS } from '@fixtures/security';
 
 /**
  * Positive control for the other security specs. A "nothing ran" result only means something if
@@ -82,11 +82,11 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
   }
 
   // Counted, not run: an `<svg onload>` put into a document with `innerHTML` is inert in every engine (only a parser run on a whole document,
-  // a frame's `srcdoc`, fires it), so this control is about the walk into the frame and the shadow root. The id is its own (11), so a
+  // a frame's `srcdoc`, fires it), so this control is about the walk into the frame and the shadow root. The id is its own (SENTINEL_CONTROL_HIT), so a
   // hit from another payload could never be mistaken for it.
   test('counts payloads left inside an iframe and a shadow root', async ({ homePage, xss }) => {
     await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
-    await xss.insertInFrameAndShadowRoot('<img src="x">', '<svg onload="__qaLabXssHit(11)"></svg>');
+    await xss.insertInFrameAndShadowRoot('<img src="x">', `<svg onload="__qaLabXssHit(${SENTINEL_CONTROL_HIT.shadowRoot})"></svg>`);
 
     await expect.poll(() => xss.injectedCount(), { message: 'one payload in the frame and one in the shadow root' }).toBe(2);
   });
@@ -95,9 +95,9 @@ test.describe('XSS sentinel (positive control)', { tag: ['@security'] }, () => {
   test('detects an svg handler that runs in a frame, and counts it once', async ({ homePage, xss }) => {
     await expect(homePage.grid.cards.first(), 'the page is loaded before anything is injected').toBeVisible();
 
-    await xss.parseInFrame('<svg onload=__qaLabXssHit(12)>');
+    await xss.parseInFrame(`<svg onload=__qaLabXssHit(${SENTINEL_CONTROL_HIT.frame})>`);
 
-    await expect.poll(() => xss.executions(), 'the handler ran').toEqual(['12']);
+    await expect.poll(() => xss.executions(), 'the handler ran').toEqual([String(SENTINEL_CONTROL_HIT.frame)]);
     // The frame is counted by its `srcdoc` attribute, and its own parsed document is not counted again.
     await expect.poll(() => xss.injectedCount(), { message: 'one payload: the frame' }).toBe(1);
   });

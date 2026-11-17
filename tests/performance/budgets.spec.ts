@@ -277,6 +277,14 @@ const WEIGHT_CEILING = {
   product: { bytes: 1_700_000, requests: 44, scriptBytes: 1_150_000 },
 } as const;
 
+/** What a first load may weigh: the same four checks for every page, each reported on its own (soft). */
+function expectWithinWeight(weight: Awaited<ReturnType<typeof measurePageWeight>>, ceiling: (typeof WEIGHT_CEILING)[keyof typeof WEIGHT_CEILING]) {
+  expect.soft(weight.requests, 'requests made (a load that made none measured nothing)').toBeGreaterThan(0);
+  expect.soft(weight.bytes, `bytes received; the heaviest: ${weight.heaviest.map(({ url, bytes }) => `${url} ${bytes}`).join(', ')}`).toBeLessThanOrEqual(ceiling.bytes);
+  expect.soft(weight.requests, 'requests made').toBeLessThanOrEqual(ceiling.requests);
+  expect.soft(weight.scriptBytes, 'script bytes received').toBeLessThanOrEqual(ceiling.scriptBytes);
+}
+
 test.describe('Page weight (self-hosted)', { tag: ['@perf', '@self-hosted'] }, () => {
   // No collector and no throttling: the bytes do not depend on speed, and a throttled load would only make the test slower.
   test.use({ measureVitals: false });
@@ -289,10 +297,7 @@ test.describe('Page weight (self-hosted)', { tag: ['@perf', '@self-hosted'] }, (
       await expect(homePage.grid.cards.first()).toBeVisible();
     });
 
-    expect.soft(weight.requests, 'requests made (a load that made none measured nothing)').toBeGreaterThan(0);
-    expect.soft(weight.bytes, `bytes received; the heaviest: ${weight.heaviest.map(({ url, bytes }) => `${url} ${bytes}`).join(', ')}`).toBeLessThanOrEqual(WEIGHT_CEILING.home.bytes);
-    expect.soft(weight.requests, 'requests made').toBeLessThanOrEqual(WEIGHT_CEILING.home.requests);
-    expect.soft(weight.scriptBytes, 'script bytes received').toBeLessThanOrEqual(WEIGHT_CEILING.home.scriptBytes);
+    expectWithinWeight(weight, WEIGHT_CEILING.home);
   });
 
   test('product page: the first load stays within its byte and request budget', async ({ productPage }) => {
@@ -303,10 +308,7 @@ test.describe('Page weight (self-hosted)', { tag: ['@perf', '@self-hosted'] }, (
       await expect(productPage.addToCartButton).toBeVisible();
     });
 
-    expect.soft(weight.requests, 'requests made (a load that made none measured nothing)').toBeGreaterThan(0);
-    expect.soft(weight.bytes, `bytes received; the heaviest: ${weight.heaviest.map(({ url, bytes }) => `${url} ${bytes}`).join(', ')}`).toBeLessThanOrEqual(WEIGHT_CEILING.product.bytes);
-    expect.soft(weight.requests, 'requests made').toBeLessThanOrEqual(WEIGHT_CEILING.product.requests);
-    expect.soft(weight.scriptBytes, 'script bytes received').toBeLessThanOrEqual(WEIGHT_CEILING.product.scriptBytes);
+    expectWithinWeight(weight, WEIGHT_CEILING.product);
   });
 });
 

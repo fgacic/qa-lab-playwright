@@ -11,8 +11,11 @@ const TEXT = {
   firstNameRequired: 'First name is required',
   lastNameRequired: 'Last name is required',
   loginRefused: 'Invalid email or password',
+  guestSummary: ({ firstName, lastName, email }: { firstName: string; lastName: string; email: string }) => `Continuing as guest: ${firstName} ${lastName} (${email})`,
   accountLocked: 'Account locked, too many failed attempts. Please contact the administrator.',
 } as const;
+/** An email the step's own validation refuses, in the sign-in form and the guest form alike. */
+const MALFORMED_EMAIL = 'not-an-email';
 
 test.describe('Checkout: sign-in step', () => {
   test.beforeEach(async ({ checkout }) => {
@@ -38,7 +41,7 @@ test.describe('Checkout: sign-in step', () => {
   });
 
   test('a malformed email and a too-short password show errors and send no sign-in', { tag: ['@negative'] }, async ({ checkout, apiMock }) => {
-    await checkout.signIn.signIn('not-an-email', 'x');
+    await checkout.signIn.signIn(MALFORMED_EMAIL, 'x');
 
     await expect(checkout.signIn.email.error).toHaveText(TEXT.emailInvalid);
     await expect(checkout.signIn.password.error).toHaveText(TEXT.passwordInvalid);
@@ -100,7 +103,7 @@ test.describe('Checkout: sign-in step', () => {
   });
 
   test('a malformed guest email is rejected', { tag: ['@negative'] }, async ({ checkout }) => {
-    await checkout.signIn.enterGuestDetails({ ...fakeGuest(), email: 'not-an-email' });
+    await checkout.signIn.enterGuestDetails({ ...fakeGuest(), email: MALFORMED_EMAIL });
 
     await expect(checkout.signIn.guestEmail.error).toHaveText(TEXT.emailInvalid);
     await expect(checkout.signIn.proceedAsGuestButton).toBeHidden();
@@ -111,7 +114,7 @@ test.describe('Checkout: sign-in step', () => {
 
     await checkout.signIn.enterGuestDetails(guest);
 
-    await expect(checkout.signIn.guestSummary).toHaveText(`Continuing as guest: ${guest.firstName} ${guest.lastName} (${guest.email})`);
+    await expect(checkout.signIn.guestSummary).toHaveText(TEXT.guestSummary(guest));
     await checkout.signIn.proceedAsGuestButton.click();
     await expect(checkout.billing.heading).toBeVisible();
   });

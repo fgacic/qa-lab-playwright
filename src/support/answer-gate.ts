@@ -33,3 +33,36 @@ export async function holdAnswers(page: Page, path: RegExp, json: unknown, statu
   });
   return { release, get reached() { return reached; } };
 }
+
+/** One answer of `answerOutOfOrder`: the value of the query parameter that calls for it, and what the shop answers. */
+export interface OrderedAnswer {
+  value: string;
+  json: unknown;
+}
+
+/**
+ * Makes two answers of one GET endpoint arrive in the wrong order, exactly: the answer for the `late` value of the query
+ * parameter `param` is held until the answer for the `early` value has been served, as a slow network can do. It is a route of
+ * its own and not `ApiMock.delay` on purpose: the two requests differ by a query parameter, which a mock answers by method and
+ * path only (a sequence would be spent by any stray request of a half-filled form), and a delay is a timer, so it would only
+ * make the late answer *probably* come second. Any other value (the page may ask while a field is half filled) is answered at
+ * once with `otherwise(value)` and releases nothing.
+ */
+export async function answerOutOfOrder(
+  page: Page,
+  path: RegExp,
+  { param, late, early, otherwise }: { param: string; late: OrderedAnswer; early: OrderedAnswer; otherwise: (value: string | null) => unknown },
+): Promise<void> {
+  let earlyServed!: () => void;
+  const isServed = new Promise<void>((resolve) => (earlyServed = resolve));
+  await page.route(path, async (route) => {
+    const value = new URL(route.request().url()).searchParams.get(param);
+    if (value === late.value) {
+      await isServed;
+      return route.fulfill({ json: late.json });
+    }
+    if (value !== early.value) return route.fulfill({ json: otherwise(value) });
+    await route.fulfill({ json: early.json });
+    earlyServed();
+  });
+}

@@ -1,4 +1,4 @@
-import { type APIRequestContext, type APIResponse } from '@playwright/test';
+import { test, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { SUITE_OWNED_NAME } from './catalog-terms';
 import { API_URL, IS_SELF_HOSTED } from './env';
 import { step } from './step';
@@ -313,6 +313,8 @@ export class ToolshopApi {
    * suite was written), so reads (and the anonymous cart creation) are attempted up to three times (two retries) on a 5xx
    * or a dropped connection, and a 429 once the server's Retry-After has passed. Other writes are never retried: a repeated
    * order or registration could duplicate, so they fail at once, with the response body in the message.
+   * Each retry is recorded as an annotation of the test (`noteRetry`): the suite treats a test that needed a retry as a flake
+   * (`failOnFlakyTests`), and a retry absorbed in here would never reach that signal, so it is at least visible in the report.
    */
   private async send(call: () => Promise<APIResponse>, { idempotent = false }: { idempotent?: boolean } = {}): Promise<APIResponse> {
     const attempts = idempotent ? 3 : 1;
@@ -323,10 +325,12 @@ export class ToolshopApi {
       } catch (error) {
         // A network error (a reset socket, a refused connection) on a read is as transient as a 5xx; the last attempt rethrows it.
         if (attempt === attempts || !isNetworkError(error)) throw error;
+        noteRetry(attempt, attempts, String((error as Error)?.message ?? error));
         await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
         continue;
       }
       if (attempt === attempts || !(response.status() >= 500 || response.status() === 429)) break;
+      noteRetry(attempt, attempts, `answered ${response.status()}`);
       const retryAfter = Number(response.headers()['retry-after']);
       const waitMs = response.status() === 429 && retryAfter > 0 ? Math.min(retryAfter, 30) * 1000 : 500 * attempt;
       await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -337,6 +341,11 @@ export class ToolshopApi {
     }
     return response!;
   }
+}
+
+/** Records on the running test that a call was attempted again, and why. */
+function noteRetry(attempt: number, attempts: number, why: string): void {
+  test.info().annotations.push({ type: 'api retry', description: `attempt ${attempt} of ${attempts} failed (${why}): retried` });
 }
 
 /** A failure of the connection itself (not a closed context or a test timeout, which must stay failures). */

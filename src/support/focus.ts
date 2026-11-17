@@ -5,8 +5,11 @@ import type { Locator, Page } from '@playwright/test';
  * or checks and not how the browser is asked.
  */
 
-/** The focus is on `container` or on something inside it. */
-export const focusWithin = (container: Locator): Promise<boolean> => container.evaluate((element) => element.contains(document.activeElement));
+/**
+ * `container` itself when the focus is on it or on something inside it, and nothing otherwise: a locator, so a spec asserts it
+ * web-first (`await expect(focusWithin(control)).toHaveCount(1)`) and a failure prints the locator and its call log.
+ */
+export const focusWithin = (container: Locator): Locator => container.and(container.page().locator(':focus-within'));
 
 /** How far outside the control's box a ring is looked for, and how far inside its edge: an outline, a shadow or a border all fall in this band. */
 const OUTSIDE = 8;

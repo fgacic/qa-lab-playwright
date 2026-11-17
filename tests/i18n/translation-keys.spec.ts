@@ -79,7 +79,8 @@ test.describe('Leaked translation keys are recognised', { tag: ['@i18n'] }, () =
       'Open Mon.-Fri. 9.00-17.00 or call 0800.123.456',
     ];
 
-    expect(untranslatedKeys(real)).toEqual([]);
+    // One input at a time, so a flagged one is named by its own text and not lost in a diff.
+    for (const text of real) expect.soft(untranslatedKeys([text]), text).toEqual([]);
   });
 
   // Documented gap: with no dot, a key cannot be told from a word ("home", "login_title"). It is not flagged here; a leaked

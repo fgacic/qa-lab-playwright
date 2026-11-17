@@ -3,10 +3,13 @@ import { ADM_25, withLoggedFailure } from '@pages/admin/alerts';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const UNAUTHORIZED = { message: 'Unauthorized' };
+/** What the form is filled in with before its save is refused. */
+const EXPIRED_BRAND = { name: 'Qa Lab Expired', slug: 'qa-lab-expired' };
 
 /**
  * An expired session on the back-office pages that are not lists: the dashboard, the statistics, the two sales reports, and the save of a form.
  * The session the admin signed in with is refused while the page is open; a fixed back office signs the admin out and shows the sign-in page.
+ * Every test in this file is a known-bug pin and calls `knownBug` first: the describe-level `@bug` tag stands for that, so a test that is not a pin belongs in another file.
  */
 test.describe('Admin pages on an expired session (mocked back office)', { tag: ['@mocked', '@negative', '@bug'] }, () => {
   test.describe('dashboard', () => {
@@ -51,7 +54,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
       knownBug('ADM-25', ADM_25);
       const form = await adminBrands.add();
       const refused = apiMock.waitForResponse('POST', '/brands');
-      await form.fillIn({ name: 'Qa Lab Expired', slug: 'qa-lab-expired' });
+      await form.fillIn(EXPIRED_BRAND);
 
       await form.chrome.save();
 

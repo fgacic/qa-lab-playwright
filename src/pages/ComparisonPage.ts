@@ -54,6 +54,12 @@ export class ComparisonPage {
     await this.shell.goto('/comparison');
   }
 
+  /** Reloads the page without waiting for its resources: callers wait for the answer they care about. */
+  @step('Reload the comparison page')
+  async reload(): Promise<void> {
+    await this.page.reload({ waitUntil: 'domcontentloaded' });
+  }
+
   @step('Remove "{0}" from the comparison')
   async remove(productName: string): Promise<void> {
     await this.table.getByRole('button', { name: `Remove ${productName} from comparison` }).click();

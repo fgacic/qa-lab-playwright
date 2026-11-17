@@ -8,9 +8,6 @@ import { type Page } from '@playwright/test';
 /** Pixels the page is wider than its viewport: more than 0 is sideways scrolling (WCAG 1.4.10 reflow at a narrow width). */
 export const horizontalOverflow = (page: Page): Promise<number> => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-/** The letter spacing the page body computes: `normal` until a stylesheet sets one (what a test of the text-spacing check reads). */
-export const bodyLetterSpacing = (page: Page): Promise<string> => page.evaluate(() => getComputedStyle(document.body).letterSpacing);
-
 /**
  * The text spacing WCAG 1.4.12 says a page must survive without losing content: line height 1.5 times the font size, paragraph
  * spacing 2 times, letter spacing 0.12 times and word spacing 0.16 times. `!important`, as a user's stylesheet or an extension applies it.

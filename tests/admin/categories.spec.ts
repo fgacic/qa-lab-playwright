@@ -1,9 +1,13 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
-import { REFUSED_STATUSES, SEARCH_HIT, category, subcategory } from '@support/admin-payloads';
+import { REFUSED_STATUSES, SEARCH_HIT, SEARCH_TERM, category, subcategory } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** The slug an edit gives the category, and the one it gives a subcategory. */
+/** The subcategory the add form creates under the listed category. */
+const NEW_SUBCATEGORY = { name: 'Qa Lab Sub', slug: 'qa-lab-sub' };
+/** The name given to a category whose save is refused. */
+const NEW_CATEGORY_NAME = 'Qa Lab New Category';
 const RENAMED_SLUG = 'qa-lab-renamed';
 const RENAMED_SUBSLUG = `${RENAMED_SLUG}-sub`;
 
@@ -17,9 +21,9 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
     await apiMock.use(mock.respond('QUERY', '/categories/search', [match]));
     const sent = apiMock.waitForRequest('QUERY', '/categories/search');
 
-    await adminCategories.search.searchFor('hit');
+    await adminCategories.search.searchFor(SEARCH_TERM);
 
-    expect((await sent).postDataJSON()).toEqual({ q: 'hit' });
+    expect((await sent).postDataJSON()).toEqual({ q: SEARCH_TERM });
     await expect(adminCategories.table.row(match.name)).toContainText(match.slug);
     await expect(adminCategories.table.row(category.name)).toHaveCount(0);
   });
@@ -28,10 +32,10 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
     const form = await adminCategories.add();
     const created = apiMock.waitForRequest('POST', '/categories');
 
-    await form.fillIn({ name: 'Qa Lab Sub', slug: 'qa-lab-sub', parent: category.name });
+    await form.fillIn({ ...NEW_SUBCATEGORY, parent: category.name });
     await form.chrome.save();
 
-    expect((await created).postDataJSON()).toMatchObject({ name: 'Qa Lab Sub', slug: 'qa-lab-sub', parent_id: category.id });
+    expect((await created).postDataJSON()).toMatchObject({ ...NEW_SUBCATEGORY, parent_id: category.id });
     await expect(form.chrome.alert(ADMIN_MESSAGES.categorySaved)).toBeVisible();
   });
 
@@ -84,7 +88,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
       const form = await adminCategories.add();
       const sent = apiMock.waitForRequest('POST', '/categories');
 
-      await form.fillIn({ name: 'Qa Lab New Category', slug: category.slug });
+      await form.fillIn({ name: NEW_CATEGORY_NAME, slug: category.slug });
       await form.chrome.save();
       await sent;
 

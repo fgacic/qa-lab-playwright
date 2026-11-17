@@ -4,6 +4,8 @@ import { spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** The specifications of one product, and one of them. */
+/** The spec the add form is filled in with. */
+const NEW_SPEC = { name: 'Length', value: '200', unit: 'mm' };
 const SPECS = /^\/products\/[^/]+\/specs$/;
 const SPEC = /^\/products\/[^/]+\/specs\/[^/]+$/;
 
@@ -16,9 +18,9 @@ test.describe('Admin product specifications (mocked back office)', { tag: ['@moc
     await expect(form.specRows).toHaveCount(1);
     const added = apiMock.waitForRequest('POST', SPECS);
 
-    await form.addSpec('Length', '200', 'mm');
+    await form.addSpec(NEW_SPEC.name, NEW_SPEC.value, NEW_SPEC.unit);
 
-    expect((await added).postDataJSON()).toEqual({ spec_name: 'Length', spec_value: '200', spec_unit: 'mm' });
+    expect((await added).postDataJSON()).toEqual({ spec_name: NEW_SPEC.name, spec_value: NEW_SPEC.value, spec_unit: NEW_SPEC.unit });
     await expect(form.specRows).toHaveCount(2);
     await expect(form.specRows.filter({ hasText: stored.spec_name })).toContainText(`${stored.spec_value}${stored.spec_unit}`); // the cells' text runs together
   });
@@ -41,11 +43,11 @@ test.describe('Admin product specifications (mocked back office)', { tag: ['@moc
       const form = await adminProducts.edit(backOffice.product.id);
       await expect(form.specRows).toHaveCount(1);
 
-      await form.addSpec('Length', '200', 'mm');
+      await form.addSpec(NEW_SPEC.name, NEW_SPEC.value, NEW_SPEC.unit);
 
       await expect(form.chrome.failure).toBeVisible();
       await expect(form.specRows).toHaveCount(1);
-      await expect(form.specRows.filter({ hasText: 'Length' })).toHaveCount(0);
+      await expect(form.specRows.filter({ hasText: NEW_SPEC.name })).toHaveCount(0);
     });
   });
 

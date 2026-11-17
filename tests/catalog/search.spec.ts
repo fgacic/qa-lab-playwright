@@ -5,6 +5,7 @@ import { HAMMER, PLIERS } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
+import { reactionWithin } from '@support/reaction';
 import type { ProductPage } from '@support/toolshop-api';
 
 /** A term no product matches. */
@@ -17,19 +18,8 @@ const SAW_TERM = 'saw';
 /** A term with spaces on both sides, as typed. */
 const PADDED_TERM = `  ${PLIERS.term}  `;
 
-/**
- * Resolves when any of `reactions` (each a promise that rejects when its window runs out) comes true, and rejects when none
- * does (the test asserts it with `expect(...).resolves`, so the failure is an assertion that carries the expectation). Every one is observed from the moment it is passed in,
- * so the ones that lose the race, or all of them when the action throws, never end as an unhandled rejection. Call it
- * before the action, await the result after.
- */
-function reactionWithin(...reactions: Promise<unknown>[]): Promise<void> {
-  const ignore = () => undefined;
-  for (const reaction of reactions) reaction.catch(ignore);
-  const reacted = Promise.any(reactions).then(ignore, () => Promise.reject(new Error('no reaction within its window')));
-  reacted.catch(ignore);
-  return reacted;
-}
+/** Literal characters a shopper may type: each is sent as written and matched literally, never read as a pattern or markup. */
+const LITERAL_TERMS = ["o'brien", '100%', '%%%', '___', 'a&b=c', '"quoted"', '<b>x</b>'];
 
 test.describe('Search', () => {
   test('lists exactly the products the search found', { tag: ['@smoke'] }, async ({ homePage, apiMock }) => {
@@ -63,7 +53,7 @@ test.describe('Search', () => {
     await expect(homePage.grid.cards).toHaveCount(0);
   });
 
-  for (const term of ["o'brien", '100%', '%%%', '___', 'a&b=c', '"quoted"', '<b>x</b>']) {
+  for (const term of LITERAL_TERMS) {
     test(`the term ${term} is searched literally`, { tag: ['@negative'] }, async ({ homePage, apiMock }) => {
       const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products/search');
 

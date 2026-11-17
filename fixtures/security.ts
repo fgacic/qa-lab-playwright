@@ -73,6 +73,12 @@ export const ATTRIBUTE_XSS_PAYLOADS: Record<string, AttributePayload> = {
 };
 
 /**
+ * The hit ids of the sentinel's own controls (tests/security/xss-sentinel.spec.ts). The payloads above use 1 to 10, so a control takes the
+ * next numbers: a hit from a payload can never be mistaken for a control's, nor the other way round. A new payload takes the next free number.
+ */
+export const SENTINEL_CONTROL_HIT = { shadowRoot: 11, frame: 12 } as const;
+
+/**
  * How long a negative result is observed before it is believed. "Nothing ran" cannot be polled
  * for like a visible element: it is true the instant the page is quiet, and also true a moment
  * before a handler fires. So `expectNotExecuted` first waits for what a payload hangs on to

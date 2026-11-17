@@ -1,9 +1,10 @@
-import { INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS } from '@components/checkout/PaymentStep';
+import { INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS, type PaymentMethod } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/mocks';
 import { holdAnswers } from '@support/answer-gate';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { CART, PAYMENT_PASSED } from '@support/cart-routes';
 import { acceptedGuestInvoice } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
@@ -23,12 +24,44 @@ const entriesOf = <K extends string, V>(record: Record<K, V>): [K, V][] => Objec
 /** `length` characters that are neither digits nor letters. */
 const junkOf = (length: number) => '!'.repeat(length);
 
-/** What the payment check answers when it passes, and the mock of it. */
-const PAYMENT_PASSED = { message: 'Payment was successful' };
+/** The mock of the payment check passing. */
 const paymentPasses = mock.respond('POST', '/payment/check', PAYMENT_PASSED);
 
-/** The cart itself: once an order is placed the page deletes it (answered here, so the real cart is untouched). */
-const CART = /^\/carts\/[^/]+$/;
+/** Two methods the specs choose by id, typed against the page object's list so a renamed method fails to compile. */
+const BUY_NOW_PAY_LATER = 'buy-now-pay-later' satisfies PaymentMethod;
+const CASH_ON_DELIVERY = 'cash-on-delivery' satisfies PaymentMethod;
+
+/** The fields each payment method asks for, by the label the shopper reads. */
+const fields = {
+  'bank-transfer': [FIELD.bankName, FIELD.accountName, FIELD.accountNumber],
+  'credit-card': [FIELD.cardNumber, FIELD.expirationDate, FIELD.cvv, FIELD.cardHolder],
+  'buy-now-pay-later': [FIELD.instalments],
+  'gift-card': [FIELD.giftCardNumber, FIELD.validationCode],
+} as const;
+
+// Each junk value is as long as its field wants, so it is the characters that are refused, not the length.
+// `valid` fills the fields that take plain text, so the junk values are the only thing that can keep the check disabled.
+const junk = {
+  'bank-transfer': {
+    valid: [FIELD.bankName, FIELD.accountName],
+    invalid: { [FIELD.accountNumber]: { value: junkOf(8), message: PAYMENT_MESSAGES.accountNumber } },
+  },
+  'credit-card': {
+    valid: [FIELD.cardHolder],
+    invalid: {
+      [FIELD.cardNumber]: { value: junkOf(16), message: PAYMENT_MESSAGES.cardNumber },
+      [FIELD.expirationDate]: { value: junkOf(7), message: PAYMENT_MESSAGES.expirationDate },
+      [FIELD.cvv]: { value: junkOf(3), message: PAYMENT_MESSAGES.cvv },
+    },
+  },
+  'gift-card': {
+    valid: [],
+    invalid: {
+      [FIELD.giftCardNumber]: { value: junkOf(16), message: PAYMENT_MESSAGES.giftCardNumber },
+      [FIELD.validationCode]: { value: junkOf(4), message: PAYMENT_MESSAGES.validationCode },
+    },
+  },
+} as const;
 
 test.describe('Checkout: payment step', () => {
   // None of these is about the postcode lookup, so it is answered by a mock: an outage of the real
@@ -57,13 +90,6 @@ test.describe('Checkout: payment step', () => {
     await expect(checkout.payment.checkPaymentButton).toBeDisabled();
   });
 
-  const fields = {
-    'bank-transfer': [FIELD.bankName, FIELD.accountName, FIELD.accountNumber],
-    'credit-card': [FIELD.cardNumber, FIELD.expirationDate, FIELD.cvv, FIELD.cardHolder],
-    'buy-now-pay-later': [FIELD.instalments],
-    'gift-card': [FIELD.giftCardNumber, FIELD.validationCode],
-  } as const;
-
   for (const [method, labels] of entriesOf(fields)) {
     test(`${PAYMENT_METHODS[method]} asks for ${labels.join(', ')}`, async ({ checkout }) => {
       await checkout.payment.choose(method);
@@ -75,7 +101,7 @@ test.describe('Checkout: payment step', () => {
   // The real check is a POST the live guard refuses, so it runs on the self-hosted shop only; the
   // mocked twin proves the same page behaviour everywhere.
   test('Cash on Delivery needs no details and passes the payment check (real shop)', { tag: ['@self-hosted'] }, async ({ checkout }) => {
-    await checkout.payment.choose('cash-on-delivery');
+    await checkout.payment.choose(CASH_ON_DELIVERY);
     await checkout.payment.checkPayment();
 
     await expect(checkout.payment.successMessage).toHaveText(PAYMENT_PASSED.message);
@@ -86,7 +112,7 @@ test.describe('Checkout: payment step', () => {
     test.use({ ...withMocks(postcodeLookupMock, paymentPasses), refuseUnmockedWrites: true });
 
     test('Cash on Delivery needs no details and passes the payment check (mocked)', async ({ checkout }) => {
-      await checkout.payment.choose('cash-on-delivery');
+      await checkout.payment.choose(CASH_ON_DELIVERY);
       await checkout.payment.checkPayment();
 
       await expect(checkout.payment.successMessage).toHaveText(PAYMENT_PASSED.message);
@@ -96,7 +122,7 @@ test.describe('Checkout: payment step', () => {
 
   test('Buy Now Pay Later offers instalment plans of 3, 6, 9 and 12 months', async ({ checkout }) => {
     const { payment } = checkout;
-    await payment.choose('buy-now-pay-later');
+    await payment.choose(BUY_NOW_PAY_LATER);
 
     await payment.field(FIELD.instalments).selectOption(INSTALMENT_PLAN);
 
@@ -109,14 +135,14 @@ test.describe('Checkout: payment step', () => {
 
     test('a chosen instalment plan is sent with the check and the order can be confirmed', async ({ checkout, apiMock }) => {
       const { payment } = checkout;
-      await payment.choose('buy-now-pay-later');
+      await payment.choose(BUY_NOW_PAY_LATER);
       await payment.field(FIELD.instalments).selectOption(INSTALMENT_PLAN);
       const asked = apiMock.waitForRequest('POST', '/payment/check');
 
       await payment.checkPayment();
 
       expect((await asked).postDataJSON(), 'the chosen plan travels with the check').toMatchObject({
-        payment_method: 'buy-now-pay-later',
+        payment_method: BUY_NOW_PAY_LATER,
         payment_details: { monthly_installments: INSTALMENT_PLAN },
       });
       await expect(payment.successMessage).toHaveText(PAYMENT_PASSED.message);
@@ -128,35 +154,11 @@ test.describe('Checkout: payment step', () => {
   // so the pin is scheduled on the self-hosted target only.
   test('Buy Now Pay Later cannot be checked before an instalment plan is chosen', { tag: ['@negative', '@bug', '@self-hosted'] }, async ({ checkout }) => {
     knownBug('BUG-29', 'Buy Now Pay Later: "Check payment" is enabled before an instalment plan is chosen, and checking then answers "Unknown error" (self-hosted build; live disables it).');
-    await checkout.payment.choose('buy-now-pay-later');
+    await checkout.payment.choose(BUY_NOW_PAY_LATER);
     await expect(checkout.payment.field(FIELD.instalments)).toHaveValue('');
 
     await expect(checkout.payment.checkPaymentButton, 'BUG-29: Check payment stays disabled until a plan is chosen').toBeDisabled({ timeout: BUG_TIMEOUT });
   });
-
-  // Each junk value is as long as its field wants, so it is the characters that are refused, not the length.
-  // `valid` fills the fields that take plain text, so the junk values are the only thing that can keep the check disabled.
-  const junk = {
-    'bank-transfer': {
-      valid: [FIELD.bankName, FIELD.accountName],
-      invalid: { [FIELD.accountNumber]: { value: junkOf(8), message: PAYMENT_MESSAGES.accountNumber } },
-    },
-    'credit-card': {
-      valid: [FIELD.cardHolder],
-      invalid: {
-        [FIELD.cardNumber]: { value: junkOf(16), message: PAYMENT_MESSAGES.cardNumber },
-        [FIELD.expirationDate]: { value: junkOf(7), message: PAYMENT_MESSAGES.expirationDate },
-        [FIELD.cvv]: { value: junkOf(3), message: PAYMENT_MESSAGES.cvv },
-      },
-    },
-    'gift-card': {
-      valid: [],
-      invalid: {
-        [FIELD.giftCardNumber]: { value: junkOf(16), message: PAYMENT_MESSAGES.giftCardNumber },
-        [FIELD.validationCode]: { value: junkOf(4), message: PAYMENT_MESSAGES.validationCode },
-      },
-    },
-  } as const;
 
   for (const [method, { valid, invalid }] of entriesOf(junk)) {
     test(`${PAYMENT_METHODS[method]} rejects characters that are not digits or letters and blocks the check`, { tag: ['@negative'] }, async ({ checkout }) => {
@@ -205,7 +207,7 @@ test.describe('Checkout: payment step', () => {
       // Held until both clicks have landed: answered at once, the page may already have replaced the button when WebKit
       // delivers the second click, and one check would be sent whatever the page does.
       const check = await holdAnswers(page, /\/payment\/check$/, PAYMENT_PASSED, 200);
-      await checkout.payment.choose('cash-on-delivery');
+      await checkout.payment.choose(CASH_ON_DELIVERY);
 
       await checkout.payment.checkPaymentWithDoubleClick();
       check.release();
@@ -219,7 +221,7 @@ test.describe('Checkout: payment step', () => {
     test.use({ ...withMocks(postcodeLookupMock, mock.fail('POST', '/payment/check', 400, { error: PAYMENT_MESSAGES.declined })), refuseUnmockedWrites: true });
 
     test('the reason is shown and the order cannot be confirmed', async ({ checkout }) => {
-      await checkout.payment.choose('cash-on-delivery');
+      await checkout.payment.choose(CASH_ON_DELIVERY);
       await checkout.payment.checkPayment();
 
       await expect(checkout.payment.errorMessage).toHaveText(PAYMENT_MESSAGES.declined);
@@ -231,7 +233,7 @@ test.describe('Checkout: payment step', () => {
     test.use({ ...withMocks(postcodeLookupMock, mock.fail('POST', '/payment/check', 500)), refuseUnmockedWrites: true });
 
     test('a generic error is shown and the order cannot be confirmed', async ({ checkout }) => {
-      await checkout.payment.choose('cash-on-delivery');
+      await checkout.payment.choose(CASH_ON_DELIVERY);
       await checkout.payment.checkPayment();
 
       await expect(checkout.payment.errorMessage).toHaveText(PAYMENT_MESSAGES.unknownError);
@@ -249,7 +251,7 @@ test.describe('Checkout: payment step', () => {
 
       await checkout.payment.payOnDelivery();
 
-      expect((await placed).postDataJSON(), 'the order is placed for the chosen payment method').toMatchObject({ payment_method: 'cash-on-delivery' });
+      expect((await placed).postDataJSON(), 'the order is placed for the chosen payment method').toMatchObject({ payment_method: CASH_ON_DELIVERY });
       await expect(checkout.wizard.confirmationFor(acceptedGuestInvoice.invoice_number)).toBeVisible();
       await cartDropped;
     });

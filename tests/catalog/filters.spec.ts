@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { BRANDS, HAMMER, PLIERS } from '@support/catalog-terms';
+import { BRANDS, DRILL, HAMMER, PLIERS, POWER_TOOLS } from '@support/catalog-terms';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -23,7 +23,7 @@ const MIN_PRICE = 15;
  */
 const SEED = {
   category: PLIERS.category,
-  parentCategory: 'Power Tools',
+  parentCategory: POWER_TOOLS.category,
   /** A category that is not under `parentCategory`. */
   otherCategory: HAMMER.category,
   brand: BRANDS.mightyCraft,
@@ -31,7 +31,7 @@ const SEED = {
   hammerBrand: BRANDS.forgeFlex,
   /** The shop's two brands, and a category of a different parent than `otherCategory`. */
   brands: [BRANDS.forgeFlex, BRANDS.mightyCraft] as const,
-  powerCategory: 'Drill',
+  powerCategory: DRILL.category,
 } as const;
 /** The slider test lowers the max to `CROSSED_MAX`, then presses the min up to `CROSSED_MIN`, past it. */
 const CROSSED_MAX = 85;
@@ -250,8 +250,10 @@ test.describe('Product filters', () => {
     });
   });
 
-  for (const failure of [mock.fail('QUERY', '/products', 500), mock.abort('QUERY', '/products')]) {
-    const how = 'abort' in failure.responses[0] ? 'cannot be reached' : 'answers 500';
+  for (const { how, failure } of [
+    { how: 'answers 500', failure: mock.fail('QUERY', '/products', 500) },
+    { how: 'cannot be reached', failure: mock.abort('QUERY', '/products') },
+  ]) {
     test.describe(`when the product list API ${how}`, { tag: ['@mocked', '@bug'] }, () => {
       test.use(withMocks(failure));
       test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));

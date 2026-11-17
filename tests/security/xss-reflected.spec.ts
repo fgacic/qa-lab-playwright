@@ -22,9 +22,12 @@ test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => 
   // that adds a handler, a `javascript:` URL) is the one a page would break by putting the term into a title, an `alt` or an `href`.
   // Those longer than the box acts on (BUG-27) would be dropped, so they are not searched. The box itself is no sink to check: the shop
   // empties it once the search is sent (its `value` is "" afterwards), so it holds nothing to reflect.
+  const fitsTheBox = ([, { payload }]: [string, { payload: string }]) => payload.length <= MAX_SEARCH_TERM;
   const searched: [string, string][] = [
     ...Object.entries(XSS_PAYLOADS),
-    ...Object.entries(ATTRIBUTE_XSS_PAYLOADS).flatMap(([name, { payload }]) => (payload.length <= MAX_SEARCH_TERM ? [[name, payload] as [string, string]] : [])),
+    ...Object.entries(ATTRIBUTE_XSS_PAYLOADS)
+      .filter(fitsTheBox)
+      .map(([name, { payload }]): [string, string] => [name, payload]),
   ];
 
   for (const [name, payload] of searched) {
@@ -71,7 +74,8 @@ test.describe('Injection, reflected through the route (read-only)', { tag: ['@se
     });
 
     // The product page asks for the id and, finding nothing, shows no part of it: nothing to read back, but still to survive.
-    test(`a product id of ${name} is not run`, async ({ productPage, xss }) => {
+    test(`a product id of ${name} is not run`, async ({ productPage, xss, consoleGuard }) => {
+      consoleGuard.allowStatus(404, /^\/products\/.+$/, 'the test asks for a product id the shop does not know (the payload, which may hold a slash of its own), and for its related products; the browser logs each 404');
       const slug = encodeURIComponent(payload);
       await productPage.open(slug);
 
@@ -104,7 +108,8 @@ test.describe('Unknown route segments, uncaught errors (read-only)', { tag: ['@s
     // Precondition, true whether or not the bug is fixed: the page drew for the slug (its answer was waited for in `open`).
     await expect(categoryPage.title).toBeVisible();
     // The error is logged a moment after the page draws, so a read right now could miss it and pass a broken page. Give it the pin's
-    // window to arrive (settled, not awaited for success: on a fixed site none does, and the window runs out into the assertion below).
+    // window to arrive (settled, not awaited for success: on a fixed site none does, and the window runs out into the assertion below). A fixed site therefore pays the whole window (BUG_TIMEOUT),
+    // the price of proving that something never happens; a poll that passes on the first empty read would prove nothing.
     await Promise.allSettled([expect.poll(thrownSoFar, { timeout: BUG_TIMEOUT }).not.toEqual([])]);
 
     expect(await thrownSoFar(), 'SEC-13: the category page threw for an unknown slug').toEqual([]);

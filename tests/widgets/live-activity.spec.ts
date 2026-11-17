@@ -44,6 +44,7 @@ test.describe('Live shop activity', () => {
   test.describe('when sales come in', { tag: ['@mocked'] }, () => {
     const hammer = fakeSale();
     const saw = fakeSale({ name: 'Qa Lab Saw', quantity: 2, unit_price: 20, buyer: 'Botty', city: 'Mockstad' });
+    // Quantity times unit price, the rule the panel shows: both sales carry fixed values here, so the sum is easy to check by hand.
     const revenue = [hammer, saw].reduce((sum, sale) => sum + sale.quantity * sale.unit_price, 0);
     test.use(withMocks(mock.eventStream('/sales-stream', salesStream([hammer, saw]))));
 

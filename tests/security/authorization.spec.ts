@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mergeTests, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
 import { worldTest } from '@fixtures/security';
-import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, removeLater, type Account, type World } from '@support/authz';
+import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, removeFavouritesLater, removeLater, type Account, type World } from '@support/authz';
 import { knownBug } from '@support/known-bug';
 import { base64Url, fakeJwt, fromBase64Url } from '@support/payloads';
 import { fakeGuest, uniqueEmail } from '@support/test-data';
@@ -387,14 +387,11 @@ test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@se
     expect((listed.data as { name: string }[]).map((message) => message.name), "a new customer's message list holds no one else's message").toEqual([]);
   });
 
-  test("a customer lists no favourite that is another customer's", async ({ request, api, cleanups, catalog, world }) => {
+  test("a customer lists no favourite that is another customer's", async ({ request, api, catalog, world }) => {
     const owner = await newCustomer(world);
     const other = await newCustomer(world);
     await api.addFavorite(owner.token, (await catalog.inStock()).id);
-    // The favourite is removed before its owner goes (cleanups run last made first), or the account could not be deleted.
-    cleanups.push(async () => {
-      for (const { id } of (await (await call(request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[]) await call(request, 'DELETE', `/favorites/${id}`, { token: owner.token });
-    });
+    removeFavouritesLater(world, owner);
     expect(await api.favoriteProductIds(owner.token), 'the owner holds the favourite, so it exists').toHaveLength(1);
 
     const listed = await (await call(request, 'GET', '/favorites', { token: other.token })).json();
@@ -489,9 +486,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
     await world.api.addFavorite(owner.token, catalogProduct.id);
     const [favourite] = (await (await call(world.request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[];
     expect(favourite, 'the owner has the favourite just added').toBeDefined();
-    world.cleanups.push(async () => {
-      await call(world.request, 'DELETE', `/favorites/${favourite.id}`, { token: owner.token });
-    });
+    removeFavouritesLater(world, owner);
     return favourite.id;
   }
   const hasFavourite = async (request: APIRequestContext, owner: Account, id: string) =>

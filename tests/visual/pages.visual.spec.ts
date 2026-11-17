@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, mock, test, withMocks } from '@fixtures';
+import type { Page } from '@playwright/test';
+import type { HomePage } from '@pages/HomePage';
 import { emptyCartMock } from '@fixtures/mocks';
 import { SUITE_OWNED_NAME } from '@support/catalog-terms';
 import { settleImages } from '@support/visual';
 import { emptyProductPage } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
+import type { ToolshopApi } from '@support/toolshop-api';
 
 /**
  * Screenshot comparisons of key pages and states. Baselines are recorded and compared only
@@ -32,13 +35,20 @@ const ZERO_BUDGET = { maxDiffPixels: 0, threshold: 0 } as const;
  */
 const SMALL_ELEMENT_BUDGET = { maxDiffPixels: 30 } as const;
 
+/** The home page's first page of cards, all of them: as many as the API serves for it, so a shot is not taken mid-render. */
+const gridFullyDrawn = async (homePage: HomePage, api: ToolshopApi): Promise<void> => {
+  const firstPage = await api.listProducts();
+  await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
+};
+
+/** The price-range sliders, whose handles sit where the data put them: masked in every shot that has them. */
+const sliders = (page: Page) => [page.getByRole('slider')];
+
 test.describe('Visual regression', { tag: ['@visual'] }, () => {
   test('home page', async ({ homePage, api, page }) => {
-    // A full first page: as many cards as the API serves for it, so the shot is not taken mid-render.
-    const firstPage = await api.listProducts();
-    await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
+    await gridFullyDrawn(homePage, api);
     await settleImages(page);
-    await expect(page).toHaveScreenshot('home.png', { fullPage: true, mask: [page.getByRole('slider')] });
+    await expect(page).toHaveScreenshot('home.png', { fullPage: true, mask: sliders(page) });
   });
 
   test('product page', async ({ productPage, page }) => {
@@ -159,8 +169,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
   test('price on the first product card', async ({ homePage, api }) => {
     // The first card of the shop's default order, which is the same on every freshly seeded shop: its price is read from the grid, not from the product page.
-    const firstPage = await api.listProducts();
-    await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
+    await gridFullyDrawn(homePage, api);
     await expect(homePage.grid.first().price).toBeVisible();
     await expect(homePage.grid.first().price).toHaveScreenshot('card-price.png', ZERO_BUDGET);
   });
@@ -208,7 +217,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     test('home page with an empty catalogue', async ({ homePage, page }) => {
       await expect(homePage.grid.emptyState).toBeVisible();
       await settleImages(page);
-      await expect(page).toHaveScreenshot('home-empty-catalogue.png', { fullPage: true, mask: [page.getByRole('slider')] });
+      await expect(page).toHaveScreenshot('home-empty-catalogue.png', { fullPage: true, mask: sliders(page) });
     });
   });
 
@@ -217,10 +226,9 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
     await homePage.header.language.switchTo('de');
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     await expect(homePage.header.navItem('categories')).toHaveText('Kategorien');
-    const firstPage = await api.listProducts();
-    await expect(homePage.grid.cards).toHaveCount(firstPage.data.length);
+    await gridFullyDrawn(homePage, api);
     await settleImages(page);
-    await expect(page).toHaveScreenshot('home-de.png', { fullPage: true, mask: [page.getByRole('slider')] });
+    await expect(page).toHaveScreenshot('home-de.png', { fullPage: true, mask: sliders(page) });
   });
 
   test('language menu open', async ({ homePage }) => {

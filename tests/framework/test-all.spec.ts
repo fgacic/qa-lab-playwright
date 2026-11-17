@@ -7,13 +7,15 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const ROOT = join(__dirname, '..', '..');
+const ALL_PASSES_MS = 150_000; // four passes, each of which lists and selects nothing
 
 test.describe('the test-all runner', { tag: ['@framework', '@self-hosted'] }, () => {
   test('a pass in which the arguments select no test is reported as skipped, and the run exits 0', () => {
+    test.setTimeout(ALL_PASSES_MS + 15_000); // the synchronous spawn plus the temp-dir clean-up
     const output = mkdtempSync(join(tmpdir(), 'test-all-spec-'));
     try {
       // --output keeps the nested passes from emptying this run's own test-results directory.
-      const run = spawnSync(process.execPath, [join(ROOT, 'scripts', 'test-all.mjs'), '--grep', '@no-test-carries-this-tag', `--output=${output}`], { cwd: ROOT, encoding: 'utf8', timeout: 150_000 });
+      const run = spawnSync(process.execPath, [join(ROOT, 'scripts', 'test-all.mjs'), '--grep', '@no-test-carries-this-tag', `--output=${output}`], { cwd: ROOT, encoding: 'utf8', timeout: ALL_PASSES_MS });
       expect(run.error, 'test-all started').toBeUndefined();
       expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
       const summary = run.stdout.slice(run.stdout.lastIndexOf('\n\n'));

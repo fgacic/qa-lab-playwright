@@ -5,13 +5,15 @@
  */
 export const PLIERS = { term: 'pliers', category: 'Pliers' } as const;
 export const HAMMER = { term: 'hammer', category: 'Hammer' } as const;
+/** A subcategory of Power Tools, as the filter menu spells it. */
+export const DRILL = { category: 'Drill' } as const;
 
 /** The shop's two brands, as the brand filter spells them. */
 export const BRANDS = { mightyCraft: 'MightyCraft Hardware', forgeFlex: 'ForgeFlex Tools' } as const;
 
 /** The parent categories of the catalogue, by slug, with the title their page carries. */
 export const HAND_TOOLS = { slug: 'hand-tools', title: 'Category: Hand Tools' } as const;
-export const POWER_TOOLS = { slug: 'power-tools', title: 'Category: Power Tools' } as const;
+export const POWER_TOOLS = { slug: 'power-tools', title: 'Category: Power Tools', category: 'Power Tools' } as const;
 export const OTHER = { slug: 'other', title: 'Category: Other' } as const;
 export const CATEGORIES = [HAND_TOOLS, POWER_TOOLS, OTHER] as const;
 /** A subcategory the seed leaves without products. */

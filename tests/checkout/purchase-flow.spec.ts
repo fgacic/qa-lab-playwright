@@ -4,6 +4,7 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/mocks';
 import { twoProductCart } from '@fixtures/pages';
 import { holdAnswers } from '@support/answer-gate';
+import { CART, PAYMENT_PASSED } from '@support/cart-routes';
 import { knownBug } from '@support/known-bug';
 import { acceptedGuestInvoice } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
@@ -134,7 +135,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
 
   test.describe('when Confirm is double-clicked', { tag: ['@mocked', '@bug'] }, () => {
     // The check and the lookup are answered, and so is the cart's deletion: the order is answered by the gate below, so no real order is placed.
-    test.use({ ...withMocks(postcodeLookupMock, mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.respond('DELETE', /^\/carts\/[^/]+$/, undefined, 204)), refuseUnmockedWrites: true });
+    test.use({ ...withMocks(postcodeLookupMock, mock.respond('POST', '/payment/check', PAYMENT_PASSED), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
 
     test('a double click on Confirm places one order', async ({ checkout, page }) => {
       knownBug('BUG-46', 'a double click on Confirm sends the order twice, so two invoices are created for one cart.');
@@ -168,7 +169,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
   });
 
   test.describe('ordering an eco-friendly product', { tag: ['@self-hosted'] }, () => {
-    test.use({ cartItems: async ({ catalog }, use) => use([{ product: await catalog.eco(), quantity: 2 }]) });
+    test.use({ cartItems: async ({ catalog }, use) => use([{ product: await catalog.eco(), quantity: ORDERED_QUANTITY }]) });
 
     test('the invoice honours the 5% eco-friendly discount the cart showed', async ({ checkout, cartItems, apiMock }) => {
       const [{ product, quantity }] = cartItems;

@@ -1,20 +1,13 @@
 // eslint.config.mjs counts a call to any listed `expect*` helper as an assertion (`playwright/expect-expect`). A stale name would
 // let a test with no assertion pass the lint; an unlisted helper would make a test that does assert fail it. No browser: this reads files.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { sourcesUnder } from './source-files';
 import { ASSERTION_HELPERS } from '../../scripts/lib/assertion-helpers.mjs';
 
 const ROOT = join(__dirname, '..', '..');
-
-function sourcesUnder(dir: string): string[] {
-  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return sourcesUnder(path);
-    return entry.name.endsWith('.ts') ? [path] : [];
-  });
-}
 
 /** Names of the `expect…` functions and methods the code defines, as a declaration (`function`, `const`, `async`, a class method), never as a call or in a comment. */
 function definedHelpers(): Set<string> {

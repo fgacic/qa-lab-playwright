@@ -127,6 +127,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   test('a brand whose slug is taken is refused by the real API', { tag: ['@self-hosted', '@negative', '@bug'] }, async ({ adminBrands, brandFactory, apiMock, consoleGuard }) => {
     knownBug('ADM-12', ADM_12, { absence: true });
     allowLoggedFailure(consoleGuard); // the SPA logs the 409 it is about to say nothing about
+    consoleGuard.allowStatus(409, '/brands', 'the test posts a brand whose slug is taken, and the browser logs the 409 it is refused with');
     const taken = await brandFactory.create();
     const form = await adminBrands.add();
     const answered = apiMock.waitForResponse<{ slug?: string[] }>('POST', '/brands');
@@ -249,14 +250,16 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(adminStatistics.report('Top 10 Most Purchased Products').first()).toContainText(purchased[0].name);
   });
 
-  test('the real monthly sales answer has twelve months and the report draws its chart area', async ({ adminMonthlySales, apiMock }) => {
-    // A <canvas> has nothing to read, so the data is checked on the answer that feeds it.
-    const answered = apiMock.waitForResponse<unknown[]>('GET', '/reports/average-sales-per-month');
+  test('the real monthly sales answer has twelve months and the report draws bars', async ({ adminMonthlySales, apiMock }) => {
+    // A <canvas> has nothing to read, so the data is checked on the answer that feeds it, and the bars drawn are measured against it:
+    // a freshly seeded shop has no sales in the year the report opens on (every figure is 0, the chart draws axes and no bars).
+    const answered = apiMock.waitForResponse<{ month: number; average: number; amount: number }[]>('GET', '/reports/average-sales-per-month');
     await adminMonthlySales.open();
     const { json: months } = await answered;
 
     expect(months, 'one entry per month').toHaveLength(12);
     await expect(adminMonthlySales.heading).toBeVisible();
-    await expect(adminMonthlySales.chart).toBeVisible();
+    const figured = months.some(({ average, amount }) => average > 0 || amount > 0);
+    expect((await adminMonthlySales.drawnBars()).length > 0, 'the report draws bars exactly when the answer has a figure above zero').toBe(figured);
   });
 });

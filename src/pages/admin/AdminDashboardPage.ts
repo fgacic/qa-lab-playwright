@@ -1,7 +1,7 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { AdminTable } from '@components/admin/AdminTable';
 import type { AdminSection } from '@components/Header';
-import { MIN_BAR, measureBars } from '@support/admin-chart';
+import { drawnBars } from '@support/admin-chart';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 import { reportedFailure } from './alerts';
@@ -32,32 +32,15 @@ export class AdminDashboardPage {
     return this.page.getByRole('heading', { name: SECTION_HEADINGS[section], exact: true });
   }
 
-  /**
-   * The heights, in pixels and left to right, of the bars the sales chart has drawn, once its animation has ended. A <canvas>
-   * has nothing to read and the app colours each bar at random, so the picture is measured, not compared: a bar is a run
-   * of non-white pixels at least `MIN_BAR` tall and `MIN_BAR` wide (gridlines and lettering are neither), and the chart is
-   * taken as finished when two reads 250 ms apart agree on the bars and something is drawn at all (axes are drawn even
-   * for a report that is empty or failed, so a blank canvas is a chart that has not started).
-   */
+  /** The heights of the bars the sales chart has drawn, once its animation has ended (`drawnBars` in admin-chart). */
   @step('Measure the bars of the sales chart')
   async drawnBars(): Promise<number[]> {
-    const read = () => this.salesChart.evaluate(measureBars, MIN_BAR);
-    let previous = '';
-    let bars: number[] = [];
-    await expect.poll(async () => {
-      const chart = await read();
-      const key = JSON.stringify(chart);
-      const settled = chart.anyInk && key === previous;
-      previous = key;
-      bars = chart.bars;
-      return settled;
-    }, { message: 'the sales chart finished drawing', intervals: [250] }).toBe(true);
-    return bars;
+    return drawnBars(this.salesChart);
   }
 
   @step('Open the admin dashboard')
   async open(): Promise<void> {
-    await this.shell.gotoAndSettle('/admin/dashboard', 'GET', /^\/invoices$/);
+    await this.shell.gotoAndSettle(ADMIN_SECTION_PATHS.Dashboard, 'GET', /^\/invoices$/);
   }
 
   /** Goes to a back-office address (the dashboard's by default) without waiting for its data: for a visitor who may be turned away before it asks for any. */

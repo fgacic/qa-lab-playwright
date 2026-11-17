@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { AdminListName } from '@pages/admin/admin-lists';
-import { LIST_ANSWERS, PAGED_LISTS, paginated, product } from '@support/admin-payloads';
+import { LIST_ANSWERS, NO_MATCH, PAGED_LISTS, SEARCH_TERM, paginated, product } from '@support/admin-payloads';
 import { appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
@@ -54,6 +54,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
       });
     });
 
+    // The lists below the dashboard that have no search (the orders list, the messages inbox) stop here.
     if (!search) continue;
     const [searchMethod, searchPath] = search;
 
@@ -64,7 +65,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
       test(`a ${name} search with no match empties the table and raises no alert`, async ({ adminList: list }) => {
         await expect(list.table.rows.first(), 'the full list is shown before the search').toBeVisible();
 
-        await list.search.searchFor('no such record');
+        await list.search.searchFor(NO_MATCH);
 
         await expect(list.table.rows).toHaveCount(0);
         await expect(list.table.columnHeader(column)).toBeVisible();
@@ -80,7 +81,7 @@ test.describe('Admin lists on empty and failing APIs (mocked back office)', { ta
         await expect(list.table.rows.first(), 'the full list is shown before the search').toBeVisible();
         const refused = apiMock.waitForResponse(searchMethod, searchPath);
 
-        await list.search.searchFor('anything');
+        await list.search.searchFor(SEARCH_TERM);
         await refused;
 
         await expect(list.failure, 'ADM-18: a failed list search tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });

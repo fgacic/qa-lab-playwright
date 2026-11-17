@@ -24,11 +24,16 @@ export const ADMIN_SECTION_PATHS: Record<AdminSection, string> = {
   Settings: '/admin/settings',
 };
 
+/** The address of each report page, stated once. */
+export const ADMIN_REPORT_PATHS = {
+  statistics: '/admin/reports/statistics',
+  month: '/admin/reports/average-sales-per-month',
+  week: '/admin/reports/average-sales-per-week',
+} as const;
+
 /** Every other address of the back office: the reports, the pages that add a record, and the ones that edit or show one (any id will do for a visitor who is turned away). */
 const OTHER_ADMIN_ADDRESSES = [
-  '/admin/reports/statistics',
-  '/admin/reports/average-sales-per-month',
-  '/admin/reports/average-sales-per-week',
+  ...Object.values(ADMIN_REPORT_PATHS),
   '/admin/products/add',
   '/admin/brands/add',
   '/admin/categories/add',

@@ -1,7 +1,9 @@
 // The arranging helpers the security and admin specs clean up with (src/support/toolshop-api.ts): create a brand and a product, register
 // a customer, find it again by its email, delete all three. Against the self-hosted shop (they write), no browser.
 import { randomUUID } from 'node:crypto';
+import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { apiOnlyTest as test, expect } from '@fixtures';
+import { ToolshopApi } from '@support/toolshop-api';
 import { fakeCustomer } from '@support/test-data';
 
 test.describe('the Toolshop API helpers', { tag: ['@framework', '@self-hosted'] }, () => {
@@ -37,5 +39,13 @@ test.describe('the Toolshop API helpers', { tag: ['@framework', '@self-hosted'] 
     expect(await api.findUserByEmail(token, customer.email), 'the customer is gone').toBeUndefined();
     expect(await api.findProductByName(token, `QaLab Product ${suffix}`), 'the product is gone').toBeUndefined();
     expect((await api.listBrands()).some(({ id }) => id === brand.id), 'the brand is gone').toBe(false);
+  });
+
+  test('a read the shop answers with a 5xx is retried, and the retry is annotated on the test', async ({}, testInfo) => {
+    const answer = (status: number) => ({ status: () => status, ok: () => status < 400, headers: () => ({}), url: () => 'fake://brands', text: async () => '', json: async () => [] }) as unknown as APIResponse;
+    const answers = [answer(500), answer(200)];
+    const api = new ToolshopApi({ get: async () => answers.shift() } as unknown as APIRequestContext);
+    expect(await api.listBrands(), 'the second answer is the one returned').toEqual([]);
+    expect(testInfo.annotations.filter(({ type }) => type === 'api retry'), 'the one retry is on the test').toEqual([{ type: 'api retry', description: 'attempt 1 of 3 failed (answered 500): retried' }]);
   });
 });

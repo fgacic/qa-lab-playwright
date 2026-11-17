@@ -11,6 +11,10 @@ import { httpUrl, httpsUrl } from '@support/urls';
 import { deliveryOrder, fetchOutcome, fetchStatus } from '@support/page-fetch';
 
 const ROOT = join(__dirname, '..', '..');
+const BRANDS = '/brands';
+const CATEGORIES = '/categories';
+// Each `--list` below loads the config in a fresh process: the spawn's own limit, and the budget of a test that runs one (or three) of them.
+const CONFIG_LOAD_MS = 60_000;
 
 test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
   /** A blank same-origin document, so `fetch` to the API is not cross-origin and no real page loads. */
@@ -22,59 +26,59 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
 
   test('expectNoRequest fails on a request sent inside its window', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.use(mock.respond('GET', '/brands', []));
+    await apiMock.use(mock.respond('GET', BRANDS, []));
     await openBlankPage(page);
 
-    const absent = apiMock.expectNoRequest('GET', '/brands', { within: 3_000 });
+    const absent = apiMock.expectNoRequest('GET', BRANDS, { within: 3_000 });
     const rejection = expect(absent).rejects.toThrow(/Expected no GET \/brands within 3000 ms, but one was sent/);
-    await send(page, 'GET', '/brands');
+    await send(page, 'GET', BRANDS);
     await rejection;
   });
 
   test('expectNoRequest fails on a request sent before the call', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.use(mock.respond('GET', '/brands', []));
+    await apiMock.use(mock.respond('GET', BRANDS, []));
     await openBlankPage(page);
-    await send(page, 'GET', '/brands');
+    await send(page, 'GET', BRANDS);
 
-    await expect(apiMock.expectNoRequest('GET', '/brands', { within: 100 })).rejects.toThrow(/already sent/);
+    await expect(apiMock.expectNoRequest('GET', BRANDS, { within: 100 })).rejects.toThrow(/already sent/);
   });
 
   test('expectNoRequest passes when no such request is sent, and ignores other endpoints and methods', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.use(mock.respond('GET', '/brands', []), mock.respond('POST', '/brands', {}, 201));
+    await apiMock.use(mock.respond('GET', BRANDS, []), mock.respond('POST', BRANDS, {}, 201));
     await openBlankPage(page);
-    await send(page, 'POST', '/brands', {});
+    await send(page, 'POST', BRANDS, {});
 
-    await apiMock.expectNoRequest('GET', '/brands', { within: 300 });
+    await apiMock.expectNoRequest('GET', BRANDS, { within: 300 });
   });
 
   test('a sequence answers in the order of asking and repeats its last answer, and a new mock replays it from the start', async ({ page }) => {
-    const sequence = mock.sequence('GET', '/brands', { status: 500, json: { message: 'first' } }, { status: 200, json: [{ id: 'second' }] }, { status: 404, json: { message: 'last' } });
+    const sequence = mock.sequence('GET', BRANDS, { status: 500, json: { message: 'first' } }, { status: 200, json: [{ id: 'second' }] }, { status: 404, json: { message: 'last' } });
     const apiMock = new ApiMock(page);
     await apiMock.use(sequence);
     await openBlankPage(page);
     const statuses: number[] = [];
-    for (let i = 0; i < 5; i++) statuses.push(await send(page, 'GET', '/brands'));
+    for (let i = 0; i < 5; i++) statuses.push(await send(page, 'GET', BRANDS));
     expect(statuses).toEqual([500, 200, 404, 404, 404]);
 
     const again = new ApiMock(page);
     await again.use(sequence);
-    expect(await send(page, 'GET', '/brands'), 'the route itself is untouched: a describe-level sequence starts over in the next test').toBe(500);
+    expect(await send(page, 'GET', BRANDS), 'the route itself is untouched: a describe-level sequence starts over in the next test').toBe(500);
   });
 
   test('a mock of the test overrides a default for the same endpoint, whichever was registered first; a default answers where nothing else does', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.useDefaults(mock.respond('GET', '/brands', [], 200), mock.respond('GET', '/categories', [], 200));
-    await apiMock.use(mock.fail('GET', '/brands', 503));
+    await apiMock.useDefaults(mock.respond('GET', BRANDS, [], 200), mock.respond('GET', CATEGORIES, [], 200));
+    await apiMock.use(mock.fail('GET', BRANDS, 503));
     await openBlankPage(page);
-    expect(await send(page, 'GET', '/brands'), 'the test mock wins').toBe(503);
-    expect(await send(page, 'GET', '/categories'), 'the default answers').toBe(200);
+    expect(await send(page, 'GET', BRANDS), 'the test mock wins').toBe(503);
+    expect(await send(page, 'GET', CATEGORIES), 'the default answers').toBe(200);
 
     const later = new ApiMock(page);
-    await later.use(mock.fail('GET', '/categories', 502));
-    await later.useDefaults(mock.respond('GET', '/categories', [], 200));
-    expect(await send(page, 'GET', '/categories'), 'a default registered after a mock still loses to it').toBe(502);
+    await later.use(mock.fail('GET', CATEGORIES, 502));
+    await later.useDefaults(mock.respond('GET', CATEGORIES, [], 200));
+    expect(await send(page, 'GET', CATEGORIES), 'a default registered after a mock still loses to it').toBe(502);
   });
 
   test('a path pattern with the /g flag is refused up front, by every method that takes one', async ({ page }) => {
@@ -86,28 +90,28 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
 
   test('waitForRequest and waitForResponse answer to the API only, not to another origin with the same path', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.use(mock.respond('GET', '/brands', []));
+    await apiMock.use(mock.respond('GET', BRANDS, []));
     // The same path on the shop's own origin, outside the API prefix: not an API request.
     await page.route(`${BASE_URL}/brands`, (route) => route.fulfill({ contentType: 'text/plain', body: 'not the API' }));
     await openBlankPage(page);
 
-    const request = apiMock.waitForRequest('GET', '/brands', { timeout: 1_500 });
-    const response = apiMock.waitForResponse('GET', '/brands', () => true, { timeout: 1_500 });
+    const request = apiMock.waitForRequest('GET', BRANDS, { timeout: 1_500 });
+    const response = apiMock.waitForResponse('GET', BRANDS, () => true, { timeout: 1_500 });
     const settled = Promise.allSettled([request, response]);
     await fetchStatus(page, `${BASE_URL}/brands`);
     expect((await settled).map((r) => r.status), 'a request outside the API prefix must not satisfy either wait').toEqual(['rejected', 'rejected']);
 
-    const real = apiMock.waitForRequest('GET', '/brands');
-    await send(page, 'GET', '/brands');
+    const real = apiMock.waitForRequest('GET', BRANDS);
+    await send(page, 'GET', BRANDS);
     expect((await real).url()).toBe(`${API_URL}/brands`);
   });
 
   test('the write guard answers an unmocked write with 418 and records it, but lets mocked writes through', async ({ page }) => {
     const apiMock = new ApiMock(page, 0, true);
-    await apiMock.use(mock.respond('POST', '/brands', { id: 'mocked' }, 201));
+    await apiMock.use(mock.respond('POST', BRANDS, { id: 'mocked' }, 201));
     await openBlankPage(page);
 
-    expect(await send(page, 'POST', '/brands', {}), 'a mocked write is answered by its mock').toBe(201);
+    expect(await send(page, 'POST', BRANDS, {}), 'a mocked write is answered by its mock').toBe(201);
     expect(await send(page, 'PUT', '/brands/1', {}), 'an unmocked write is refused').toBe(418);
     expect(await send(page, 'DELETE', '/brands/1'), 'every write method is guarded').toBe(418);
     expect(apiMock.blockedWrites).toEqual(['PUT /brands/1', 'DELETE /brands/1']);
@@ -124,18 +128,18 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
 
   test('mark() and since count only the requests after the mark, for expectNoRequest and requestsTo alike', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.use(mock.respond('GET', '/brands', []));
+    await apiMock.use(mock.respond('GET', BRANDS, []));
     await openBlankPage(page);
-    await send(page, 'GET', '/brands'); // the page's own load
+    await send(page, 'GET', BRANDS); // the page's own load
 
     const before = await apiMock.mark();
 
-    expect(apiMock.requestsTo('GET', '/brands'), 'without a mark the earlier request counts').toBe(1);
-    expect(apiMock.requestsTo('GET', '/brands', { since: before })).toBe(0);
-    await apiMock.expectNoRequest('GET', '/brands', { within: 100, since: before });
-    await send(page, 'GET', '/brands');
-    expect(apiMock.requestsTo('GET', '/brands', { since: before })).toBe(1);
-    await expect(apiMock.expectNoRequest('GET', '/brands', { within: 100, since: before })).rejects.toThrow(/already sent/);
+    expect(apiMock.requestsTo('GET', BRANDS), 'without a mark the earlier request counts').toBe(1);
+    expect(apiMock.requestsTo('GET', BRANDS, { since: before })).toBe(0);
+    await apiMock.expectNoRequest('GET', BRANDS, { within: 100, since: before });
+    await send(page, 'GET', BRANDS);
+    expect(apiMock.requestsTo('GET', BRANDS, { since: before })).toBe(1);
+    await expect(apiMock.expectNoRequest('GET', BRANDS, { within: 100, since: before })).rejects.toThrow(/already sent/);
   });
 
   test('a delay predicate that throws is recorded for the page fixture to fail on, and does not hold the request', async ({ page }) => {
@@ -152,7 +156,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
 
   test('a CORS preflight is answered by the mock for a mocked path, and goes to the real API for any other', async ({ page }) => {
     const apiMock = new ApiMock(page);
-    await apiMock.use(mock.respond('GET', '/brands', [{ id: 'mocked' }]));
+    await apiMock.use(mock.respond('GET', BRANDS, [{ id: 'mocked' }]));
     // Another origin than the API's (127.0.0.1 for localhost), so the browser really sends a preflight for the custom header.
     const other = new URL(BASE_URL);
     other.hostname = '127.0.0.1';
@@ -163,7 +167,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     const real = await fetchOutcome(page, `${API_URL}/categories/tree`, 'GET', { 'x-qa-lab': '1' });
 
     expect(mocked, 'the preflight of a mocked path is answered, and then the mocked GET').toBe(200);
-    expect(apiMock.requestsTo('GET', '/brands')).toBe(1);
+    expect(apiMock.requestsTo('GET', BRANDS)).toBe(1);
     // No mock serves it, so the mock layer must not paper over the real API's own preflight answer: the self-hosted API does
     // not allow another origin to send this header, and the browser refuses. A canned mock answer would have let it through.
     expect(real, "the real API's refusal shows through").toBe('TypeError');
@@ -221,8 +225,9 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
 
 test.describe('the target configuration', { tag: ['@framework'] }, () => {
   /** `playwright test --list` loads the config in a fresh process with this environment, which is where env.ts runs. */
+  test.describe.configure({ timeout: 3 * CONFIG_LOAD_MS + 15_000 }); // the loopback test loads the config three times
   const loadConfig = (env: Record<string, string>) =>
-    spawnSync('npx', ['playwright', 'test', '--list', '--project=framework'], { cwd: ROOT, timeout: 60_000, encoding: 'utf8', env: { ...process.env, ...env } });
+    spawnSync('npx', ['playwright', 'test', '--list', '--project=framework'], { cwd: ROOT, timeout: CONFIG_LOAD_MS, encoding: 'utf8', env: { ...process.env, ...env } });
 
   test('a local target whose BASE_URL and API_URL are on different origins is refused', () => {
     const base = httpUrl('localhost');
@@ -264,7 +269,7 @@ test.describe('the target configuration', { tag: ['@framework'] }, () => {
   });
 
   test('a run that schedules perf next to another project is refused at load time when --reporter replaced the guard', () => {
-    const run = spawnSync('npx', ['playwright', 'test', '--project=perf', '--project=chromium', '--reporter=dot', '--grep=@nothing-has-this-tag'], { cwd: ROOT, timeout: 60_000, encoding: 'utf8', env: process.env });
+    const run = spawnSync('npx', ['playwright', 'test', '--project=perf', '--project=chromium', '--reporter=dot', '--grep=@nothing-has-this-tag'], { cwd: ROOT, timeout: CONFIG_LOAD_MS, encoding: 'utf8', env: process.env });
     expect(run.status).not.toBe(0);
     expect(`${run.stdout}${run.stderr}`).toMatch(/perf budgets must run alone/);
   });

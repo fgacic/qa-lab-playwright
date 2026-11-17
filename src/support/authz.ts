@@ -35,6 +35,15 @@ export const removeLater = ({ request, adminToken, cleanups }: World, path: stri
     if (!response.ok() && response.status() !== 404) throw new Error(`DELETE ${path} answered ${response.status()}`);
   });
 
+/**
+ * Removes every favourite the owner holds, once the test is over (cleanups run last made first, so this runs before the owner's own
+ * removal): an account that still has favourites cannot be deleted.
+ */
+export const removeFavouritesLater = ({ request, cleanups }: World, owner: Pick<Account, 'token'>) =>
+  cleanups.push(async () => {
+    for (const { id } of (await (await call(request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[]) await call(request, 'DELETE', `/favorites/${id}`, { token: owner.token });
+  });
+
 /** A customer registered for this test and signed in (somebody who is neither anonymous nor an admin), removed afterwards. */
 export interface Account {
   id: string;

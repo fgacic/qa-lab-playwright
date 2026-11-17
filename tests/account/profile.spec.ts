@@ -13,6 +13,10 @@ const SERVER_ERROR = 'Server Error';
 const RENAMED = 'Renamed';
 const MOVED = { country: 'BE', postal_code: '9000', state: 'Oost-Vlaanderen' };
 const NOT_A_PHONE = 'abc';
+/** What the shop's refusals say, typed once for the mock and for the assertion. */
+const FIRST_NAME_TOO_LONG = 'The first name field must not be greater than 40 characters.';
+const CONFIRMATION_MISMATCH = 'The new password field confirmation does not match.';
+const WRONG_CURRENT_PASSWORD = 'Your current password does not matches with the password.';
 
 /** The profile page with a mocked session: a fake token and mocked account endpoints, so it runs anywhere without an account. */
 test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
@@ -42,7 +46,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     await expect(profilePage.qrCode).toBeAttached();
     await expect.poll(() => apiMock.answers, { message: 'POST /totp/setup was answered' }).toContainEqual({ pathname: '/totp/setup', outcome: 200 });
 
-    expect(await consoleGuard.logged(/angularx-qrcode/), 'BUG-37: the QR code widget logged an error').toEqual([]);
+    await expect(consoleGuard.expectNoneLogged(/angularx-qrcode/), 'BUG-37: the QR code widget logged an error').resolves.toBeUndefined();
   });
 
   test('saving sends the edited profile', async ({ profilePage, apiMock }) => {
@@ -52,7 +56,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     await profilePage.update();
 
     expect((await saved).postDataJSON()).toMatchObject({ first_name: RENAMED, last_name: fakeUser.last_name });
-    await expect(profilePage.alerts.filter({ hasText: PROFILE_SAVED })).toBeVisible();
+    await expect(profilePage.alert(PROFILE_SAVED)).toBeVisible();
   });
 
   test('saving sends the edited address', async ({ profilePage, apiMock }) => {
@@ -64,7 +68,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     await profilePage.update();
 
     expect((await saved).postDataJSON().address).toEqual({ ...fakeUser.address, ...MOVED });
-    await expect(profilePage.alerts.filter({ hasText: PROFILE_SAVED })).toBeVisible();
+    await expect(profilePage.alert(PROFILE_SAVED)).toBeVisible();
   });
 
   test('an empty postal code is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
@@ -72,7 +76,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alerts.filter({ hasText: FORM_INVALID })).toBeVisible();
+    await expect(profilePage.alert(FORM_INVALID)).toBeVisible();
     await apiMock.expectNoRequest('PUT', PROFILE_PATH);
   });
 
@@ -84,9 +88,9 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     await answered;
     // Precondition, true whether or not the bug is fixed: the page took the answer in and shows it. The handler throws before the alert is
     // drawn (the throw is logged first, the alert follows on the next render), so once the alert is up the throw is already in the log.
-    await expect(profilePage.alerts.filter({ hasText: PASSWORD_SAVED })).toBeVisible();
+    await expect(profilePage.alert(PASSWORD_SAVED)).toBeVisible();
 
-    expect(await consoleGuard.logged(/TypeError:[^\n]*\bvalue\b/), 'BUG-47: the answer to a password change threw').toEqual([]);
+    await expect(consoleGuard.expectNoneLogged(/TypeError:[^\n]*\bvalue\b/), 'BUG-47: the answer to a password change threw').resolves.toBeUndefined();
   });
 
   test('changing the password sends the current and the new one', async ({ profilePage, apiMock }) => {
@@ -99,7 +103,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
       new_password: NEW_PASSWORD,
       new_password_confirmation: NEW_PASSWORD,
     });
-    await expect(profilePage.alerts.filter({ hasText: PASSWORD_SAVED })).toBeVisible();
+    await expect(profilePage.alert(PASSWORD_SAVED)).toBeVisible();
   });
 
   test('an empty password change is stopped by the form', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
@@ -112,22 +116,22 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     // The defect itself: the request leaves. Checked first, so a form that validates and a form that merely words the refusal differ.
     await expect(apiMock.expectNoRequest('POST', '/users/change-password', { since: before }), 'BUG-26: no request is sent').resolves.toBeUndefined();
     // And, once nothing is sent, the form says what is missing (the wording is a separate matter from the request).
-    await expect(profilePage.alerts.filter({ hasText: /required/i }).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: BUG_TIMEOUT });
+    await expect(profilePage.alert(/required/i).first(), 'BUG-26: the form names the missing fields').toBeVisible({ timeout: BUG_TIMEOUT });
   });
 
   test('a confirmation that differs from the new password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
     // The real API answers 422 with this body (the form does not compare the two fields itself).
     await apiMock.use(mock.fail('POST', '/users/change-password', 422, {
-      message: 'The new password field confirmation does not match.',
-      errors: { new_password: ['The new password field confirmation does not match.'] },
+      message: CONFIRMATION_MISMATCH,
+      errors: { new_password: [CONFIRMATION_MISMATCH] },
     }));
     const sent = apiMock.waitForRequest('POST', '/users/change-password');
 
     await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD, WRONG_PASSWORD);
 
     expect((await sent).postDataJSON()).toMatchObject({ new_password: NEW_PASSWORD, new_password_confirmation: WRONG_PASSWORD });
-    await expect(profilePage.alerts.filter({ hasText: 'The new password field confirmation does not match.' })).toBeVisible();
-    await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    await expect(profilePage.alert(CONFIRMATION_MISMATCH)).toBeVisible();
+    await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 
   test('an empty first name is stopped by the form', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
@@ -135,7 +139,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alerts.filter({ hasText: FORM_INVALID })).toBeVisible();
+    await expect(profilePage.alert(FORM_INVALID)).toBeVisible();
     await apiMock.expectNoRequest('PUT', PROFILE_PATH);
   });
 
@@ -145,17 +149,17 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alerts.filter({ hasText: 'Please enter a valid phone number (digits, spaces and ( ) + - only).' })).toBeVisible();
+    await expect(profilePage.alert('Please enter a valid phone number (digits, spaces and ( ) + - only).')).toBeVisible();
     await apiMock.expectNoRequest('PUT', PROFILE_PATH);
   });
 
   test('a profile the API rejects shows its reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
-    await apiMock.use(mock.fail('PUT', PROFILE_PATH, 422, { first_name: ['The first name field must not be greater than 40 characters.'] }));
+    await apiMock.use(mock.fail('PUT', PROFILE_PATH, 422, { first_name: [FIRST_NAME_TOO_LONG] }));
 
     await profilePage.update();
 
-    await expect(profilePage.alerts.filter({ hasText: 'The first name field must not be greater than 40 characters.' })).toBeVisible();
-    await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    await expect(profilePage.alert(FIRST_NAME_TOO_LONG)).toBeVisible();
+    await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 
   // The two ways a request fails besides a refusal with a reason: the API answers 500, or is not reached at all.
@@ -164,8 +168,8 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alerts.filter({ hasText: SERVER_ERROR })).toBeVisible();
-    await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    await expect(profilePage.alert(SERVER_ERROR)).toBeVisible();
+    await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 
   test('saving the profile when the API cannot be reached shows the failure, not a success', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
@@ -175,8 +179,8 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     await profilePage.update();
     await attempted;
 
-    await expect(profilePage.alerts.filter({ hasText: 'An unexpected error occurred.' })).toBeVisible();
-    await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    await expect(profilePage.alert('An unexpected error occurred.')).toBeVisible();
+    await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 
   test('changing the password when the API answers 500 shows the failure, not a success', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
@@ -184,8 +188,8 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.changePassword(OLD_PASSWORD, NEW_PASSWORD);
 
-    await expect(profilePage.alerts.filter({ hasText: SERVER_ERROR })).toBeVisible();
-    await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    await expect(profilePage.alert(SERVER_ERROR)).toBeVisible();
+    await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 
   test('changing the password when the API cannot be reached tells the customer', { tag: ['@negative', '@bug'] }, async ({ profilePage, apiMock }) => {
@@ -202,11 +206,11 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
   test('a wrong current password shows the API reason', { tag: ['@negative'] }, async ({ profilePage, apiMock }) => {
     // The real API answers 400 with this body.
-    await apiMock.use(mock.fail('POST', '/users/change-password', 400, { success: false, message: 'Your current password does not matches with the password.' }));
+    await apiMock.use(mock.fail('POST', '/users/change-password', 400, { success: false, message: WRONG_CURRENT_PASSWORD }));
 
     await profilePage.changePassword(WRONG_PASSWORD, NEW_PASSWORD);
 
-    await expect(profilePage.alerts.filter({ hasText: 'Your current password does not matches with the password.' })).toBeVisible();
-    await expect(profilePage.alerts.filter({ hasText: SAVED_NOTICE })).toHaveCount(0);
+    await expect(profilePage.alert(WRONG_CURRENT_PASSWORD)).toBeVisible();
+    await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 });

@@ -17,7 +17,10 @@ const SPANNING_TERM = 'er';
 type Endpoint = '/products/search' | '/products';
 
 test.describe('A search that spans several pages', { tag: ['@api'] }, () => {
-  /** One page of the search, as the shop asks for it. */
+  /**
+   * One page of the search, as the shop asks for it. Sent raw, not through the `api` client: the client throws on any non-2xx answer
+   * and sends the shop's own first-page shape only, while this spec reads the answer of every page and endpoint itself.
+   */
   const pageOf = async (request: APIRequestContext, endpoint: Endpoint, page: number) => {
     const response = await request.fetch(`${API_URL}${endpoint}`, { method: 'QUERY', data: { q: SPANNING_TERM, page: String(page) } });
     return { ok: response.ok(), json: (await response.json()) as ProductPage };

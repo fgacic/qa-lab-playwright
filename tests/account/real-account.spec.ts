@@ -26,7 +26,8 @@ test.describe('Real account', { tag: ['@account'] }, () => {
       await expect(account.header.userMenu).toHaveText(`${customer.firstName} ${customer.lastName}`);
     });
 
-    test('registering the same email twice is refused', { tag: ['@negative'] }, async ({ api, registerPage }) => {
+    test('registering the same email twice is refused', { tag: ['@negative'] }, async ({ api, registerPage, consoleGuard }) => {
+      consoleGuard.allowStatus(409, '/users/register', 'the test registers an email the shop already has, and the browser logs the 409 it is refused with');
       const customer = fakeCustomer();
       await api.registerCustomer(customer);
 

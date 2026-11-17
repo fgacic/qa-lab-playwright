@@ -1,8 +1,9 @@
 // The console guard (src/support/console-guard.ts): which errors the browser logs or throws are allowed, and which fail the test. The
 // teardown that applies it is probed in fixture-teardown.spec.ts. No browser: pure functions.
-import { expect, test } from '@playwright/test';
-import { describeError, isApiResourceFailure, PINNED_DEFECT_LOGS, SUITE_WIDE_ALLOWANCES, unexpectedErrors } from '@support/console-guard';
-import { API_URL } from '@support/env';
+import { expect, test, type Page } from '@playwright/test';
+import { test as fixtureTest } from '@fixtures';
+import { allowancesFor, describeError, isApiResourceFailure, PINNED_DEFECT_LOGS, SUITE_WIDE_ALLOWANCES, unexpectedErrors, type ExpectedStatus } from '@support/console-guard';
+import { API_URL, BASE_URL } from '@support/env';
 import { httpUrl } from '@support/urls';
 import { LOGGED_FAILED_REQUEST } from '@pages/admin/alerts';
 
@@ -25,9 +26,14 @@ test.describe('the console guard', { tag: ['@framework'] }, () => {
     const assetFailure = logged('Failed to load resource: net::ERR_FAILED', httpUrl('localhost', '/assets/logo.png'));
     const got = (status: number, path: string) => [answer('GET', path, status)];
     expect(isApiResourceFailure(failedResource(401, '/users/me'), [], got(401, '/users/me'))).toBe(true);
-    expect(isApiResourceFailure(failedResource(404, '/products/0000'), [], got(404, '/products/0000'))).toBe(true);
-    expect(isApiResourceFailure(failedResource(422, '/carts/1/product/quantity'), [], got(422, '/carts/1/product/quantity')), 'the shop refusing invalid input').toBe(true);
-    expect(isApiResourceFailure(failedResource(409, '/brands'), [], got(409, '/brands')), 'the shop refusing a conflicting one').toBe(true);
+    const optedIn = (status: number, path: ExpectedStatus['path']): ExpectedStatus[] => [{ status, path, reason: 'the test provokes it' }];
+    expect(isApiResourceFailure(failedResource(404, '/products/0000'), [], got(404, '/products/0000')), 'a 404 nobody opted into').toBe(false);
+    expect(isApiResourceFailure(failedResource(404, '/products/0000'), [], got(404, '/products/0000'), optedIn(404, /^\/products\//))).toBe(true);
+    expect(isApiResourceFailure(failedResource(422, '/carts/1/product/quantity'), [], got(422, '/carts/1/product/quantity'), optedIn(422, '/carts/1/product/quantity')), 'the shop refusing invalid input').toBe(true);
+    expect(isApiResourceFailure(failedResource(409, '/brands'), [], got(409, '/brands'), optedIn(409, '/brands')), 'the shop refusing a conflicting one').toBe(true);
+    expect(isApiResourceFailure(failedResource(409, '/brands'), [], got(409, '/brands'), optedIn(409, '/categories')), 'opted in for another path').toBe(false);
+    expect(isApiResourceFailure(failedResource(409, '/brands'), [], got(409, '/brands'), optedIn(422, '/brands')), 'opted in for another status').toBe(false);
+    expect(isApiResourceFailure(failedResource(404, '/products/0000'), [], [], optedIn(404, /^\/products\//)), 'opted in, but the shop never answered that').toBe(false);
     expect(isApiResourceFailure(failedResource(404, '/products/0000')), 'an expected status with no such answer received').toBe(false);
     expect(isApiResourceFailure(failedResource(404, '/products/0000'), [], got(404, '/brands')), 'the answer was for another path').toBe(false);
     expect(isApiResourceFailure(failedResource(404, '/products/0000'), [], got(200, '/products/0000')), 'the path answered with another status').toBe(false);
@@ -52,7 +58,11 @@ test.describe('the console guard', { tag: ['@framework'] }, () => {
     const chromium = logged('ERROR {message: Unauthorized}');
     const unknownProduct = { ...logged('ERROR yi'), route: '/product/0000', args: `ERROR {"status":404,"statusText":"Not Found","url":"${API('/products/0000')}","name":"HttpErrorResponse"}` };
     const cancelled = logged('ERROR XMLHttpRequestProgressEvent');
-    expect(unexpectedErrors([me401, failedResource(401, '/users/me'), unauthorizedLog, chromium, unknownProduct, cancelled], SUITE_WIDE_ALLOWANCES, [], [answer('GET', '/users/me', 401), answer('GET', '/products/0000', 404)])).toEqual([]);
+    const answers = [answer('GET', '/users/me', 401), answer('GET', '/products/0000', 404)];
+    const notCancelled = [me401, failedResource(401, '/users/me'), unauthorizedLog, chromium, unknownProduct];
+    expect(unexpectedErrors([...notCancelled, cancelled], allowancesFor('webkit'), [], answers)).toEqual([]);
+    expect(unexpectedErrors([...notCancelled, cancelled], allowancesFor('chromium'), [], answers), 'the cancelled XHR is allowed in WebKit only').toEqual([cancelled]);
+    expect(unexpectedErrors([...notCancelled, cancelled], allowancesFor('firefox'), [], answers)).toEqual([cancelled]);
   });
 
   test('an "Unauthorized" log needs a 401 of GET /users/me the browser received, in any engine, and as many logs as subscribers echo it', () => {
@@ -147,5 +157,34 @@ test.describe('the console guard', { tag: ['@framework'] }, () => {
 
   test('an error is described on one line, with its URL', () => {
     expect(describeError(logged('first line\nsecond', httpUrl('x', '/y')))).toBe(`[console] first line (${httpUrl('x', '/y')})`);
+  });
+});
+
+// The window of `consoleGuard.expectNoneLogged` (fixtures/console-guard.ts), in a real page: a page of the probe's own route logs after a delay.
+fixtureTest.describe('consoleGuard.expectNoneLogged', { tag: ['@framework'] }, () => {
+  const PROBE = `${BASE_URL}/__probe-console`;
+  const LOGS = /the probe logged/;
+  const open = async (page: Page, logAfterMs: number) => {
+    await page.route(PROBE, (route) => route.fulfill({ contentType: 'text/html', body: `<!doctype html><title>probe</title><script>setTimeout(() => console.error('the probe logged this'), ${logAfterMs})</script>` }));
+    await page.goto(PROBE);
+  };
+
+  fixtureTest('rejects an error logged inside its window', async ({ page, consoleGuard }) => {
+    consoleGuard.allow(LOGS, 'provoked on purpose');
+    await open(page, 200);
+    await expect(consoleGuard.expectNoneLogged(LOGS, { within: 5_000 })).rejects.toThrow(/within 5000 ms, but one was logged/);
+  });
+
+  fixtureTest('rejects an error logged before the call', async ({ page, consoleGuard }) => {
+    consoleGuard.allow(LOGS, 'provoked on purpose');
+    await open(page, 0);
+    await expect.poll(() => consoleGuard.logged(LOGS)).toHaveLength(1);
+    await expect(consoleGuard.expectNoneLogged(LOGS, { within: 100 })).rejects.toThrow(/already logged/);
+  });
+
+  fixtureTest('passes when nothing matching is logged in its window, and ignores other errors', async ({ page, consoleGuard }) => {
+    consoleGuard.allow(LOGS, 'provoked on purpose');
+    await open(page, 200);
+    await expect(consoleGuard.expectNoneLogged(/a line nobody logs/, { within: 600 })).resolves.toBeUndefined();
   });
 });

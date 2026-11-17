@@ -69,7 +69,7 @@ export interface PageFixtures {
    * Page objects that are not opened yet, for journeys that move between areas (back office,
    * then shop): the test opens them when the story gets there.
    */
-  shop: { home: HomePage; contact: ContactPage; login: LoginPage; register: RegisterPage; appShell: AppShell };
+  shop: { product: ProductPage; home: HomePage; contact: ContactPage; login: LoginPage; register: RegisterPage; appShell: AppShell };
 }
 
 export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions & PageFixtures>({
@@ -153,6 +153,7 @@ export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions 
   },
   shop: async ({ page }, use) =>
     use({
+      product: new ProductPage(page),
       home: new HomePage(page),
       contact: new ContactPage(page),
       login: new LoginPage(page),

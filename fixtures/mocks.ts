@@ -38,7 +38,9 @@ export const test = base.extend<MockFixtures>({
   },
 
   apiMock: async ({ page }, use) => {
-    await use(mockOf.get(page)!);
+    const installed = mockOf.get(page);
+    if (!installed) throw new Error('apiMock was requested before the page fixture installed its mock layer');
+    await use(installed);
   },
 });
 

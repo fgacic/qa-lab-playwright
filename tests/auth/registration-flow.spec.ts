@@ -10,6 +10,8 @@ import { fakeCustomer } from '@support/test-data';
  * login.spec.ts). The same journey against the real API is tests/account/real-account.spec.ts.
  */
 test.describe('Registration flow (mocked auth API)', { tag: ['@flow', '@mocked'] }, () => {
+  // Built once for the describe because the mocks below echo it back as the registered account; the block holds a single test, so a retry
+  // re-registers the same fake customer against mocks that carry no state. A second test here must build its own customer.
   const customer = fakeCustomer();
   const me = { ...fakeUser, first_name: customer.firstName, last_name: customer.lastName, email: customer.email };
 

@@ -9,6 +9,10 @@ const NEW_CUSTOMER_ID = '01QALABNEWCUSTOMER0000000';
 const COUNTRY = 'NL';
 const POSTCODE = '1234 AB';
 const HOUSE_NUMBER = '1';
+/** The address the mocked postcode lookup answers with, and the three fields the page fills in from it. */
+const LOOKUP = { street: 'Mockstraat', city: 'Mockstad', state: 'Mockland' };
+/** The minimum length the page's password rules list (BUG-31 is about the validation message disagreeing with it). */
+const LISTED_MINIMUM = 8;
 
 /**
  * Nothing here creates a real account. Submissions with valid data are answered by a mocked
@@ -40,7 +44,7 @@ test.describe('Registration form', () => {
     await registerPage.submit();
 
     for (const [field, message] of Object.entries(required)) {
-      await expect(registerPage.fields[field as keyof typeof required].error, field).toHaveText(message);
+      await expect.soft(registerPage.fields[field as keyof typeof required].error, field).toHaveText(message);
     }
     await apiMock.expectNoRequest('POST', '/users/register');
   });
@@ -78,7 +82,7 @@ test.describe('Registration form', () => {
 
   test('the form lists the password rules', async ({ registerPage }) => {
     await expect(registerPage.passwordRules).toHaveText([
-      'Be at least 8 characters long',
+      `Be at least ${LISTED_MINIMUM} characters long`,
       'Contain both uppercase and lowercase letters',
       'Include at least one number',
       'Have at least one special symbol (e.g., @, #, $, etc.)',
@@ -103,17 +107,14 @@ test.describe('Registration form', () => {
     await apiMock.blockUnmockedWrites();
     await registerPage.password.input.fill('a');
     await registerPage.submit();
-    // Both statements exist, whichever number a fix settles on.
-    await expect(registerPage.passwordRules.first()).toContainText(/\d+ characters/);
+    // The rules list the minimum (the 'lists the password rules' test pins it), so the precondition is that the message names a length too.
+    await expect(registerPage.passwordRules.first()).toContainText(`${LISTED_MINIMUM} characters`);
     await expect(registerPage.password.error).toContainText(/\d+ characters/);
-    // The rule is static text that the assertion above has just waited for, so this single read cannot race.
-    const rule = await registerPage.passwordRules.first().innerText();
-    const listedMinimum = /(\d+) characters/.exec(rule)?.[1];
 
-    await expect(registerPage.password.error, `BUG-31: the message names the minimum the rules list ("${rule}")`).toContainText(new RegExp(`\\b${listedMinimum} characters`), { timeout: BUG_TIMEOUT });
+    await expect(registerPage.password.error, `BUG-31: the message names the minimum the rules list (${LISTED_MINIMUM})`).toContainText(new RegExp(`\\b${LISTED_MINIMUM} characters`), { timeout: BUG_TIMEOUT });
   });
 
-  // The minimum the page lists is 8 (BUG-31 is about the validation message saying 6). Probed: the form really enforces 8, so the
+  // The minimum the page lists is LISTED_MINIMUM, 8 (BUG-31 is about the validation message saying 6). Probed: the form really enforces 8, so the
   // pairs are 6 against 8 (the number the message names) and 7 against 8 (the number the rules list). A password is `Ab1!` plus filler,
   // so only its length changes between a pair.
   const passwordOfLength = (length: number) => `Ab1!${'x'.repeat(length - 4)}`;
@@ -131,17 +132,35 @@ test.describe('Registration form', () => {
     });
   }
 
+  // The other three rules the page lists, one missing at a time: each password is long enough, so only the missing rule can refuse it.
+  const missingRule = [
+    { rule: 'a digit', password: 'Abcdefg!' },
+    { rule: 'an uppercase letter', password: 'abcdefg1!' },
+    { rule: 'a special symbol', password: 'Abcdefg1' },
+  ];
+  for (const { rule, password } of missingRule) {
+    test(`a password without ${rule} is rejected by the form`, { tag: ['@negative'] }, async ({ registerPage, apiMock }) => {
+      await apiMock.blockUnmockedWrites();
+      await registerPage.password.input.fill(password);
+
+      await registerPage.submit();
+
+      await expect(registerPage.password.error).toBeVisible();
+      await apiMock.expectNoRequest('POST', '/users/register');
+    });
+  }
+
   test.describe('when the postcode lookup knows the address', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.respond('GET', '/postcode-lookup', { street: 'Mockstraat', house_number: HOUSE_NUMBER, city: 'Mockstad', state: 'Mockland', country: COUNTRY, postcode: POSTCODE })));
+    test.use(withMocks(mock.respond('GET', '/postcode-lookup', { ...LOOKUP, house_number: HOUSE_NUMBER, country: COUNTRY, postcode: POSTCODE })));
 
     test('street, city and state are filled in', async ({ registerPage }) => {
       await registerPage.country.input.selectOption(COUNTRY);
       await registerPage.postalCode.input.fill(POSTCODE);
       await registerPage.houseNumber.input.fill(HOUSE_NUMBER);
 
-      await expect(registerPage.street.input).toHaveValue('Mockstraat');
-      await expect(registerPage.city.input).toHaveValue('Mockstad');
-      await expect(registerPage.state.input).toHaveValue('Mockland');
+      await expect(registerPage.street.input).toHaveValue(LOOKUP.street);
+      await expect(registerPage.city.input).toHaveValue(LOOKUP.city);
+      await expect(registerPage.state.input).toHaveValue(LOOKUP.state);
     });
   });
 

@@ -4,16 +4,12 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { emptyCartMock } from '@fixtures/mocks';
 import { twoProductCart } from '@fixtures/pages';
 import { allowLoggedFailure } from '@pages/admin/alerts';
+import { CART, REMOVE_LINE, SAVE_QUANTITY } from '@support/cart-routes';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** The units a cart holds in all: what the header link counts. */
 const unitsIn = (items: { quantity: number }[]) => items.reduce((sum, { quantity }) => sum + quantity, 0);
-
-/** The request that saves a quantity, and the one that removes a line. */
-const SAVE_QUANTITY = /^\/carts\/[^/]+\/product\/quantity$/;
-const REMOVE_LINE = /^\/carts\/[^/]+\/product\/[^/]+$/;
-const CART = /^\/carts\/[^/]+$/;
 
 /** The quantities the specs type, and the figures that follow from them (the cart's own limit is 99). */
 const NEW_QUANTITY = 4;
@@ -23,6 +19,15 @@ const CORRECTED_FRACTION = 2;
 const ABOVE_LIMIT = 150;
 const QUANTITY_LIMIT = 99;
 const CORRECTED_MINIMUM = 1;
+
+/** The mocked products of the discount specs, named once: the cart is built from them and its rows are found by them. */
+const ECO_SAW = 'QA Lab Eco Saw';
+const RENTAL_DRILL = 'QA Lab Rental Drill';
+const HAMMER = 'QA Lab Hammer';
+
+/** The two adds of the same product: the first from the page's default quantity, the second typed. */
+const FIRST_ADD_QUANTITY = 1;
+const SECOND_ADD_QUANTITY = 2;
 
 /**
  * A cart with fixed prices, answered by a mock, for the discount specs. The expected figures are
@@ -117,7 +122,8 @@ test.describe('Cart', () => {
   });
 
   // A quantity the shop corrects to 1 (the product page does the same): shown corrected and saved corrected.
-  for (const { typed, label } of [{ typed: 0, label: '0' }, { typed: -1, label: '-1' }, { typed: '', label: 'nothing' }]) {
+  for (const typed of [0, -1, '']) {
+    const label = typed === '' ? 'nothing' : String(typed);
     test(`a quantity of ${label} is corrected to ${CORRECTED_MINIMUM}, also in the saved cart`, { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
       const [{ product }] = cartItems;
 
@@ -130,7 +136,8 @@ test.describe('Cart', () => {
     });
   }
 
-  test('a fractional quantity is corrected to a whole number, also in the saved cart', { tag: ['@negative', '@bug'] }, async ({ checkout, cartItems }) => {
+  test('a fractional quantity is corrected to a whole number, also in the saved cart', { tag: ['@negative', '@bug'] }, async ({ checkout, cartItems, consoleGuard }) => {
+    consoleGuard.allowStatus(422, /^\/carts\/[^/]+\/product\/quantity$/, 'the test types a fractional quantity, which the shop refuses with a 422 the browser logs');
     knownBug('BUG-42', 'a quantity of 2.5 in the cart is refused by the shop (422, "must be an integer"), yet the line keeps showing 2.5 and a total for 2.5 items; the product page corrects it to 2.');
     const [{ product }] = cartItems;
     const row = checkout.cart.table.row(product.name);
@@ -207,7 +214,7 @@ test.describe('Cart', () => {
   });
 
   test.describe('with only an eco-friendly product', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(cartOf([{ name: 'QA Lab Eco Saw', price: 80, quantity: 1, eco: true }])));
+    test.use(withMocks(cartOf([{ name: ECO_SAW, price: 80, quantity: 1, eco: true }])));
 
     test('a 5% eco-friendly discount comes off the subtotal', async ({ checkout }) => {
       const { table } = checkout.cart;
@@ -219,15 +226,14 @@ test.describe('Cart', () => {
   });
 
   test('adding the same product twice merges into one line with both quantities, also in the saved cart', async ({ productPage, product, apiMock }) => {
-    const second = 2;
     await productPage.addToCart();
     await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
-    const [saved] = await Promise.all([apiMock.waitForResponse('POST', CART), productPage.addToCart(second)]);
+    const [saved] = await Promise.all([apiMock.waitForResponse('POST', CART), productPage.addToCart(SECOND_ADD_QUANTITY)]);
     expect(saved.response.status(), 'the shop accepts the second add').toBeLessThan(300);
 
     const checkout = await productPage.openCart();
     const row = checkout.cart.table.row(product.name);
-    const units = 1 + second;
+    const units = FIRST_ADD_QUANTITY + SECOND_ADD_QUANTITY;
     await expect(checkout.cart.table.rows).toHaveCount(1);
     await expect(row.quantity).toHaveValue(String(units));
     await checkout.page.reload();
@@ -237,12 +243,12 @@ test.describe('Cart', () => {
   });
 
   test.describe('with a rental and a product', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(cartOf([{ name: 'QA Lab Rental Drill', price: 50, quantity: 1, rental: true }, { name: 'QA Lab Hammer', price: 30, quantity: 1 }], 15)));
+    test.use(withMocks(cartOf([{ name: RENTAL_DRILL, price: 50, quantity: 1, rental: true }, { name: HAMMER, price: 30, quantity: 1 }], 15)));
 
     test('a 15% combination discount applies and the rental is priced per hour', async ({ checkout }) => {
       const { table } = checkout.cart;
 
-      await expect(table.row('QA Lab Rental Drill').root).toContainText(MESSAGES.rentalPerHour);
+      await expect(table.row(RENTAL_DRILL).root).toContainText(MESSAGES.rentalPerHour);
       await expect(table.subtotal).toShowAmount(80);
       await expect(table.discount).toShowAmount(-12);
       await expect(table.total).toShowAmount(68);
@@ -286,7 +292,7 @@ test.describe('Cart', () => {
       // Precondition, true whether or not the bug is fixed: the page has drawn (the step header is there), so the template has run.
       await expect(checkout.wizard.indicator.steps).toHaveCount(CHECKOUT_STEPS.length);
 
-      expect(await consoleGuard.logged(/\bcart_items\b/), 'BUG-38: the checkout threw while it read a missing cart').toEqual([]);
+      await expect(consoleGuard.expectNoneLogged(/\bcart_items\b/), 'BUG-38: the checkout threw while it read a missing cart').resolves.toBeUndefined();
     });
   });
 

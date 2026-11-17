@@ -1,5 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { POSTCODE_LOOKUP_RESULT, postcodeLookupMock } from '@fixtures/mocks';
+import { answerOutOfOrder } from '@support/answer-gate';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
@@ -130,22 +131,11 @@ test.describe('Checkout: billing address step', () => {
     const { billing } = checkout;
     // The answer for the first house number is held back until the one for the second has been
     // served, as a slow network can do; nothing here waits for a fixed time.
-    // This is a route of its own and not `apiMock.delay` on purpose: the two answers differ by the house number in the query, which
-    // a mock answers by method and path only (a sequence would be spent by any stray lookup of a half-filled field), and a delay
-    // is a timer, so it would only make the first answer *probably* later than the second. The release below makes the order exact.
-    let secondServed!: () => void;
-    const secondIsServed = new Promise<void>((resolve) => (secondServed = resolve));
-    await page.route(/\/postcode-lookup/, async (route) => {
-      const house = new URL(route.request().url()).searchParams.get('house_number');
-      // Only the first number's answer waits, and only the second number's answer releases it: any other
-      // lookup (the page may ask while a field is half filled) is answered at once and releases nothing.
-      if (house === RACE.first.houseNumber) {
-        await secondIsServed;
-        return route.fulfill({ json: RACE.first.answer });
-      }
-      if (house !== RACE.second.houseNumber) return route.fulfill({ json: { ...POSTCODE_LOOKUP_RESULT, house_number: house } });
-      await route.fulfill({ json: RACE.second.answer });
-      secondServed();
+    await answerOutOfOrder(page, /\/postcode-lookup/, {
+      param: 'house_number',
+      late: { value: RACE.first.houseNumber, json: RACE.first.answer },
+      early: { value: RACE.second.houseNumber, json: RACE.second.answer },
+      otherwise: (house) => ({ ...POSTCODE_LOOKUP_RESULT, house_number: house }),
     });
     const firstAsked = page.waitForRequest(lookupFor(RACE.first.houseNumber));
     const slow = page.waitForResponse(lookupFor(RACE.first.houseNumber));

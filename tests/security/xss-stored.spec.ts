@@ -3,6 +3,7 @@ import { expect, test as base } from '@fixtures';
 import { ProfilePage } from '@pages/account/ProfilePage';
 import { ATTRIBUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { API_URL } from '@support/env';
+import { CONTACT_SUBJECTS } from '@support/payloads';
 import { escapeRegExp } from '@support/regexp';
 import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
 
@@ -25,6 +26,13 @@ const payload = XSS_PAYLOADS['img onerror'];
 const breakout = XSS_PAYLOADS['svg onload, breaking out of an attribute'];
 
 const scriptTag = XSS_PAYLOADS['script tag'];
+
+/** The subject both contact tests send: the form picks it by its label, the API takes its slug (the same subject, named twice). */
+const SUBJECT = CONTACT_SUBJECTS[1];
+/** The stem of every record name these tests make (a sender, a brand, a rental): the payload and a unique key follow it, so a test finds its own record. */
+const NAME_STEM = 'Qa Lab';
+/** A last name of 13 characters, within the 20 the field takes: a bare image tag, which `injectedCount` recognises by its `src="x"`. */
+const SHORT_LAST_NAME_PAYLOAD = 'Qa<img src=x>';
 
 /**
  * A key no other test, worker, retry or earlier run shares, short enough for the API's field limits (a first name is capped
@@ -90,9 +98,9 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
   test.use({ adminSession: 'storage-state', xssWatch: true });
 
   test('a contact message is shown to the admin as text', async ({ api, adminMessages, xss }) => {
-    const sender = `Qa Lab ${payload} ${uniqueKey()}`;
+    const sender = `${NAME_STEM} ${payload} ${uniqueKey()}`;
     const message = `${CONTACT_MESSAGE} ${scriptTag} ${breakout}`;
-    await api.sendContactMessage({ name: sender, email: uniqueEmail('xss'), subject: 'webmaster', message });
+    await api.sendContactMessage({ name: sender, email: uniqueEmail('xss'), subject: SUBJECT.slug, message });
 
     await adminMessages.open();
     await expect(adminMessages.table.row(sender)).toBeVisible();
@@ -109,7 +117,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     const from = { ...fakeGuest(), firstName: `Qa${breakout}`, lastName: `Xss${uniqueKey()}` };
     const message = `${CONTACT_MESSAGE} ${scriptTag}`;
     // The visitor is somebody else: their own browser context, not the admin's signed-in one.
-    await visitorContactPage.send({ from, subject: 'Webmaster', message });
+    await visitorContactPage.send({ from, subject: SUBJECT.label, message });
     await expect(visitorContactPage.successMessage).toBeVisible();
 
     await adminMessages.open();
@@ -125,7 +133,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
   });
 
   test('a brand name is shown as text where the admin and the storefront list it', async ({ adminBrands, adminProducts, visitorHomePage, removeBrandLater, xss }) => {
-    const name = `Qa Lab ${payload} ${uniqueKey()}`;
+    const name = `${NAME_STEM} ${payload} ${uniqueKey()}`;
     removeBrandLater(name); // before the save, so the fixture removes it even if the save's answer never arrives
     // Both lists are fixtures here, so the page may be on either: start from the brands.
     await adminBrands.open();
@@ -157,7 +165,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
   // so a name that closes the quote would add an attribute of its own. The product is the test's own (see `makeRental`).
   for (const [kind, { payload: attributePayload }] of Object.entries(ATTRIBUTE_XSS_PAYLOADS)) {
     test(`a product name with ${kind} is shown as text, in the picture attribute that carries it too`, async ({ makeRental, productPage, rentalsPage, xss }) => {
-      const name = `Qa Lab ${attributePayload} ${uniqueKey()}`;
+      const name = `${NAME_STEM} ${attributePayload} ${uniqueKey()}`;
       const id = await makeRental({ name });
 
       await productPage.open(id);
@@ -183,7 +191,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
   for (const [kind, payload] of Object.entries(XSS_PAYLOADS)) {
     test(`a product description with ${kind} is shown as text`, async ({ makeRental, productPage, rentalsPage, xss }) => {
       const description = `Made by the stored-input checks. ${payload} ${uniqueKey()}`;
-      const id = await makeRental({ name: `Qa Lab description ${uniqueKey()}`, description });
+      const id = await makeRental({ name: `${NAME_STEM} description ${uniqueKey()}`, description });
 
       await productPage.open(id);
 
@@ -232,13 +240,13 @@ test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@se
     await expect(profilePage.firstName.input, 'the profile has loaded the account before it is edited').toHaveValue(customer.firstName);
     // A last name may have 20 characters, too few for a payload that calls the hook (the shortest is 29): this one is a bare image
     // tag, which `injectedCount` recognises by its `src="x"` all the same, so a parsed one is still seen. The street takes the full payload.
-    const lastName = 'Qa<img src=x>';
+    const lastName = SHORT_LAST_NAME_PAYLOAD;
     const street = payload;
 
     await profilePage.lastName.input.fill(lastName);
     await profilePage.street.input.fill(street);
     await profilePage.update();
-    await expect(profilePage.alerts.filter({ hasText: 'Your profile is successfully updated!' })).toBeVisible();
+    await expect(profilePage.alert('Your profile is successfully updated!')).toBeVisible();
     // Read back from the server: a fresh load of the page, not the form the payload was typed into.
     await profilePage.open();
 
