@@ -1,7 +1,7 @@
 import { ADMIN_SECTIONS } from '@components/Header';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADMIN_SECTION_PATHS } from '@pages/admin/AdminPages';
-import { allowLoggedFailure, appearsWithin } from '@pages/admin/alerts';
+import { ADMIN_SECTION_PATHS } from '@pages/admin/admin-sections';
+import { appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
 import { ORDER_STATUS, paginated, reports } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
@@ -37,8 +37,7 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
   }
 
   test.describe('with a report that fails', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('GET', '/reports/total-sales-of-years', 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', '/reports/total-sales-of-years', 500)));
 
     // Not the pin (ADM-01 is below): it says what the chart does draw, so a failed report is told from a healthy one by more than "the canvas is there".
     test('the sales chart has no bars', async ({ adminDashboard }) => {
@@ -99,8 +98,7 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
   });
 
   test.describe('when the dashboard data fails to load', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('GET', '/invoices', 500), mock.fail('GET', '/reports/total-sales-of-years', 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', '/invoices', 500), mock.fail('GET', '/reports/total-sales-of-years', 500)));
 
     test('the admin is told the dashboard could not be loaded', async ({ adminDashboard }) => {
       knownBug('ADM-01', 'failed dashboard requests leave an empty chart and table with no message.', { absence: true });

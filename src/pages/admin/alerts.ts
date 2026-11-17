@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import type { ConsoleGuard } from '@fixtures/console-guard';
+import { withMocks, type MockRoute } from '@support/api-mock';
 import { failureFeedback } from '@support/feedback';
 
 /**
@@ -39,6 +40,12 @@ export function allowLoggedFailure(guard: ConsoleGuard): void {
   guard.allow(LOGGED_FAILED_REQUEST, 'the SPA logs the failed request this test mocks', { requiresFailure: true });
 }
 
+/**
+ * `withMocks` for mocks that fail a request, plus the declaration that the SPA logs it (`allowLoggedFailure`, applied by the
+ * `loggedFailure` fixture of fixtures/admin.ts): `test.use(withLoggedFailure(mock.fail('GET', '/brands', 500)))`.
+ */
+export const withLoggedFailure = (...routes: MockRoute[]) => ({ ...withMocks(...routes), loggedFailure: true });
+
 /** The defect ADM-14 in one sentence, shared by its pins (products, brands, categories, users, messages). */
 export const ADM_14 = 'an edit form or detail page whose record fails to load (500) opens empty, with no message: saving it would write blanks.';
 
@@ -47,6 +54,9 @@ export const ADM_12 = 'a brand or category the API refuses to save (409, slug ta
 
 /** The defect ADM-23 in one sentence, shared by its pins (a refused brand or category edit). */
 export const ADM_23 = 'a brand or category edit the API refuses to save (409 slug taken, 500) leaves the form as it was: no message, no "saved", nothing (ADM-12 is the same for a new one).';
+
+/** The defect ADM-25 in one sentence, shared by its pins (ADM-22 is the same for the six lists). */
+export const ADM_25 = 'a back-office page or form whose request is refused with 401 (an expired or revoked session) stays where it is and the admin is not sent to the sign-in page (ADM-22 is the same for the lists).';
 
 /** What the back office says back, word for word: the confirmations and the one validation message the specs look for by name. */
 export const ADMIN_MESSAGES = {

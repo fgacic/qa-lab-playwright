@@ -120,7 +120,9 @@ const projectsToRun = [...new Set(verifyIn.values())];
 
 // A pin scheduled in firefox or webkit needs that browser. CI installs all three before this runs (the verify-bugs job); this is the
 // safety net for a local run: a no-op when present, instead of a run that fails with "Executable doesn't exist" and a misleading verdict.
-for (const browser of new Set(projectsToRun.map((p) => BROWSER_OF[p]).filter(Boolean))) {
+// Never with a stand-in runner (VERIFY_BUGS_PLAYWRIGHT): nothing then opens a browser, and parallel installs fight over apt's dpkg lock (exit 100).
+const browsersNeeded = process.env.VERIFY_BUGS_PLAYWRIGHT ? [] : [...new Set(projectsToRun.map((p) => BROWSER_OF[p]).filter(Boolean))];
+for (const browser of browsersNeeded) {
   console.log(`making sure ${browser} is installed: a known-bug spec is scheduled there`);
   // --with-deps: a bare CI runner lacks the browser's system libraries as well as the browser.
   const install = spawnSync('npx', ['playwright', 'install', '--with-deps', browser], { stdio: 'inherit' });

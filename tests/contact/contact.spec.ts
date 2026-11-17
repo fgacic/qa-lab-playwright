@@ -19,6 +19,7 @@ const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
 /** A message of exactly `length` characters, for the boundary around the form's 50-character minimum. */
 const messageOfLength = (length: number) => 'a'.repeat(length);
 const MIN_MESSAGE_LENGTH = 50;
+const MIN_LENGTH_ERROR = `Message must be minimal ${MIN_MESSAGE_LENGTH} characters`;
 const textFile = (name: string, content: string) => ({ name, mimeType: 'text/plain', buffer: Buffer.from(content) });
 
 test.describe('Contact form', () => {
@@ -55,7 +56,7 @@ test.describe('Contact form', () => {
     test(`a message of ${MIN_MESSAGE_LENGTH - 1} characters is rejected`, { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ message: messageOfLength(MIN_MESSAGE_LENGTH - 1) }));
 
-      await expect(contactPage.message.error).toHaveText('Message must be minimal 50 characters');
+      await expect(contactPage.message.error).toHaveText(MIN_LENGTH_ERROR);
       await apiMock.expectNoRequest('POST', '/messages');
     });
 
@@ -228,7 +229,7 @@ test.describe('Contact form', () => {
 
       await shop.contact.sendAsCustomer(DEFAULT_SUBJECT, messageOfLength(MIN_MESSAGE_LENGTH - 1));
 
-      await expect(shop.contact.message.error).toHaveText('Message must be minimal 50 characters');
+      await expect(shop.contact.message.error).toHaveText(MIN_LENGTH_ERROR);
       await apiMock.expectNoRequest('POST', '/messages', { since: before });
     });
   });

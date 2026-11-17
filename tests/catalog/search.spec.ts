@@ -18,13 +18,17 @@ const SAW_TERM = 'saw';
 const PADDED_TERM = `  ${PLIERS.term}  `;
 
 /**
- * Whether the shop reacts at all: any of `reactions` (each a promise that rejects when its window runs out) comes true.
- * Every one is observed from the moment it is passed in, so the ones that lose the race, or all of them when the action
- * throws, never end as an unhandled rejection. Call it before the action, await the result after.
+ * Resolves when any of `reactions` (each a promise that rejects when its window runs out) comes true, and rejects when none
+ * does (the test asserts it with `expect(...).resolves`, so the failure is an assertion that carries the expectation). Every one is observed from the moment it is passed in,
+ * so the ones that lose the race, or all of them when the action throws, never end as an unhandled rejection. Call it
+ * before the action, await the result after.
  */
-async function reactedWithin(...reactions: Promise<unknown>[]): Promise<boolean> {
-  for (const reaction of reactions) reaction.catch(() => undefined);
-  return Promise.any(reactions).then(() => true, () => false);
+function reactionWithin(...reactions: Promise<unknown>[]): Promise<void> {
+  const ignore = () => undefined;
+  for (const reaction of reactions) reaction.catch(ignore);
+  const reacted = Promise.any(reactions).then(ignore, () => Promise.reject(new Error('no reaction within its window')));
+  reacted.catch(ignore);
+  return reacted;
 }
 
 test.describe('Search', () => {
@@ -173,11 +177,11 @@ test.describe('Search', () => {
       // Either answer is fine: the term goes to the API, or the page says why not.
       const searched = apiMock.waitForRequest('QUERY', '/products/search', { timeout: BUG_TIMEOUT });
       const explained = expect(homePage.search.termExplanation).toBeVisible({ timeout: BUG_TIMEOUT });
-      const reacted = reactedWithin(searched, explained);
+      const reacted = reactionWithin(searched, explained);
       await homePage.search.query.fill(term);
       await homePage.search.submitButton.click();
 
-      expect(await reacted, `${bug.id}: the term is searched, or the shopper is told why not`).toBe(true);
+      await expect(reacted, `${bug.id}: the term is searched, or the shopper is told why not`).resolves.toBeUndefined();
     });
   }
 

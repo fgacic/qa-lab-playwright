@@ -170,7 +170,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     expect((await deleted).response.ok(), 'the real API accepted the delete').toBe(true);
     await expect(adminBrands.alert(ADMIN_MESSAGES.brandDeleted)).toBeVisible();
     await expect(adminBrands.table.row(brand.name)).toHaveCount(0);
-    expect((await api.listBrands()).map(({ id }) => id), 'the real API no longer lists the brand').not.toContain(brand.id);
+    await expect.poll(async () => (await api.listBrands()).map(({ id }) => id), 'the real API no longer lists the brand').not.toContain(brand.id);
   });
 
   // The API does accept this user when it is registered with the fields it names (probed on the self-hosted shop); what it refuses is what the form sends.

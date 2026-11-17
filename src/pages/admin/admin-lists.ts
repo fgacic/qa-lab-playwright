@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { AdminBrandForm, AdminCategoryForm, AdminProductForm, AdminUserForm } from './AdminForms';
-import { AdminMessagePage, AdminOrderPage } from './AdminPages';
+import { AdminMessagePage } from './AdminMessagePage';
+import { AdminOrderPage } from './AdminOrderPage';
 
 /** The six back-office lists: where each lives, what feeds its table, and the page its Add / Edit / Details leads to. */
 export const ADMIN_LISTS = {

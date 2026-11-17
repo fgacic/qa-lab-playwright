@@ -21,6 +21,8 @@ export class ProfilePage {
   readonly confirmNewPassword: Locator;
   readonly changePasswordButton: Locator;
   readonly alerts: Locator;
+  /** The two-factor QR widget: a custom element with no role, name or test id. */
+  readonly qrCode: Locator;
 
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
@@ -41,6 +43,7 @@ export class ProfilePage {
     this.confirmNewPassword = page.getByRole('textbox', { name: 'Confirm New Password' });
     this.changePasswordButton = page.getByRole('button', { name: 'Change Password' });
     this.alerts = page.getByRole('alert');
+    this.qrCode = page.locator('qrcode');
   }
 
   @step('Open my profile')

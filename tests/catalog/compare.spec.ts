@@ -1,23 +1,27 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { COMPARE_STORAGE_KEY } from '@pages/ComparisonPage';
+import type { HomePage } from '@pages/HomePage';
+import { AVAILABILITY, COMPARE_STORAGE_KEY, COMPARISON_ROW, priceText } from '@pages/ComparisonPage';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Product comparison', () => {
-  test('picking products shows the comparison bar with the count', { tag: ['@smoke'] }, async ({ homePage }) => {
-    const [first, second] = await homePage.grid.productNames();
+  /** Puts the first two products of the grid in the comparison and returns their names. */
+  const pickTwo = async ({ grid }: HomePage): Promise<[string, string]> => {
+    const [first, second] = await grid.productNames();
+    await grid.compare(first);
+    await grid.compare(second);
+    return [first, second];
+  };
 
-    await homePage.grid.compare(first);
-    await homePage.grid.compare(second);
+  test('picking products shows the comparison bar with the count', { tag: ['@smoke'] }, async ({ homePage }) => {
+    const [first] = await pickTwo(homePage);
 
     await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(2));
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('Compare Now opens a side-by-side table of the picked products', async ({ homePage, page }) => {
-    const [first, second] = await homePage.grid.productNames();
-    await homePage.grid.compare(first);
-    await homePage.grid.compare(second);
+    const [first, second] = await pickTwo(homePage);
     // The link only carries the selection the app has stored: check that before leaving the page.
     await expect(homePage.grid.card(first).compareButton).toHaveAttribute('aria-pressed', 'true');
     await expect(homePage.grid.card(second).compareButton).toHaveAttribute('aria-pressed', 'true');
@@ -52,9 +56,7 @@ test.describe('Product comparison', () => {
   });
 
   test('the selection survives opening a product and coming back', async ({ homePage }) => {
-    const [first, second] = await homePage.grid.productNames();
-    await homePage.grid.compare(first);
-    await homePage.grid.compare(second);
+    const [first, second] = await pickTwo(homePage);
     await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(2));
 
     const productPage = await homePage.openProduct(first);
@@ -94,11 +96,11 @@ test.describe('Product comparison', () => {
       const [inStock, outOfStock] = comparedProducts;
 
       await expect(comparisonPage.productColumns).toHaveCount(2);
-      await expect(comparisonPage.cells('Price')).toHaveText([`$${inStock.price.toFixed(2)}`, `$${outOfStock.price.toFixed(2)}`]);
-      await expect(comparisonPage.cells('Brand')).toHaveText([inStock.brand.name, outOfStock.brand.name]);
-      await expect(comparisonPage.cells('Category')).toHaveText([inStock.category.name, outOfStock.category.name]);
-      await expect(comparisonPage.cells('Availability')).toHaveText(['In Stock', 'Out of Stock']);
-      await expect(comparisonPage.cells('CO₂ Rating')).toHaveText([inStock.co2_rating, outOfStock.co2_rating]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.price)).toHaveText([priceText(inStock.price), priceText(outOfStock.price)]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.brand)).toHaveText([inStock.brand.name, outOfStock.brand.name]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.category)).toHaveText([inStock.category.name, outOfStock.category.name]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.availability)).toHaveText([AVAILABILITY.inStock, AVAILABILITY.outOfStock]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.co2)).toHaveText([inStock.co2_rating, outOfStock.co2_rating]);
     });
 
     test('removing a product drops its column', async ({ comparisonPage, comparedProducts }) => {
@@ -126,17 +128,17 @@ test.describe('Product comparison', () => {
       const [rental, product] = comparedProducts;
 
       await expect(comparisonPage.productColumns).toContainText([rental.name, product.name]);
-      await expect(comparisonPage.cells('Price')).toHaveText([`$${rental.price.toFixed(2)}`, `$${product.price.toFixed(2)}`]);
-      await expect(comparisonPage.cells('Brand')).toHaveText([rental.brand.name, product.brand.name]);
-      await expect(comparisonPage.cells('Category')).toHaveText([rental.category.name, product.category.name]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.price)).toHaveText([priceText(rental.price), priceText(product.price)]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.brand)).toHaveText([rental.brand.name, product.brand.name]);
+      await expect(comparisonPage.cells(COMPARISON_ROW.category)).toHaveText([rental.category.name, product.category.name]);
     });
 
     test('a rental is not called out of stock, as the rentals page and its own page do not', { tag: ['@bug'] }, async ({ comparisonPage }) => {
       knownBug('BUG-60', 'the comparison lists a rental as "Out of Stock" (the API marks the seeded rentals in_stock: false), while the rentals page and the rental\'s own page offer it for hire with an enabled Add to cart.');
-      await expect(comparisonPage.cells('Availability'), 'one cell for the rental and one for the product').toHaveCount(2);
-      await expect(comparisonPage.cells('Availability').nth(1), 'the product in stock is listed as such').toHaveText('In Stock');
+      await expect(comparisonPage.cells(COMPARISON_ROW.availability), 'one cell for the rental and one for the product').toHaveCount(2);
+      await expect(comparisonPage.cells(COMPARISON_ROW.availability).nth(1), 'the product in stock is listed as such').toHaveText(AVAILABILITY.inStock);
 
-      await expect(comparisonPage.cells('Availability').first(), 'BUG-60: a rental is not listed as out of stock').not.toHaveText('Out of Stock', { timeout: BUG_TIMEOUT });
+      await expect(comparisonPage.cells(COMPARISON_ROW.availability).first(), 'BUG-60: a rental is not listed as out of stock').not.toHaveText(AVAILABILITY.outOfStock, { timeout: BUG_TIMEOUT });
     });
   });
 
@@ -152,15 +154,15 @@ test.describe('Product comparison', () => {
 
     test('"Show differences only" hides the rows where they agree', { tag: ['@bug'] }, async ({ comparisonPage, comparedProducts }) => {
       knownBug('BUG-12', '"Show differences only" hides nothing; rows where both products agree stay visible.');
-      await expect(comparisonPage.cells('Brand')).toHaveText(comparedProducts.map((p) => p.brand.name));
-      await expect(comparisonPage.row('Brand')).toBeVisible();
-      await expect(comparisonPage.cells('Price')).toHaveText(comparedProducts.map((p) => `$${p.price.toFixed(2)}`));
+      await expect(comparisonPage.cells(COMPARISON_ROW.brand)).toHaveText(comparedProducts.map((p) => p.brand.name));
+      await expect(comparisonPage.row(COMPARISON_ROW.brand)).toBeVisible();
+      await expect(comparisonPage.cells(COMPARISON_ROW.price)).toHaveText(comparedProducts.map((p) => priceText(p.price)));
 
       await comparisonPage.showDifferencesOnly.check();
 
-      await expect(comparisonPage.row('Brand'), 'BUG-12: "Show differences only" hides the rows where both products agree').toBeHidden({ timeout: BUG_TIMEOUT });
+      await expect(comparisonPage.row(COMPARISON_ROW.brand), 'BUG-12: "Show differences only" hides the rows where both products agree').toBeHidden({ timeout: BUG_TIMEOUT });
       // And the filter must not overreach: a row where they differ stays.
-      await expect(comparisonPage.row('Price'), 'BUG-12: "Show differences only" keeps the rows where the products differ').toBeVisible();
+      await expect(comparisonPage.row(COMPARISON_ROW.price), 'BUG-12: "Show differences only" keeps the rows where the products differ').toBeVisible();
     });
   });
 

@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { ADM_14, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
 import { REFUSED_STATUSES, customer, paginated } from '@support/admin-payloads';
 import { consoleArgsText } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -8,6 +8,9 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 const NEW_USER_ERROR = /NG01002|Must supply a value for form control/;
 /** The user the add form is filled in with: only the required fields, the others stay empty and the form accepts that. */
 const newUser = { firstName: 'Newly', lastName: 'Added', dateOfBirth: '1991-02-03', street: 'Test Street 2', city: 'Testville', country: 'NL', email: 'newly.added@example.com' };
+
+/** The first name an edit gives the user. */
+const RENAMED = 'Renamed';
 
 test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows name and email', async ({ adminUsers }) => {
@@ -57,11 +60,11 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(form.failedLoginAttempts).toHaveValue('0');
     const saved = apiMock.waitForRequest('PUT', `/users/${customer.id}`);
 
-    await form.firstName.fill('Renamed');
+    await form.firstName.fill(RENAMED);
     await form.enabled.uncheck();
     await form.chrome.save();
 
-    expect((await saved).postDataJSON()).toMatchObject({ first_name: 'Renamed', enabled: false, email: customer.email });
+    expect((await saved).postDataJSON()).toMatchObject({ first_name: RENAMED, enabled: false, email: customer.email });
     await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeVisible();
   });
 
@@ -106,8 +109,7 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   test.describe('when the user cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('GET', /^\/users\/[^/]+$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', /^\/users\/[^/]+$/, 500)));
 
     test('the admin is told the user could not be loaded', async ({ adminUsers, apiMock }) => {
       knownBug('ADM-14', ADM_14, { absence: true });
@@ -137,15 +139,14 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
 
   for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edited user is refused (${status})`, { tag: ['@negative'] }, () => {
-      test.use(withMocks(mock.fail('PUT', /^\/users\/[^/]+$/, status, { message: 'The user could not be saved.' })));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('PUT', /^\/users\/[^/]+$/, status, { message: 'The user could not be saved.' })));
 
       test('the failure is shown and nothing is reported as saved', async ({ adminUsers, apiMock }) => {
         const form = await adminUsers.edit(customer.email);
         await expect(form.email).toHaveValue(customer.email);
         const refused = apiMock.waitForResponse('PUT', `/users/${customer.id}`);
 
-        await form.firstName.fill('Renamed');
+        await form.firstName.fill(RENAMED);
         await form.chrome.save();
         expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
 

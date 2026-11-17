@@ -5,6 +5,15 @@ import { AppShell } from './AppShell';
 /** The sessionStorage key under which the app keeps the ids of the products picked for comparison. */
 export const COMPARE_STORAGE_KEY = 'compare_ids';
 
+/** The row headers of the comparison table. */
+export const COMPARISON_ROW = { price: 'Price', brand: 'Brand', category: 'Category', availability: 'Availability', co2: 'CO₂ Rating' } as const;
+
+/** What the Availability row says of a product. */
+export const AVAILABILITY = { inStock: 'In Stock', outOfStock: 'Out of Stock' } as const;
+
+/** A price as the table shows it: a dollar sign and two decimals. */
+export const priceText = (price: number): string => `$${price.toFixed(2)}`;
+
 export class ComparisonPage {
   readonly shell: AppShell;
   readonly title: Locator;

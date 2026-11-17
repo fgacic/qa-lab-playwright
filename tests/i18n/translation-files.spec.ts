@@ -90,4 +90,19 @@ test.describe('Translation files agree with English', { tag: ['@i18n'] }, () => 
     const unknownPlaceholders = (await placeholderDiffs(request)).filter((line) => !I18N_28.some((key) => line.startsWith(`${GREEK} ${key}: `)));
     expect(unknownPlaceholders, 'values whose placeholders differ from English, apart from the I18N-28 one').toEqual([]);
   });
+
+  // The allow-list cannot go stale: once a known difference is fixed its pin goes green, and this says so, so the entry is taken out
+  // of I18N_27 / I18N_28 and not left to excuse a later regression.
+  test('the known I18N-27 and I18N-28 differences are all still there', async ({ request }) => {
+    const keyDifferences = await comparedWithEnglish(request);
+    expect(
+      I18N_27.filter((key) => !keyDifferences.some((line) => others.some((language) => line === `${language} has ${key}, English does not`))),
+      'I18N-27 keys that no file differs on any more: take them out of I18N_27',
+    ).toEqual([]);
+    const placeholderDifferences = await placeholderDiffs(request);
+    expect(
+      I18N_28.filter((key) => !placeholderDifferences.some((line) => line.startsWith(`${GREEK} ${key}: `))),
+      'I18N-28 values whose placeholders agree now: take them out of I18N_28',
+    ).toEqual([]);
+  });
 });

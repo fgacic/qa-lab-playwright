@@ -14,6 +14,13 @@ const EMAIL_PROMPT = 'What is your email address?';
 const SUBJECT_PROMPT = 'Please select a subject for your ticket:';
 const DESCRIPTION_PROMPT = 'Please describe your issue (minimum 50 characters):';
 const ATTACHMENT_PROMPT = 'Would you like to add an attachment?';
+/** The answer to the attachment question that sends the ticket without one. */
+const SKIP_ATTACHMENT = 'Skip';
+/** How the dialogue ends: the ticket was sent, or it was not (the reason follows the second). */
+const TICKET_SUBMITTED = "Your support ticket has been submitted successfully! We'll get back to you soon.";
+const TICKET_ERROR = 'There was an error submitting your ticket:';
+/** The quantity the order dialogue is answered with. */
+const QUANTITY = 2;
 /** The subject the ticket dialogue picks: any of the contact form's, named from the same list. */
 const TICKET_SUBJECT = CONTACT_SUBJECTS[1].label;
 
@@ -73,10 +80,10 @@ test.describe('Chat assistant', () => {
       await chat.productResult(product.name).click();
       await expect(chat.reply('Great choice! You selected:')).toBeVisible();
       await expect(chat.reply('How many would you like to order?')).toBeVisible();
-      await chat.pick('2');
+      await chat.pick(String(QUANTITY));
 
       await expect(chat.reply('Order Summary:')).toBeVisible();
-      await expect(chat.reply(`$${(product.price * 2).toFixed(2)}`)).toBeVisible();
+      await expect(chat.reply(`$${(product.price * QUANTITY).toFixed(2)}`)).toBeVisible();
       await expect(chat.reply('Would you like to add this to your cart?')).toBeVisible();
     });
   });
@@ -148,9 +155,9 @@ test.describe('Chat assistant', () => {
       await chat.send(CONTACT_MESSAGE);
       await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', '/messages');
-      await chat.pick('Skip');
+      await chat.pick(SKIP_ATTACHMENT);
 
-      await expect(chat.reply("Your support ticket has been submitted successfully! We'll get back to you soon.")).toBeVisible();
+      await expect(chat.reply(TICKET_SUBMITTED)).toBeVisible();
       expect((await sent).postDataJSON()).toMatchObject({
         name: `${guest.firstName} ${guest.lastName}`,
         email: guest.email,
@@ -169,12 +176,12 @@ test.describe('Chat assistant', () => {
       await chat.fillTicketUntilAttachment(fakeGuest(), TICKET_SUBJECT, CONTACT_MESSAGE);
       await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
       const answered = apiMock.waitForResponse('POST', '/messages');
-      await chat.pick('Skip');
+      await chat.pick(SKIP_ATTACHMENT);
 
       expect((await answered).response.status()).toBe(500);
-      await expect(chat.reply('There was an error submitting your ticket:')).toBeVisible();
+      await expect(chat.reply(TICKET_ERROR)).toBeVisible();
       await expect(chat.reply('Server Error')).toBeVisible();
-      await expect(chat.reply("Your support ticket has been submitted successfully! We'll get back to you soon.")).toBeHidden();
+      await expect(chat.reply(TICKET_SUBMITTED)).toHaveCount(0);
     });
   });
 
@@ -188,11 +195,11 @@ test.describe('Chat assistant', () => {
       await chat.fillTicketUntilAttachment(fakeGuest(), TICKET_SUBJECT, CONTACT_MESSAGE);
       await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', '/messages');
-      await chat.pick('Skip');
+      await chat.pick(SKIP_ATTACHMENT);
       await sent;
       // Precondition, true whether or not the bug is fixed: the ticket is reported as failed, and not as submitted.
-      await expect(chat.reply('There was an error submitting your ticket:')).toBeVisible();
-      await expect(chat.reply("Your support ticket has been submitted successfully! We'll get back to you soon.")).toBeHidden();
+      await expect(chat.reply(TICKET_ERROR)).toBeVisible();
+      await expect(chat.reply(TICKET_SUBMITTED)).toHaveCount(0);
 
       await expect(chat.reply(/^\s*true\s*$/), 'BUG-55: the reason after the error is not the literal "true"').toBeHidden({ timeout: BUG_TIMEOUT });
     });

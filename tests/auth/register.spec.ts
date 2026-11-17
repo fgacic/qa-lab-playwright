@@ -5,6 +5,10 @@ import { fakeCustomer } from '@support/test-data';
 /** A password the form accepts, typed where a test only needs some password, and the id the mocked register answers with. */
 const VISIBLE_PASSWORD = 'Qa-lab-visible-1!';
 const NEW_CUSTOMER_ID = '01QALABNEWCUSTOMER0000000';
+/** An address the postcode tests type: the country, the postal code and the house number go together. */
+const COUNTRY = 'NL';
+const POSTCODE = '1234 AB';
+const HOUSE_NUMBER = '1';
 
 /**
  * Nothing here creates a real account. Submissions with valid data are answered by a mocked
@@ -102,6 +106,7 @@ test.describe('Registration form', () => {
     // Both statements exist, whichever number a fix settles on.
     await expect(registerPage.passwordRules.first()).toContainText(/\d+ characters/);
     await expect(registerPage.password.error).toContainText(/\d+ characters/);
+    // The rule is static text that the assertion above has just waited for, so this single read cannot race.
     const rule = await registerPage.passwordRules.first().innerText();
     const listedMinimum = /(\d+) characters/.exec(rule)?.[1];
 
@@ -127,12 +132,12 @@ test.describe('Registration form', () => {
   }
 
   test.describe('when the postcode lookup knows the address', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.respond('GET', '/postcode-lookup', { street: 'Mockstraat', house_number: '1', city: 'Mockstad', state: 'Mockland', country: 'NL', postcode: '1234 AB' })));
+    test.use(withMocks(mock.respond('GET', '/postcode-lookup', { street: 'Mockstraat', house_number: HOUSE_NUMBER, city: 'Mockstad', state: 'Mockland', country: COUNTRY, postcode: POSTCODE })));
 
     test('street, city and state are filled in', async ({ registerPage }) => {
-      await registerPage.country.input.selectOption('NL');
-      await registerPage.postalCode.input.fill('1234 AB');
-      await registerPage.houseNumber.input.fill('1');
+      await registerPage.country.input.selectOption(COUNTRY);
+      await registerPage.postalCode.input.fill(POSTCODE);
+      await registerPage.houseNumber.input.fill(HOUSE_NUMBER);
 
       await expect(registerPage.street.input).toHaveValue('Mockstraat');
       await expect(registerPage.city.input).toHaveValue('Mockstad');
@@ -145,9 +150,9 @@ test.describe('Registration form', () => {
 
     test('the address stays as typed and the form is still usable', async ({ registerPage }) => {
       await registerPage.street.input.fill('Typed Street');
-      await registerPage.country.input.selectOption('NL');
-      await registerPage.postalCode.input.fill('1234 AB');
-      await registerPage.houseNumber.input.fill('1');
+      await registerPage.country.input.selectOption(COUNTRY);
+      await registerPage.postalCode.input.fill(POSTCODE);
+      await registerPage.houseNumber.input.fill(HOUSE_NUMBER);
 
       await expect(registerPage.street.input).toHaveValue('Typed Street');
       await registerPage.city.input.fill('Typed City');

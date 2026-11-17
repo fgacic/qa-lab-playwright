@@ -81,7 +81,7 @@ const REFUSED: [code: string, message: string][] = [
 const ALLOWED = [
   'const at = new Date("2026-01-02T03:04:05Z"); const n = new Date(0); await page.clock.install({ time: at });',
   'await expect(page.getByRole("button")).toBeVisible(); const t = await storedToken(page); await consoleArgsText(args);',
-  'const ms = await elapsedMs(() => page.goto("/"));',
+  'const status = await fetchStatus(page, "/api/brands");',
   'await page.goto("/products/" + id); const note = "see http docs"; const label = `${id}/https`;',
   'test.describe.parallel("a", () => {}); test.describe.configure({ mode: "parallel" }); test.describe.configure({ retries: 2 });',
 ];

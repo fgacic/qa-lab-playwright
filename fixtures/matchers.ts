@@ -23,10 +23,10 @@ export const collectionExpect = base.extend({
 });
 
 /**
- * The first amount in a text: a `$`-prefixed one when there is any, else the first number. "$28.30 (incl. 21% VAT)"
+ * The first amount in a text (exported for tests/framework/performance-maths.spec.ts, which holds the matchers' pure parts): a `$`-prefixed one when there is any, else the first number. "$28.30 (incl. 21% VAT)"
  * is 28.3, not 28.3021. No number at all is NaN, never 0: an empty or placeholder text must not read as a zero amount.
  */
-function parseAmount(text: string): number {
+export function parseAmount(text: string): number {
   // The sign may stand before the "$", with or without a space, or after it ("-$4.00", "- $4.00", "$-4.00"), as a hyphen or a true minus sign.
   const token = text.match(/[-−]?\s?\$\s?[-−]?\d[\d,]*(?:\.\d+)?/)?.[0] ?? text.match(/[-−]?\d[\d,]*(?:\.\d+)?/)?.[0];
   return token ? Number(token.replace(/−/g, '-').replace(/[^0-9.-]/g, '')) : NaN;

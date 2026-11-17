@@ -3,11 +3,14 @@
 // asserted here, once, in Chromium. These use the plain Playwright `test` on purpose: they build their own
 // ApiMock, and the suite's `page` fixture would already have installed one on the same page.
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { ApiMock, isAllowedAnonymousWrite, mock } from '@support/api-mock';
 import { API_URL, BASE_URL, writeGuardDefault } from '@support/env';
 import { httpUrl, httpsUrl } from '@support/urls';
-import { deliveryOrder, elapsedMs, fetchOutcome, fetchStatus } from '@support/page-fetch';
+import { deliveryOrder, fetchOutcome, fetchStatus } from '@support/page-fetch';
+
+const ROOT = join(__dirname, '..', '..');
 
 test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
   /** A blank same-origin document, so `fetch` to the API is not cross-origin and no real page loads. */
@@ -138,12 +141,12 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
   test('a delay predicate that throws is recorded for the page fixture to fail on, and does not hold the request', async ({ page }) => {
     const apiMock = new ApiMock(page);
     await apiMock.use(mock.respond('QUERY', '/products', { data: [] }));
-    await apiMock.delay('QUERY', '/products', () => { throw new Error('broken predicate'); }, 5_000);
+    // One rule: it holds 'slow' (a working predicate, the reference) and throws on 'broken', which must then be answered at once.
+    await apiMock.delay('QUERY', '/products', (body) => { if (body.page === 'broken') throw new Error('broken predicate'); return body.page === 'slow'; }, 700);
     await openBlankPage(page);
 
-    const took = await elapsedMs(() => send(page, 'QUERY', '/products', { page: '1' }));
-
-    expect(took, 'the request was not held back').toBeLessThan(2_000);
+    const order = await deliveryOrder(page, `${API_URL}/products`, ['slow', 'broken']); // 'slow' is asked first
+    expect(order, 'the broken request was not held back: it was answered before the held one').toEqual(['broken', 'slow']);
     expect(apiMock.handlerErrors).toEqual([expect.stringMatching(/delay\(QUERY \/products\) threw: broken predicate/)]);
   });
 
@@ -201,9 +204,8 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
     await apiMock.delay('QUERY', '/products', (body) => body.page === 'slow', 700);
     await openBlankPage(page);
 
-    const timed = (body: unknown) => elapsedMs(() => send(page, 'QUERY', '/products', body));
-    expect(await timed({ page: 'slow' }), 'the selected request is held back').toBeGreaterThanOrEqual(650);
-    expect(await timed({ page: 'fast' }), 'another request is not').toBeLessThan(650);
+    const order = await deliveryOrder(page, `${API_URL}/products`, ['slow', 'fast']); // 'slow' is asked first
+    expect(order, 'the selected request is held back, so the one asked after it is answered first').toEqual(['fast', 'slow']);
   });
 
   test('serialize delivers real answers in the order the requests were sent, even when an earlier one is held back', async ({ page }) => {
@@ -220,7 +222,7 @@ test.describe('the mock layer', { tag: ['@framework', '@self-hosted'] }, () => {
 test.describe('the target configuration', { tag: ['@framework'] }, () => {
   /** `playwright test --list` loads the config in a fresh process with this environment, which is where env.ts runs. */
   const loadConfig = (env: Record<string, string>) =>
-    spawnSync('npx', ['playwright', 'test', '--list', '--project=framework'], { encoding: 'utf8', env: { ...process.env, ...env } });
+    spawnSync('npx', ['playwright', 'test', '--list', '--project=framework'], { cwd: ROOT, timeout: 60_000, encoding: 'utf8', env: { ...process.env, ...env } });
 
   test('a local target whose BASE_URL and API_URL are on different origins is refused', () => {
     const base = httpUrl('localhost');
@@ -262,7 +264,7 @@ test.describe('the target configuration', { tag: ['@framework'] }, () => {
   });
 
   test('a run that schedules perf next to another project is refused at load time when --reporter replaced the guard', () => {
-    const run = spawnSync('npx', ['playwright', 'test', '--project=perf', '--project=chromium', '--reporter=dot', '--grep=@nothing-has-this-tag'], { encoding: 'utf8', env: process.env });
+    const run = spawnSync('npx', ['playwright', 'test', '--project=perf', '--project=chromium', '--reporter=dot', '--grep=@nothing-has-this-tag'], { cwd: ROOT, timeout: 60_000, encoding: 'utf8', env: process.env });
     expect(run.status).not.toBe(0);
     expect(`${run.stdout}${run.stderr}`).toMatch(/perf budgets must run alone/);
   });

@@ -1,7 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
 import { REFUSED_STATUSES, SEARCH_HIT, category, subcategory } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+
+/** The slug an edit gives the category, and the one it gives a subcategory. */
+const RENAMED_SLUG = 'qa-lab-renamed';
+const RENAMED_SUBSLUG = `${RENAMED_SLUG}-sub`;
 
 test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each category with its slug', async ({ adminCategories }) => {
@@ -45,10 +49,10 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
     await expect(form.name.input).toHaveValue(category.name);
     const saved = apiMock.waitForRequest('PUT', `/categories/${category.id}`);
 
-    await form.slug.input.fill('qa-lab-renamed');
+    await form.slug.input.fill(RENAMED_SLUG);
     await form.chrome.save();
 
-    expect((await saved).postDataJSON()).toMatchObject({ name: category.name, slug: 'qa-lab-renamed', parent_id: null });
+    expect((await saved).postDataJSON()).toMatchObject({ name: category.name, slug: RENAMED_SLUG, parent_id: null });
     await expect(form.chrome.alert(ADMIN_MESSAGES.categorySaved)).toBeVisible();
   });
 
@@ -64,17 +68,16 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
       await expect(form.parent, 'the parent is preselected').toHaveValue(category.id);
       const saved = apiMock.waitForRequest('PUT', `/categories/${subcategory.id}`);
 
-      await form.slug.input.fill('qa-lab-renamed-sub');
+      await form.slug.input.fill(RENAMED_SUBSLUG);
       await form.chrome.save();
 
-      expect((await saved).postDataJSON()).toMatchObject({ name: subcategory.name, slug: 'qa-lab-renamed-sub', parent_id: category.id });
+      expect((await saved).postDataJSON()).toMatchObject({ name: subcategory.name, slug: RENAMED_SUBSLUG, parent_id: category.id });
       await expect(form.chrome.alert(ADMIN_MESSAGES.categorySaved)).toBeVisible();
     });
   });
 
   test.describe('when saving a category is refused', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('POST', '/categories', 409, { slug: ['A category already exists with this slug.'] })));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('POST', '/categories', 409, { slug: ['A category already exists with this slug.'] })));
 
     test('the reason is shown', async ({ adminCategories, apiMock }) => {
       knownBug('ADM-12', ADM_12, { absence: true });
@@ -91,8 +94,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
 
   test.describe('when the category cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
     // The edit form loads the category from its tree endpoint.
-    test.use(withMocks(mock.fail('GET', /^\/categories\/tree\/[^/]+$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', /^\/categories\/tree\/[^/]+$/, 500)));
 
     test('the admin is told the category could not be loaded', async ({ adminCategories, apiMock }) => {
       knownBug('ADM-14', ADM_14, { absence: true });
@@ -110,8 +112,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
   // The refusal of an edit: 409 when the slug is taken, 500 when the server fails.
   for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edit is refused (${status})`, { tag: ['@negative', '@bug'] }, () => {
-      test.use(withMocks(mock.fail('PUT', /^\/categories\/[^/]+$/, status, { message: 'The category could not be saved.' })));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('PUT', /^\/categories\/[^/]+$/, status, { message: 'The category could not be saved.' })));
 
       test('the admin is told the edited category was not saved', async ({ adminCategories, apiMock }) => {
         knownBug('ADM-23', ADM_23, { absence: true });
@@ -119,7 +120,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
         await expect(form.name.input).toHaveValue(category.name);
         const refused = apiMock.waitForResponse('PUT', `/categories/${category.id}`);
 
-        await form.slug.input.fill('qa-lab-renamed');
+        await form.slug.input.fill(RENAMED_SLUG);
         await form.chrome.save();
         expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
 

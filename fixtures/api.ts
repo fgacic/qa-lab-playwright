@@ -15,6 +15,12 @@ export class Catalog {
   outOfStock = () => this.memo('out-of-stock', () => this.api.outOfStockProduct());
   eco = () => this.memo('eco', () => this.api.ecoProduct());
   nonEco = () => this.memo('non-eco', () => this.api.nonEcoProduct());
+  /** A second in-stock product that is neither eco-friendly nor a rental, other than `nonEco`: the two lines of the shared two-product cart. */
+  secondNonEco = () =>
+    this.memo('second-non-eco', async () => {
+      const first = await this.nonEco();
+      return this.api.findProduct('second non-eco', (p) => p.in_stock && !p.is_rental && !p.is_eco_friendly && p.id !== first.id);
+    });
   rental = () => this.memo('rental', () => this.api.rentalProduct());
 
   private memo(key: string, load: () => Promise<Product>): Promise<Product> {

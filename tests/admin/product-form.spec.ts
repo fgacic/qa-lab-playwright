@@ -1,24 +1,35 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_14, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import type { AdminProductForm } from '@pages/admin/AdminForms';
+import type { AdminListPage } from '@pages/admin/AdminListPage';
+import { ADM_14, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
 import { REFUSED_STATUSES, brand, category, product, spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
 
+/** What an edit changes (the price) and fills in because the edit form does not load it (the stock: ADM-05). */
+const EDITED = { price: '19.99', stock: '7' };
+
 /** One product, by id. */
 const PRODUCT = /^\/products\/[^/]+$/;
 
+/** Opens the Add Product form and waits for it to be drawn, so that what a test fills in is not lost to a form that is still being built. */
+async function openAddForm(products: AdminListPage<AdminProductForm>): Promise<AdminProductForm> {
+  const form = await products.add();
+  await expect(form.chrome.heading).toHaveText('Add Product');
+  return form;
+}
+
 test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, () => {
   test('a new product is saved with what was entered', async ({ adminProducts, apiMock }) => {
-    const form = await adminProducts.add();
-    await expect(form.chrome.heading).toHaveText('Add Product');
+    const form = await openAddForm(adminProducts);
     const created = apiMock.waitForRequest('POST', '/products');
 
     await form.fillIn(newProduct);
     await form.chrome.save();
 
     expect((await created).postDataJSON()).toMatchObject({
-      name: newProduct.name, description: newProduct.description, price: '9.99', stock: '5', co2_rating: 'B', brand_id: brand.id, category_id: category.id, product_image_id: product.product_image.id,
+      name: newProduct.name, description: newProduct.description, price: newProduct.price, stock: newProduct.stock, co2_rating: 'B', brand_id: brand.id, category_id: category.id, product_image_id: product.product_image.id,
       is_rental: false, is_location_offer: false,
     });
     await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
@@ -26,8 +37,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
 
   // The two ticks are sent as booleans. Ticking "Item for rent" also clears Stock (a rental has none), so no stock is entered here.
   test('the rental and location-offer ticks are sent with the product', async ({ adminProducts, apiMock }) => {
-    const form = await adminProducts.add();
-    await expect(form.chrome.heading).toHaveText('Add Product');
+    const form = await openAddForm(adminProducts);
     const created = apiMock.waitForRequest('POST', '/products');
 
     await form.fillIn({ ...newProduct, rental: true, locationOffer: true });
@@ -41,8 +51,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   // The CO₂ rating is sent as its letter, whatever the option's longer label says.
   for (const [label, letter] of [['A - Most environmentally friendly', 'A'], ['E - High environmental impact', 'E']] as const) {
     test(`the CO₂ rating "${letter}" is sent as its letter`, async ({ adminProducts, apiMock }) => {
-      const form = await adminProducts.add();
-      await expect(form.chrome.heading).toHaveText('Add Product');
+      const form = await openAddForm(adminProducts);
       const created = apiMock.waitForRequest('POST', '/products');
 
       await form.fillIn({ ...newProduct, co2Rating: label });
@@ -65,8 +74,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   for (const price of ['abc', '-5']) {
     test(`a price of "${price}" is rejected by the form`, { tag: ['@negative', '@bug'] }, async ({ adminProducts, apiMock }) => {
       knownBug('ADM-03', 'the product form sends any price (text, negative) to the API without validating it.', { absence: true });
-      const form = await adminProducts.add();
-      await expect(form.chrome.heading).toHaveText('Add Product');
+      const form = await openAddForm(adminProducts);
 
       await form.fillIn({ ...newProduct, price });
       await form.chrome.save();
@@ -103,14 +111,14 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     await expect(form.name).toHaveValue(backOffice.product.name);
     // The edit form loads neither the stock (ADM-05) nor brand, category and image (ADM-09): they are filled in here,
     // so that this proves the save itself and keeps passing, whichever of those two defects is fixed first.
-    await form.stock.fill('7');
+    await form.stock.fill(EDITED.stock);
     await form.chooseRelations();
     const saved = apiMock.waitForRequest('PUT', PRODUCT);
 
-    await form.price.fill('19.99');
+    await form.price.fill(EDITED.price);
     await form.chrome.save();
 
-    expect((await saved).postDataJSON()).toMatchObject({ id: backOffice.product.id, name: backOffice.product.name, description: backOffice.product.description, price: '19.99', stock: '7', brand_id: brand.id, category_id: category.id, product_image_id: backOffice.product.product_image.id });
+    expect((await saved).postDataJSON()).toMatchObject({ id: backOffice.product.id, name: backOffice.product.name, description: backOffice.product.description, price: EDITED.price, stock: EDITED.stock, brand_id: brand.id, category_id: category.id, product_image_id: backOffice.product.product_image.id });
     await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeVisible();
     await expect(form.chrome.alert(ADMIN_MESSAGES.quantityRequired)).toBeHidden();
   });
@@ -122,12 +130,12 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     // Brand, category and image are empty too (ADM-09, pinned below); choose them so only the stock can block the save.
     await form.chooseRelations();
 
-    await form.price.fill('19.99');
+    await form.price.fill(EDITED.price);
     await form.chrome.save();
 
-    // Either way the save is answered on screen: a confirmation, or the validation messages that stopped it.
-    // (.first(): with ADM-04 both a confirmation and a validation message may be on screen.)
-    await expect(form.chrome.alert(/saved!|is required/).first()).toBeVisible();
+    // Either way the save is answered on screen: by the confirmation, or by the validation message that stopped it.
+    // (.first(): with ADM-04 both may be on screen.)
+    await expect(form.chrome.alert(new RegExp(`${ADMIN_MESSAGES.productSaved}|${ADMIN_MESSAGES.quantityRequired}`)).first()).toBeVisible();
     await expect(form.chrome.alert(ADMIN_MESSAGES.quantityRequired), 'ADM-05: no "Quantity is required" after saving without retyping the stock').toBeHidden({ timeout: BUG_TIMEOUT });
     await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved), 'ADM-05: the product is saved without retyping its stock').toBeVisible();
   });
@@ -143,8 +151,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   });
 
   test.describe('when the product cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('GET', PRODUCT, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', PRODUCT, 500)));
 
     test('the admin is told the product could not be loaded', async ({ adminProducts, backOffice, apiMock }) => {
       knownBug('ADM-14', ADM_14, { absence: true });
@@ -175,18 +182,17 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
 
   for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edited product is refused (${status})`, { tag: ['@negative'] }, () => {
-      test.use(withMocks(mock.fail('PUT', PRODUCT, status, { message: 'The product could not be saved.' })));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('PUT', PRODUCT, status, { message: 'The product could not be saved.' })));
 
       test('the failure is shown and nothing is reported as saved', async ({ adminProducts, backOffice, apiMock }) => {
         const form = await adminProducts.edit(backOffice.product.id);
         await expect(form.name).toHaveValue(backOffice.product.name);
         // Stock, brand, category and image are not loaded by the edit form (ADM-05, ADM-09): filled in, so that only the refusal can stop the save.
-        await form.stock.fill('7');
+        await form.stock.fill(EDITED.stock);
         await form.chooseRelations();
         const refused = apiMock.waitForResponse('PUT', PRODUCT);
 
-        await form.price.fill('19.99');
+        await form.price.fill(EDITED.price);
         await form.chrome.save();
         expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
 

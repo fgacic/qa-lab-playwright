@@ -14,7 +14,7 @@ test.describe('Category contents', { tag: ['@api'] }, () => {
       const strangers: string[] = [];
       for (let pageNo = 1; pageNo <= lastPage; pageNo++) {
         const { data } = await api.listProducts({ by_category_slug: slug, page: String(pageNo) });
-        strangers.push(...data.filter((p) => !belonging.has(p.category.slug)).map((p) => p.name));
+        strangers.push(...data.filter((p) => !belonging.has(p.category.slug)).map((p) => `${p.name} (page ${pageNo})`));
       }
 
       expect(strangers, 'products outside the category').toEqual([]);

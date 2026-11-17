@@ -67,18 +67,22 @@ test.describe('Login', () => {
     await expect(loginPage.password.input).toHaveAttribute('type', 'password');
   });
 
-  test('links lead to registration and password reset', async ({ loginPage, page }) => {
+  test('the registration link leads to registration', async ({ loginPage, page }) => {
     await loginPage.registerLink.click();
-    await expect(page).toHaveURL('/auth/register');
 
-    await page.goBack();
+    await expect(page).toHaveURL('/auth/register');
+  });
+
+  test('the password reset link leads to password reset', async ({ loginPage, page }) => {
     await loginPage.forgotPasswordLink.click();
+
     await expect(page).toHaveURL('/auth/forgot-password');
   });
 
   test('Google sign-in is offered', async ({ loginPage }) => {
-    // Not clicked: it starts a real OAuth flow with a third party.
+    // Not clicked: it starts a real OAuth flow with a third party. Offered means a button by that name that a visitor can use.
     await expect(loginPage.googleButton).toBeVisible();
+    await expect(loginPage.googleButton).toBeEnabled();
   });
 
   test.describe('when the credentials are accepted', { tag: ['@mocked'] }, () => {

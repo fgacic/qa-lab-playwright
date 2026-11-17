@@ -1,6 +1,8 @@
 import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
+import { searchedFor } from '@components/SearchBar';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { postcodeLookupMock, twoProductCart } from '@fixtures/pages';
+import { postcodeLookupMock } from '@fixtures/mocks';
+import { twoProductCart } from '@fixtures/pages';
 import { holdAnswers } from '@support/answer-gate';
 import { knownBug } from '@support/known-bug';
 import { acceptedGuestInvoice } from '@support/payloads';
@@ -11,7 +13,7 @@ const KEPT_QUANTITY = 3;
 /** How many of the product the browse-and-buy journeys put in the cart. */
 const ORDERED_QUANTITY = 2;
 
-/** The cart's discount for an eco-friendly product: 5% off the subtotal. */
+/** The cart's discount for an eco-friendly product: 5% off the subtotal (the cart specs hold the rule itself to literal figures). */
 const ECO_DISCOUNT = 0.05;
 
 interface GuestInvoice {
@@ -72,7 +74,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     const alsoKept = await api.inStockProduct([kept.id, removed.id]);
     for (const product of [kept, removed, alsoKept]) {
       await homePage.search.searchFor(product.name);
-      await expect(homePage.search.caption).toHaveText(`Searched for: ${product.name}`);
+      await expect(homePage.search.caption).toHaveText(searchedFor(product.name));
       const productPage = await homePage.openProduct(product.name);
       await productPage.addToCart();
       await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
@@ -153,17 +155,12 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
 
   test('browser Back from the sign-in step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {
     const [{ product }] = cartItems;
-    // The cart opened from the shop, so there is a page to go Back to.
-    await checkout.header.goHomeViaLogo();
-    await expect(page).toHaveURL('/');
-    await checkout.header.openCart();
-    await expect(checkout.cart.table.row(product.name).title).toBeVisible();
-    await checkout.cart.proceed();
-    await expect(checkout.signIn.guestTab).toBeVisible();
 
-    await page.goBack();
-    await expect(page).toHaveURL('/');
-    await page.goForward();
+    await checkout.walkThenBackAndForward(async () => {
+      await expect(checkout.cart.table.row(product.name).title).toBeVisible();
+      await checkout.cart.proceed();
+      await expect(checkout.signIn.guestTab).toBeVisible();
+    });
 
     await expect(page).toHaveURL(/\/checkout$/);
     await expect(checkout.cart.table.row(product.name).title, 'the cart still holds its line').toBeVisible();
@@ -175,7 +172,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
 
     test('the invoice honours the 5% eco-friendly discount the cart showed', async ({ checkout, cartItems, apiMock }) => {
       const [{ product, quantity }] = cartItems;
-      // 5% off the subtotal, written out and not computed with the app's rule: the cart shows it before the order.
+      // The cart shows 5% off the subtotal before the order is placed (cart.spec.ts checks that rule with literal figures); the invoice must charge that same total.
       const subtotal = product.price * quantity;
       const discounted = subtotal * (1 - ECO_DISCOUNT);
       await expect(checkout.cart.table.total).toShowAmount(discounted);

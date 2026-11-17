@@ -159,3 +159,25 @@ export const LIST_ANSWERS = {
   users: { feed: ['GET', '/users'], search: ['QUERY', '/users/search'], empty: paginated([]), column: 'Email' },
   messages: { feed: ['GET', '/messages'], empty: paginated([]), column: 'Subject' },
 } as const satisfies Record<string, { feed: readonly [HttpMethod, string]; search?: readonly [HttpMethod, string]; empty: unknown; column: string }>;
+
+/**
+ * The lists that page with `GET <feed>?page=N` (orders, users, messages): the record of the first page and the one the second
+ * page answers with, each with the text of the row it draws. Every row is named by a text only its own record has.
+ */
+export const PAGED_LISTS = {
+  orders: {
+    feed: '/invoices',
+    first: { row: order(product).invoice_number, record: order(product) },
+    second: { row: 'INV-2026999997', record: { ...order(product), id: '01QALABORDERPAGETWO000000', invoice_number: 'INV-2026999997' } },
+  },
+  users: {
+    feed: '/users',
+    first: { row: customer.email, record: customer },
+    second: { row: 'second.page@example.com', record: { ...customer, id: '01QALABUSERPAGETWO0000000', email: 'second.page@example.com' } },
+  },
+  messages: {
+    feed: '/messages',
+    first: { row: contactMessage.name, record: contactMessage },
+    second: { row: 'Second Pager', record: { ...contactMessage, id: '01QALABMESSAGEPAGETWO0000', name: 'Second Pager', user: { ...customer, first_name: 'Second', last_name: 'Pager' } } },
+  },
+} as const;

@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
+const ROOT = join(__dirname, '..', '..');
+
 interface Outcome {
   status: string;
   messages: string;
@@ -18,6 +20,7 @@ async function runProbes(): Promise<Record<string, Outcome>> {
   try {
     const out = join(dir, 'report.json');
     const run = spawnSync('npx', ['playwright', 'test', '--config=tests/framework/probe/playwright.probe.config.ts', `--output=${join(dir, 'artifacts')}`], {
+      cwd: ROOT,
       encoding: 'utf8',
       timeout: 100_000, // a hung nested run must fail this spec, not hold the suite
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: out },
@@ -48,60 +51,68 @@ test.describe('fixture teardown guards', { tag: ['@framework', '@self-hosted'] }
   // One nested run feeds every test below: in one worker, so a retry or a second worker never repeats it.
   test.describe.configure({ mode: 'default' });
   let outcomes: Record<string, Outcome>;
+  /** What happened to the probe of this title (tests/framework/probe/guarded-writes.probe.ts); a renamed probe is named here, not a TypeError on `undefined`. */
+  const outcomeOf = (title: string): Outcome => {
+    const outcome = outcomes[title];
+    if (!outcome) throw new Error(`no probe titled "${title}" ran; the nested run reported: ${Object.keys(outcomes).join(' | ')}`);
+    return outcome;
+  };
   test.beforeAll(async () => {
     test.setTimeout(120_000); // the nested run starts a second Playwright: longer than a test's own budget
     outcomes = await runProbes();
   });
 
   test('a write no mock answered fails the test that sent it, at teardown, naming the write', () => {
-    const outcome = outcomes['probe: an unmocked write'];
+    const outcome = outcomeOf('probe: an unmocked write');
     expect(outcome.status).toBe('failed');
     expect(outcome.messages).toContain('writes that reached no mock (refused, never sent)');
     expect(outcome.messages).toContain('DELETE /brands/1');
   });
 
   test('a mocked write leaves nothing to fail at teardown', () => {
-    expect(outcomes['probe: a mocked write'].status).toBe('passed');
+    expect(outcomeOf('probe: a mocked write').status).toBe('passed');
   });
 
   test('an error the app logs fails the test at teardown, unless the test allowed that very error', () => {
-    expect(outcomes['probe: an error the page logs'].status).toBe('failed');
-    expect(outcomes['probe: an error the page logs'].messages).toContain('[console] probe: the app logged this');
-    expect(outcomes['probe: an error the page logs and the test allows'].status).toBe('passed');
+    const logged = outcomeOf('probe: an error the page logs');
+    expect(logged.status).toBe('failed');
+    expect(logged.messages).toContain('[console] probe: the app logged this');
+    expect(outcomeOf('probe: an error the page logs and the test allows').status).toBe('passed');
   });
 
   test('an error the page throws uncaught fails the test too', () => {
-    expect(outcomes['probe: an uncaught error in the page'].status).toBe('failed');
-    expect(outcomes['probe: an uncaught error in the page'].messages).toContain('[pageerror]');
-    expect(outcomes['probe: an uncaught error in the page'].messages).toContain('probe: uncaught');
+    const uncaught = outcomeOf('probe: an uncaught error in the page');
+    expect(uncaught.status).toBe('failed');
+    expect(uncaught.messages).toContain('[pageerror]');
+    expect(uncaught.messages).toContain('probe: uncaught');
   });
 
   test('a failure of the mock layer itself (a delay predicate that threw) fails the test at teardown, naming the predicate', () => {
-    const outcome = outcomes['probe: a delay predicate that throws'];
+    const outcome = outcomeOf('probe: a delay predicate that throws');
     expect(outcome.status).toBe('failed');
     expect(outcome.messages).toContain('failures of the mock layer itself');
     expect(outcome.messages).toContain('the predicate broke');
   });
 
   test('a pinned defect is allowed suite-wide only on its own page: BUG-47 on the profile page passes, the same error elsewhere fails', () => {
-    expect(outcomes['probe: a TypeError reading value on the profile page, the pinned defect (BUG-47)'].status).toBe('passed');
-    const elsewhere = outcomes['probe: the same TypeError on another page'];
+    expect(outcomeOf('probe: a TypeError reading value on the profile page, the pinned defect (BUG-47)').status).toBe('passed');
+    const elsewhere = outcomeOf('probe: the same TypeError on another page');
     expect(elsewhere.status).toBe('failed');
     expect(elsewhere.messages).toContain('[pageerror]');
     expect(elsewhere.messages).toContain("reading 'value'");
   });
 
   test('the browser line for a failed API request is allowed when a mock of the test answered it, and fails the test when nothing did', () => {
-    expect(outcomes['probe: a 500 of the API that a mock of the test answered'].status).toBe('passed');
-    const unmocked = outcomes['probe: a 500 of the API that no mock of the test answered'];
+    expect(outcomeOf('probe: a 500 of the API that a mock of the test answered').status).toBe('passed');
+    const unmocked = outcomeOf('probe: a 500 of the API that no mock of the test answered');
     expect(unmocked.status).toBe('failed');
     expect(unmocked.messages).toContain('Failed to load resource');
     expect(unmocked.messages).toContain('/probe-500');
   });
 
   test('an "Unauthorized" log is allowed only with the 401 of GET /users/me behind it', () => {
-    expect(outcomes['probe: an Unauthorized log with the 401 of GET /users/me behind it'].status).toBe('passed');
-    const bare = outcomes['probe: an Unauthorized log with no 401 behind it'];
+    expect(outcomeOf('probe: an Unauthorized log with the 401 of GET /users/me behind it').status).toBe('passed');
+    const bare = outcomeOf('probe: an Unauthorized log with no 401 behind it');
     expect(bare.status).toBe('failed');
     expect(bare.messages).toContain('Unauthorized');
   });

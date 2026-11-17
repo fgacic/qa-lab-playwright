@@ -1,7 +1,9 @@
-// The arithmetic behind the performance baseline (fixtures/performance.ts): the limit a recorded median earns, the margin cap and the
-// noisy-recording rule. No browser; the budgets themselves are measured in tests/performance.
+// The pure arithmetic of the fixtures (the one browser here is a blank page for toShowAmount): the performance baseline (fixtures/performance-baseline.ts: the limit a recorded
+// median earns, the margin cap, the noisy-recording rule) and the matchers that every catalogue and cart spec trusts
+// (fixtures/matchers.ts: the amount a text holds, the order a list is in). The budgets themselves are measured in tests/performance.
 import { expect, test } from '@playwright/test';
-import { isNoisy, onCI, ratchetLimits } from '../../fixtures/performance';
+import { collectionExpect, moneyExpect, parseAmount } from '@fixtures/matchers';
+import { isNoisy, onCI, ratchetLimits } from '@fixtures/performance-baseline';
 
 test.describe('the performance baseline arithmetic', { tag: ['@framework'] }, () => {
   test('no recorded entry means no limits at all, so the spec says the baseline is missing', () => {
@@ -40,4 +42,53 @@ test.describe('the performance baseline arithmetic', { tag: ['@framework'] }, ()
       expect(onCI(value)).toBe(expected);
     });
   }
+});
+
+test.describe('the matchers', { tag: ['@framework'] }, () => {
+  for (const [text, expected] of [
+    ['$28.30 (incl. 21% VAT)', 28.3], // the "$" amount, not the first number
+    ['-$4.00', -4],
+    ['$-4.00', -4],
+    ['- $4.00', -4],
+    ['\u2212$4.00', -4], // a true minus sign
+    ['1,234.50', 1234.5], // thousands commas, no "$": the first number
+    ['Total: 3 items, $9.99', 9.99],
+    ['1.234,50', 1.234], // a comma-decimal text reads as 1.234: the shop ignores the language for amounts (I18N-29), and a fix has to change this row
+    ['n/a', NaN], // never 0: a placeholder must not read as a zero amount
+    ['', NaN],
+  ] as const) {
+    test(`an amount is read from ${JSON.stringify(text)} as ${expected}`, () => {
+      expect(parseAmount(text)).toBe(expected);
+    });
+  }
+
+  test('a list in order passes toBeSorted, in either direction', () => {
+    collectionExpect(['a', 'b', 'c']).toBeSorted();
+    collectionExpect([3, 2, 1]).toBeSorted({ descending: true });
+    collectionExpect([1, 1, 2]).toBeSorted();
+  });
+
+  for (const [values, options, message] of [
+    [['b', 'a'], undefined, /expected ascending order/],
+    [[1, 3, 2], undefined, /expected ascending order/],
+    [[1, 2, 3], { descending: true }, /expected descending order/],
+    [[1], undefined, /at least 2 values/], // one value proves no order
+    [[], undefined, /at least 2 values/], // nor does an empty grid that has not rendered yet
+  ] as const) {
+    test(`toBeSorted fails on ${JSON.stringify(values)}${options ? ' descending' : ''}`, () => {
+      expect(() => collectionExpect([...values]).toBeSorted(options)).toThrow(message);
+    });
+  }
+
+  test('toBeSorted ignores case, so a case-sensitive order bug is not what it can catch', () => {
+    collectionExpect(['a', 'B', 'c']).toBeSorted();
+  });
+
+  // `toShowAmount` tells "the amount never matched" from a broken test by the shape of the error `expect.poll` throws: a Playwright upgrade that changes it is caught here.
+  test('toShowAmount passes on the amount shown, fails with what is shown, and lets a strict-mode violation surface as itself', async ({ page }) => {
+    await page.setContent('<p id="total">Total $28.30 (incl. 21% VAT)</p><ul><li>$1.00</li><li>$2.00</li></ul>');
+    await moneyExpect(page.locator('#total')).toShowAmount(28.3);
+    await expect(moneyExpect(page.locator('#total')).toShowAmount(30, { timeout: 300 })).rejects.toThrow(/to show \$30\.00, it shows \$28\.30/);
+    await expect(moneyExpect(page.locator('li')).toShowAmount(1, { timeout: 300 })).rejects.toThrow(/strict mode violation/);
+  });
 });

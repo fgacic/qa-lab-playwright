@@ -36,7 +36,6 @@ test.describe('Rentals', () => {
     const rental = await catalog.rental();
     const product = await rentalsPage.openRental(rental.name);
     const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
-    added.catch(() => undefined);
 
     await product.addToCart();
 

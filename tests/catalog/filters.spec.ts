@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { HAMMER, PLIERS } from '@support/catalog-terms';
+import { BRANDS, HAMMER, PLIERS } from '@support/catalog-terms';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -26,11 +26,11 @@ const SEED = {
   parentCategory: 'Power Tools',
   /** A category that is not under `parentCategory`. */
   otherCategory: HAMMER.category,
-  brand: 'MightyCraft Hardware',
+  brand: BRANDS.mightyCraft,
   /** A brand that sells in `otherCategory`. */
-  hammerBrand: 'ForgeFlex Tools',
+  hammerBrand: BRANDS.forgeFlex,
   /** The shop's two brands, and a category of a different parent than `otherCategory`. */
-  brands: ['ForgeFlex Tools', 'MightyCraft Hardware'] as const,
+  brands: [BRANDS.forgeFlex, BRANDS.mightyCraft] as const,
   powerCategory: 'Drill',
 } as const;
 /** The slider test lowers the max to `CROSSED_MAX`, then presses the min up to `CROSSED_MIN`, past it. */

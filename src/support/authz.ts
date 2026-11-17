@@ -1,5 +1,5 @@
 import type { APIRequestContext, APIResponse } from '@playwright/test';
-import type { Cleanups } from '@fixtures/security';
+import type { Cleanups } from '@fixtures/cleanups';
 import { API_URL } from '@support/env';
 import { fakeCustomer, type Customer } from '@support/test-data';
 import type { ToolshopApi } from '@support/toolshop-api';

@@ -1,6 +1,6 @@
 import { mergeTests } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
-import { cleanupTest } from '@fixtures/security';
+import { worldTest } from '@fixtures/security';
 import { call, newCustomer, profileBody, type Account, type World } from '@support/authz';
 import { knownBug } from '@support/known-bug';
 import { fromBase64Url } from '@support/payloads';
@@ -16,7 +16,7 @@ import { uniqueEmail } from '@support/test-data';
  * (so there is no limit per client); and an account with the admin role never locks, whatever is sent. The lock is checked with a
  * control (the account signs in with the right password first), and the two gaps are pinned (SEC-16, SEC-17).
  */
-const test = mergeTests(apiOnlyTest, cleanupTest);
+const test = mergeTests(apiOnlyTest, worldTest);
 
 /** What a locked account is answered, and what a rate limit would be answered. */
 const LOCKED = [423, 429];
@@ -24,19 +24,20 @@ const LOCKED = [423, 429];
 const WRONG_PASSWORDS = 8;
 /** Wrong passwords sent to addresses nobody has: enough for any per-minute limit a login would reasonably have. */
 const GUESSES_AT_UNKNOWN = 30;
+/** A password no account holds: the stem of the wrong ones sent to one account, and the one sent to addresses nobody has. */
+const WRONG_PASSWORD = 'not-the-password';
 
 const login = (world: Pick<World, 'request'>, email: string, password: string) => call(world.request, 'POST', '/users/login', { data: { email, password } });
 
 /** The answers to `count` wrong passwords for one account, in order. */
 async function wrongPasswords(world: Pick<World, 'request'>, email: string, count: number): Promise<number[]> {
   const answers: number[] = [];
-  for (let attempt = 1; attempt <= count; attempt++) answers.push((await login(world, email, `not-the-password-${attempt}`)).status());
+  for (let attempt = 1; attempt <= count; attempt++) answers.push((await login(world, email, `${WRONG_PASSWORD}-${attempt}`)).status());
   return answers;
 }
 
 test.describe('Login, repeated wrong passwords (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
-  test('a customer account locks after a run of wrong passwords, and then refuses the right one too', async ({ request, api, adminToken, cleanups }) => {
-    const world = { request, api, adminToken, cleanups };
+  test('a customer account locks after a run of wrong passwords, and then refuses the right one too', async ({ world }) => {
     const { customer } = await newCustomer(world);
     // The control: before the wrong ones, the right password signs in, so a refusal later is the lock and not a wrong credential.
     expect((await login(world, customer.email, customer.password)).status(), 'the right password signs the new customer in').toBe(200);
@@ -49,9 +50,8 @@ test.describe('Login, repeated wrong passwords (self-hosted only)', { tag: ['@se
   });
 
   test.describe('the gaps', { tag: ['@bug'] }, () => {
-    test('an account with the admin role locks after a run of wrong passwords too', async ({ request, api, adminToken, cleanups }) => {
+    test('an account with the admin role locks after a run of wrong passwords too', async ({ request, adminToken, world }) => {
       knownBug('SEC-16', 'an account with the admin role never locks: any number of wrong passwords is answered 401, so the most powerful account can be guessed at without limit.');
-      const world = { request, api, adminToken, cleanups };
       // A throwaway account made an admin, never the seeded one: if the shop is fixed, this pin locks the account it made and nobody else's.
       const account: Account = await newCustomer(world);
       const promoted = await call(request, 'PUT', `/users/${account.id}`, { token: await adminToken(), data: profileBody(account, { role: 'admin' }) });
@@ -64,12 +64,14 @@ test.describe('Login, repeated wrong passwords (self-hosted only)', { tag: ['@se
       expect(answers.some((status) => LOCKED.includes(status)), `SEC-16: ${WRONG_PASSWORDS} wrong passwords for an admin account were answered ${answers.join(', ')}, none with a lock`).toBe(true);
     });
 
+    // Latent risk: if the shop is fixed to a limit per client, these 30 sign-ins would be answered 429 for every other worker's sign-in from the
+    // same address while they run. Then this file belongs in a project of its own, run alone (a change to playwright.config.ts, not to the test).
     test('guessing at addresses that have no account is limited per client', async ({ request }) => {
       knownBug('SEC-17', `${GUESSES_AT_UNKNOWN} sign-in attempts in a row from one client are all answered 401: there is no limit on the rate of guesses, only a lock on one existing customer account.`);
       const answers: number[] = [];
 
       for (let attempt = 0; attempt < GUESSES_AT_UNKNOWN; attempt++) {
-        answers.push((await login({ request }, uniqueEmail('guess'), 'not-the-password')).status());
+        answers.push((await login({ request }, uniqueEmail('guess'), WRONG_PASSWORD)).status());
       }
 
       // Precondition, true whether or not the bug is fixed: every answer is a refusal of the credentials or a limit, never a success or a failure of the shop.

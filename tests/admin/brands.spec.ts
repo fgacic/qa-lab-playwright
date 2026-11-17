@@ -1,9 +1,11 @@
-import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { expect, mock, test } from '@fixtures';
+import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
 import { REFUSED_STATUSES, SEARCH_HIT, brand } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
+/** The name an edit gives the brand. */
+const RENAMED = 'Qa Lab Renamed';
 const BRAND = /^\/brands\/[^/]+$/;
 
 test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
@@ -48,16 +50,15 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(form.name.input).toHaveValue(brand.name);
     const saved = apiMock.waitForRequest('PUT', `/brands/${brand.id}`);
 
-    await form.name.input.fill('Qa Lab Renamed');
+    await form.name.input.fill(RENAMED);
     await form.chrome.save();
 
-    expect((await saved).postDataJSON()).toMatchObject({ id: brand.id, name: 'Qa Lab Renamed', slug: brand.slug });
+    expect((await saved).postDataJSON()).toMatchObject({ id: brand.id, name: RENAMED, slug: brand.slug });
     await expect(form.chrome.alert(ADMIN_MESSAGES.brandSaved)).toBeVisible();
   });
 
   test.describe('when the brand cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('GET', BRAND, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', BRAND, 500)));
 
     test('the admin is told the brand could not be loaded', async ({ adminBrands, apiMock }) => {
       knownBug('ADM-14', ADM_14, { absence: true });
@@ -75,8 +76,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   test.describe('when saving a brand is refused', { tag: ['@negative', '@bug'] }, () => {
     // The real API answers a taken slug with 409 and the reason keyed by field (POST /brands, probed on the self-hosted shop;
     // back-office.e2e.spec.ts asks the real backend the same).
-    test.use(withMocks(mock.fail('POST', '/brands', 409, { slug: ['A brand already exists with this slug.'] })));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('POST', '/brands', 409, { slug: ['A brand already exists with this slug.'] })));
 
     test('the reason is shown', async ({ adminBrands, apiMock }) => {
       knownBug('ADM-12', ADM_12, { absence: true });
@@ -94,8 +94,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   // The refusal of an edit: 409 when the slug is taken, 500 when the server fails.
   for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edit is refused (${status})`, { tag: ['@negative', '@bug'] }, () => {
-      test.use(withMocks(mock.fail('PUT', BRAND, status, { message: 'The brand could not be saved.' })));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('PUT', BRAND, status, { message: 'The brand could not be saved.' })));
 
       test('the admin is told the edited brand was not saved', async ({ adminBrands, apiMock }) => {
         knownBug('ADM-23', ADM_23, { absence: true });
@@ -103,7 +102,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
         await expect(form.name.input).toHaveValue(brand.name);
         const refused = apiMock.waitForResponse('PUT', `/brands/${brand.id}`);
 
-        await form.name.input.fill('Qa Lab Renamed');
+        await form.name.input.fill(RENAMED);
         await form.chrome.save();
         expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
 

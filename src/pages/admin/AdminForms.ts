@@ -139,8 +139,8 @@ export class AdminProductForm {
     this.chrome = new AdminFormChrome(page);
     this.name = page.getByRole('textbox', { name: 'Name', exact: true });
     this.description = page.getByRole('textbox', { name: 'Description' });
-    this.stock = page.getByRole('textbox', { name: 'Stock' });
-    this.price = page.getByRole('textbox', { name: 'Price' });
+    this.stock = page.getByRole('textbox', { name: 'Stock', exact: true });
+    this.price = page.getByRole('textbox', { name: 'Price', exact: true });
     this.locationOffer = page.getByRole('checkbox', { name: 'Location offer' });
     this.rental = page.getByRole('checkbox', { name: 'Item for rent' });
     this.co2Rating = page.getByRole('combobox', { name: 'CO₂ Rating' });

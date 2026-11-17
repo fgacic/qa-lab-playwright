@@ -16,8 +16,8 @@ const pageAnswer = (apiMock: ApiMock, n: number) => apiMock.waitForResponse<Prod
 
 test.describe('Pagination', () => {
   test.describe('over the real catalogue', () => {
-    // Shared precondition: with fewer pages, a test that goes to page 3 or 4 would fail on missing data and not on the pager.
-    test.beforeEach(async ({ api }) => {
+    // Shared precondition, checked once per worker: with fewer pages, a test that goes to page 3 or 4 would fail on missing data and not on the pager.
+    test.beforeAll(async ({ api }) => {
       const { last_page: pages } = await api.listProducts();
       expect(pages, `the catalogue should have at least ${PAGES_NEEDED} pages for the pager to be exercised`).toBeGreaterThanOrEqual(PAGES_NEEDED);
     });

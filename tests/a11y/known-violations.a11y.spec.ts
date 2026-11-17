@@ -6,13 +6,13 @@ import { contactMessage } from '@support/admin-payloads';
 import { knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 import type { AdminListPage } from '@pages/admin/AdminListPage';
-import type { AdminMessagePage } from '@pages/admin/AdminPages';
+import type { AdminMessagePage } from '@pages/admin/AdminMessagePage';
 import type { ProfilePage } from '@pages/account/ProfilePage';
 import type { CheckoutPage } from '@pages/CheckoutPage';
 import type { HomePage } from '@pages/HomePage';
 import type { LoginPage } from '@pages/LoginPage';
 import type { ProductPage } from '@pages/ProductPage';
-import { RegisterPage } from '@pages/RegisterPage';
+import type { RegisterPage } from '@pages/RegisterPage';
 
 /**
  * One pin per known violation (src/support/a11y-baseline.ts). Each test waits for the offending
@@ -170,14 +170,14 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
   }
 
   for (const violation of on('login with errors')) {
-    test(`${violation.id} ${violation.rule} on ${violation.target} (login)`, async ({ loginPage, page, a11y }) => {
+    test(`${violation.id} ${violation.rule} on ${violation.target} (login)`, async ({ loginPage, shop, a11y }) => {
       knownBug(violation.id, summaryOf(violation));
       // The entry was recorded on the pages "with errors": the pin brings each to that state, as the scan does.
       await loginPage.loginButton.click();
       await expectFixed(a11y, violation, 'login with errors', anchorOf(LOGIN_ANCHORS, violation, loginPage), {
         'register with errors': async () => {
-          // Built here, not a fixture: `registerPage` would open /auth/register before this test opens the login page's own state.
-          const registerPage = new RegisterPage(page);
+          // From `shop`, not the `registerPage` fixture, which would open /auth/register before this test opens the login page's own state.
+          const registerPage = shop.register;
           await registerPage.open();
           await registerPage.submit();
           return [registerPage.firstName.error, registerPage.password.error, registerPage.showPasswordButton];

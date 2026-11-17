@@ -22,8 +22,15 @@ const QUANTITY_CASES = [
   { typed: '2.5', clampedTo: '2' },
   { typed: '-1', clampedTo: '1' },
 ] as const;
+/** The quantity the page starts at and never goes below. */
+const MIN_QUANTITY = 1;
 const MAX_QUANTITY = 99;
 const OVER_MAX_QUANTITY = 150;
+/** The badge an eco-friendly product carries. */
+const ECO_BADGE = 'ECO';
+/** The one defect of a product page that cannot load its product (an unknown id, a 404, a 500), pinned from three triggers. */
+const UNAVAILABLE_SUMMARY = 'a missing or failing product renders an empty page with only "Related products".';
+const UNAVAILABLE_MESSAGE = 'BUG-11: the page says the product is unavailable';
 /** The quantity the add-to-cart test sends. */
 const ADDED_QUANTITY = 3;
 /** What the shop answers when a product request fails, by status. */
@@ -62,17 +69,17 @@ test.describe('Product detail', () => {
   });
 
   test('the quantity buttons count up and down but never below 1', async ({ productPage }) => {
-    await expect(productPage.quantity).toHaveValue('1');
+    await expect(productPage.quantity).toHaveValue(String(MIN_QUANTITY));
 
     await productPage.increaseQuantityButton.click();
     await productPage.increaseQuantityButton.click();
-    await expect(productPage.quantity).toHaveValue('3');
+    await expect(productPage.quantity).toHaveValue(String(MIN_QUANTITY + 2));
 
     await productPage.decreaseQuantityButton.click();
-    await expect(productPage.quantity).toHaveValue('2');
+    await expect(productPage.quantity).toHaveValue(String(MIN_QUANTITY + 1));
     await productPage.decreaseQuantityButton.click();
     await productPage.decreaseQuantityButton.click();
-    await expect(productPage.quantity).toHaveValue('1');
+    await expect(productPage.quantity).toHaveValue(String(MIN_QUANTITY));
   });
 
   for (const { typed, clampedTo } of QUANTITY_CASES) {
@@ -104,8 +111,6 @@ test.describe('Product detail', () => {
   // smoke test runs there for real instead of behind a mock that would prove nothing.
   test('Add to cart puts the chosen quantity in the cart', { tag: ['@smoke'] }, async ({ productPage, product, apiMock }) => {
     const added = apiMock.waitForRequest('POST', /^\/carts\/[^/]+$/);
-    // Observed from the start: if the click throws, the wait is not left rejecting unhandled.
-    added.catch(() => undefined);
 
     await productPage.addToCart(ADDED_QUANTITY);
 
@@ -120,7 +125,6 @@ test.describe('Product detail', () => {
 
     test('a 401 on adding to favourites shows the unauthorized message and keeps the shopper on the product', { tag: ['@negative'] }, async ({ productPage, product, page, apiMock }) => {
       const asked = apiMock.waitForRequest('POST', '/favorites');
-      asked.catch(() => undefined);
 
       await productPage.addToFavourites();
 
@@ -163,7 +167,7 @@ test.describe('Product detail', () => {
     test.use({ productKind: 'eco' });
 
     test('carries the ECO badge', async ({ productPage }) => {
-      await expect(productPage.ecoBadge).toHaveText('ECO');
+      await expect(productPage.ecoBadge).toHaveText(ECO_BADGE);
     });
   });
 
@@ -171,7 +175,6 @@ test.describe('Product detail', () => {
     test('adding to favourites confirms it', async ({ signedInProductPage: productPage, product, apiMock }) => {
       await apiMock.use(mock.respond('POST', '/favorites', { id: FAVORITE_ID }, 201));
       const asked = apiMock.waitForRequest('POST', '/favorites');
-      asked.catch(() => undefined);
 
       await productPage.addToFavourites();
 
@@ -245,11 +248,11 @@ test.describe('Product detail', () => {
     test.use({ product: async ({}, use) => use({ id: UNKNOWN_PRODUCT_ID } as Product) });
 
     test('the page says the product is unavailable', async ({ productPage }) => {
-      knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".', { absence: true });
+      knownBug('BUG-11', UNAVAILABLE_SUMMARY, { absence: true });
       // Holds whether or not the page explains itself: nothing can be bought on it.
       await expect(productPage.addToCartButton).toBeHidden();
 
-      await expect(failureFeedback(productPage.page).or(productPage.unavailableMessage).first(), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: BUG_TIMEOUT });
+      await expect(failureFeedback(productPage.page).or(productPage.unavailableMessage).first(), UNAVAILABLE_MESSAGE).toBeVisible({ timeout: BUG_TIMEOUT });
     });
   });
 
@@ -259,9 +262,9 @@ test.describe('Product detail', () => {
       test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
       test('the page says the product is unavailable', async ({ productPage }) => {
-        knownBug('BUG-11', 'a missing or failing product renders an empty page with only "Related products".', { absence: true });
+        knownBug('BUG-11', UNAVAILABLE_SUMMARY, { absence: true });
 
-        await expect(failureFeedback(productPage.page).or(productPage.unavailableMessage).first(), 'BUG-11: the page says the product is unavailable').toBeVisible({ timeout: BUG_TIMEOUT });
+        await expect(failureFeedback(productPage.page).or(productPage.unavailableMessage).first(), UNAVAILABLE_MESSAGE).toBeVisible({ timeout: BUG_TIMEOUT });
       });
     });
   }

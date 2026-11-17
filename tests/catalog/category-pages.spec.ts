@@ -1,16 +1,11 @@
 import { SORT, SORT_OPTIONS } from '@components/FilterPanel';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
-import { CATEGORIES, HAND_TOOLS } from '@support/catalog-terms';
+import { CATEGORIES, HAND_TOOLS, SPECIAL_TOOLS, UNKNOWN_CATEGORY_SLUG } from '@support/catalog-terms';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
-
-/** A subcategory the seed leaves without products. */
-const SPECIAL_TOOLS = { slug: 'special-tools', title: 'Category: Special Tools' };
-/** A slug no category has. */
-const UNKNOWN_SLUG = 'qa-lab-unknown';
 
 /** The category pages, hand-tools first, are long enough to run to several pages: sort and pager are tried there. */
 const PAGED = HAND_TOOLS;
@@ -115,6 +110,7 @@ test.describe('Category pages', () => {
     test.use(withMocks(mock.respond('QUERY', '/products', emptyProductPage())));
 
     test('the page shows the empty state', async ({ categoryPage }) => {
+      // Whichever category is opened gets the empty answer; the seed's one empty subcategory is the natural one to open.
       await categoryPage.open(SPECIAL_TOOLS.slug);
 
       await expect(categoryPage.title).toHaveText(SPECIAL_TOOLS.title);
@@ -124,7 +120,7 @@ test.describe('Category pages', () => {
 
   test('an unknown category says it does not exist', { tag: ['@negative', '@bug'] }, async ({ categoryPage }) => {
     knownBug('BUG-06', '/category/<anything> invents a page titled after the slug, with an empty grid and no "not found".', { absence: true });
-    await categoryPage.open(UNKNOWN_SLUG);
+    await categoryPage.open(UNKNOWN_CATEGORY_SLUG);
 
     await expect(categoryPage.notFoundMessage, 'BUG-06: an unknown category says it does not exist').toBeVisible({ timeout: BUG_TIMEOUT });
   });

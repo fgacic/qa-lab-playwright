@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { ApiMock, type MockSet } from '@support/api-mock';
+import { ApiMock, mock, type MockSet } from '@support/api-mock';
 import { IS_SELF_HOSTED, writeGuardDefault } from '@support/env';
 
 export interface MockFixtures {
@@ -41,3 +41,25 @@ export const test = base.extend<MockFixtures>({
     await use(mockOf.get(page)!);
   },
 });
+
+/**
+ * An answer for GET /postcode-lookup, for specs that are not about the lookup: the address is then
+ * filled from this and a lookup outage cannot fail them. Specs that mock other routes list it too,
+ * since a describe's `withMocks` replaces the file's.
+ */
+export const POSTCODE_LOOKUP_RESULT = {
+  street: 'Mockstraat',
+  house_number: '1',
+  city: 'Mockstad',
+  state: 'Mockland',
+  country: 'NL',
+  postcode: '1234 AB',
+};
+export const postcodeLookupMock = mock.respond('GET', '/postcode-lookup', POSTCODE_LOOKUP_RESULT);
+
+/**
+ * What GET /carts/:id answers for a cart with nothing in it, and the mock for any cart id: for specs that are about the empty cart page.
+ * (For an empty list, `listOf([])` in @support/payloads.)
+ */
+export const EMPTY_CART = { id: 'qa-lab', additional_discount_percentage: null, lat: null, lng: null, cart_items: [] };
+export const emptyCartMock = mock.respond('GET', /^\/carts\/[^/]+$/, EMPTY_CART);

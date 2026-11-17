@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { ADM_14, allowLoggedFailure } from '@pages/admin/alerts';
+import { ADM_14, withLoggedFailure } from '@pages/admin/alerts';
 import { contactMessage, messageReply } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
@@ -48,8 +48,7 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   test.describe('when the reply is not saved', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('POST', /^\/messages\/[^/]+\/reply$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('POST', /^\/messages\/[^/]+\/reply$/, 500)));
 
     test('the admin is told the reply was not sent', async ({ adminMessages, apiMock }) => {
       knownBug('ADM-10', 'a reply the API refuses (500) is not reported to the admin: no message.', { absence: true });
@@ -65,8 +64,7 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   test.describe('when the status is not saved', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('PUT', /^\/messages\/[^/]+\/status$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('PUT', /^\/messages\/[^/]+\/status$/, 500)));
 
     test('the admin is told the status was not saved', async ({ adminMessages, apiMock }) => {
       knownBug('ADM-11', 'a message status the API refuses to save (500) is not reported: the picker keeps showing the new status as if it had been saved.', { absence: true });
@@ -82,8 +80,7 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
   });
 
   test.describe('when the message cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('GET', /^\/messages\/[^/]+$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', /^\/messages\/[^/]+$/, 500)));
 
     test('the admin is told the message could not be loaded', async ({ adminMessages, apiMock }) => {
       knownBug('ADM-14', ADM_14, { absence: true });

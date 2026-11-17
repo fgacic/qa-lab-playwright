@@ -53,6 +53,21 @@ export class CheckoutPage {
     await this.payment.payOnDelivery();
   }
 
+  /**
+   * Opens the cart from the shop (so there is a page to go Back to), lets `walk` take the steps it is about, then
+   * presses Back, which leaves the checkout for the shop, and Forward, which returns to the cart.
+   */
+  @step('Walk the checkout, then go Back to the shop and Forward again')
+  async walkThenBackAndForward(walk: () => Promise<void>): Promise<void> {
+    await this.header.goHomeViaLogo();
+    await this.page.waitForURL('/');
+    await this.header.openCart();
+    await walk();
+    await this.page.goBack();
+    await this.page.waitForURL('/');
+    await this.page.goForward();
+  }
+
   @step('Open the cart')
   async open(): Promise<void> {
     await this.shell.goto('/checkout');

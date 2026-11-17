@@ -1,9 +1,6 @@
-import { expect, mock, test, withMocks } from '@fixtures';
-import { allowLoggedFailure } from '@pages/admin/alerts';
+import { expect, mock, test } from '@fixtures';
+import { ADM_25, withLoggedFailure } from '@pages/admin/alerts';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-
-/** The defect ADM-25 in one sentence, shared by its pins (ADM-22 is the same for the six lists). */
-const ADM_25 = 'a back-office page or form whose request is refused with 401 (an expired or revoked session) stays where it is and the admin is not sent to the sign-in page (ADM-22 is the same for the lists).';
 
 const UNAUTHORIZED = { message: 'Unauthorized' };
 
@@ -12,10 +9,8 @@ const UNAUTHORIZED = { message: 'Unauthorized' };
  * The session the admin signed in with is refused while the page is open; a fixed back office signs the admin out and shows the sign-in page.
  */
 test.describe('Admin pages on an expired session (mocked back office)', { tag: ['@mocked', '@negative', '@bug'] }, () => {
-  test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
-
   test.describe('dashboard', () => {
-    test.use(withMocks(mock.fail('GET', '/invoices', 401, UNAUTHORIZED), mock.fail('GET', '/reports/total-sales-of-years', 401, UNAUTHORIZED)));
+    test.use(withLoggedFailure(mock.fail('GET', '/invoices', 401, UNAUTHORIZED), mock.fail('GET', '/reports/total-sales-of-years', 401, UNAUTHORIZED)));
 
     test('an expired session on the dashboard sends the admin to the sign-in page', async ({ adminDashboard, page }) => {
       knownBug('ADM-25', ADM_25);
@@ -26,7 +21,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
   });
 
   test.describe('statistics', () => {
-    test.use(withMocks(mock.fail('GET', /^\/reports\/[^/]+$/, 401, UNAUTHORIZED)));
+    test.use(withLoggedFailure(mock.fail('GET', /^\/reports\/[^/]+$/, 401, UNAUTHORIZED)));
 
     test('an expired session on the statistics sends the admin to the sign-in page', async ({ adminStatistics, page }) => {
       knownBug('ADM-25', ADM_25);
@@ -38,7 +33,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
 
   for (const period of ['month', 'week'] as const) {
     test.describe(`average sales per ${period}`, () => {
-      test.use({ adminSalesPeriod: period, ...withMocks(mock.fail('GET', /^\/reports\/[^/]+$/, 401, UNAUTHORIZED)) });
+      test.use({ adminSalesPeriod: period, ...withLoggedFailure(mock.fail('GET', /^\/reports\/[^/]+$/, 401, UNAUTHORIZED)) });
 
       test(`an expired session on the sales per ${period} sends the admin to the sign-in page`, async ({ adminSalesReport, page }) => {
         knownBug('ADM-25', ADM_25);
@@ -50,7 +45,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
   }
 
   test.describe('a form save', () => {
-    test.use(withMocks(mock.fail('POST', '/brands', 401, UNAUTHORIZED)));
+    test.use(withLoggedFailure(mock.fail('POST', '/brands', 401, UNAUTHORIZED)));
 
     test('an expired session when a brand is saved sends the admin to the sign-in page', async ({ adminBrands, apiMock, page }) => {
       knownBug('ADM-25', ADM_25);

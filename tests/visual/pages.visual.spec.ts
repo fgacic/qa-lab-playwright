@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, mock, test, withMocks } from '@fixtures';
+import { emptyCartMock } from '@fixtures/mocks';
 import { SUITE_OWNED_NAME } from '@support/catalog-terms';
 import { settleImages } from '@support/visual';
 import { emptyProductPage } from '@support/payloads';
@@ -113,7 +114,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
 
   test.describe('empty cart (mocked)', { tag: ['@mocked'] }, () => {
     // The shop answers the cart with no lines: the state it words ("The cart is empty."), unlike a visitor with no cart at all (BUG-13).
-    test.use(withMocks(mock.respond('GET', /^\/carts\/[^/]+$/, { id: 'qa-lab', additional_discount_percentage: null, lat: null, lng: null, cart_items: [] })));
+    test.use(withMocks(emptyCartMock));
 
     test('empty cart', async ({ checkout, page }) => {
       await expect(checkout.cart.emptyMessage).toBeVisible();

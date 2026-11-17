@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { ADMIN_ADDRESSES } from '@pages/admin/AdminPages';
+import { ADMIN_ADDRESSES } from '@pages/admin/admin-sections';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /**

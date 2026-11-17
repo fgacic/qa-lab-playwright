@@ -7,14 +7,21 @@ import { KNOWN_VIOLATIONS, SCAN_NAMES } from '@support/a11y-baseline';
 
 const PIN_SPEC = readFileSync(join(__dirname, '..', 'a11y', 'known-violations.a11y.spec.ts'), 'utf8');
 const SCAN_SPEC = readFileSync(join(__dirname, '..', 'a11y', 'pages.a11y.spec.ts'), 'utf8');
-const scannedNames = [...SCAN_SPEC.matchAll(/\ba11y\.scan\(\s*'([^']+)'/g)].map(([, name]) => name);
-const pinnedPages = new Set([...PIN_SPEC.matchAll(/\bon\('([^']+)'\)/g)].map(([, page]) => page));
+// Any quote style counts as a literal. A call whose first argument is not one (a variable, a template with a hole) is not read as a name, so
+// the number of calls is held against the number of names read: such a call fails the guard instead of slipping past it.
+const SCAN_CALL = /\ba11y\.scan\(/g;
+const SCAN_LITERAL = /\ba11y\.scan\(\s*(['"`])([^'"`$]+)\1/g;
+const PIN_CALL = /\bon\(/g;
+const PIN_LITERAL = /\bon\((['"`])([^'"`$]+)\1\)/g;
+const scannedNames = [...SCAN_SPEC.matchAll(SCAN_LITERAL)].map(([, , name]) => name);
+const pinnedPages = new Set([...PIN_SPEC.matchAll(PIN_LITERAL)].map(([, , page]) => page));
 
 test.describe('the accessibility baseline', { tag: ['@framework'] }, () => {
   test('every baseline entry has a pin loop in the pin spec, and every id is unique', () => {
     const ids = KNOWN_VIOLATIONS.map((v) => v.id);
 
     expect(pinnedPages.size, 'the scan of the pin spec found no `on(...)` loop at all').toBeGreaterThan(0);
+    expect([...PIN_SPEC.matchAll(PIN_LITERAL)], 'every `on(...)` in the pin spec is called with a literal page name (this guard reads the source)').toHaveLength([...PIN_SPEC.matchAll(PIN_CALL)].length);
     expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'baseline ids that appear twice').toEqual([]);
     expect(KNOWN_VIOLATIONS.filter((v) => !pinnedPages.has(v.page)).map((v) => `${v.id} (${v.page})`), 'entries whose page no pin loop is written for (add one in known-violations.a11y.spec.ts)').toEqual([]);
   });
@@ -32,6 +39,7 @@ test.describe('the accessibility baseline', { tag: ['@framework'] }, () => {
 
   test('every state in SCAN_NAMES is scanned in pages.a11y.spec.ts, exactly once, and no scan names a state outside the list', () => {
     expect(scannedNames.length, 'the scan of the spec found no `a11y.scan(...)` call at all').toBeGreaterThan(0);
+    expect(scannedNames, 'every `a11y.scan(...)` in the spec is called with a literal name (this guard reads the source)').toHaveLength([...SCAN_SPEC.matchAll(SCAN_CALL)].length);
     expect(SCAN_NAMES.filter((name) => !scannedNames.includes(name)), 'named in SCAN_NAMES, scanned nowhere (its baseline entries could never be checked)').toEqual([]);
     expect(scannedNames.filter((name, i) => scannedNames.indexOf(name) !== i), 'scanned twice under one name').toEqual([]);
     expect(scannedNames.filter((name) => !(SCAN_NAMES as readonly string[]).includes(name)), 'scanned, but not in SCAN_NAMES').toEqual([]);

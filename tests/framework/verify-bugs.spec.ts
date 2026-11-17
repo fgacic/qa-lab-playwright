@@ -40,6 +40,8 @@ function verify(pins: Pin[], runErrors?: string[], argv: string[] = []): Outcome
       env: { ...process.env, VERIFY_BUGS_PLAYWRIGHT: join(ROOT, 'tests', 'framework', 'probe', 'fake-playwright.mjs'), FAKE_PLAYWRIGHT_SCENARIO: scenario, FAKE_PLAYWRIGHT_LOG: log },
     });
     expect(run.error, 'verify-bugs started').toBeUndefined();
+    // The stand-in opens no browser, so nothing may install one (parallel `playwright install --with-deps` runs collide on apt's lock).
+    expect(run.stdout, 'verify-bugs installed a browser although a stand-in runner is configured').not.toContain('making sure');
     const calls = readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Call);
     // Written only when the run got as far as judging the pins.
     const summaryFile = join(dir, 'test-results', 'verify-bugs.json');

@@ -4,6 +4,9 @@ import { AppShell } from '../AppShell';
 
 export type AccountSection = 'Favorites' | 'Profile' | 'Invoices' | 'Messages';
 
+/** The heading of /account. */
+export const ACCOUNT_TITLE = 'My account';
+
 /** /account: the signed-in landing page with one tile per section. */
 export class AccountPage {
   readonly shell: AppShell;

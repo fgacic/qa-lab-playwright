@@ -17,7 +17,7 @@ import { httpsUrl } from '@support/urls';
  * site would send, not just that the header exists. Plain HTTP, no browser: the file runs on the browserless `apiOnlyTest`,
  * and a challenge is recognised by Cloudflare's `cf-mitigated: challenge` response header.
  *
- * Defect ids: SEC-01..06 are the pins below; the next free one is SEC-15 (the registry in docs/COVERAGE.md is the source).
+ * Defect ids: SEC-01..06 are the pins below; the next free one is whatever the registry in docs/COVERAGE.md says (it is the source).
  * What counts as a good header value is judged by the matchers in src/support/security-headers.ts, which
  * tests/security/header-matchers.spec.ts runs offline on sample values, on the gate.
  *
@@ -100,7 +100,7 @@ test.describe('Security headers of the live shop', { tag: ['@security', '@live-o
 // Not pins, so a describe of their own without @bug (verify-bugs.mjs treats every @bug test as a pin that must fail).
 test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['@security', '@live-only'] }, () => {
   // The checks below are not pins: nothing is known about the live site's answer yet, so each states the behaviour a
-  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (SEC-18) then.
+  // hardened site shows and is judged on its own value. A red nightly run is the finding; pin it under the next free SEC id (see the header) then.
   // They are @live-only, like the rest of the file, because the self-hosted nginx is ours and not the product.
 
   test('every cookie the shop and its API set, if any, is Secure, HttpOnly and has a SameSite', async ({ request }, testInfo) => {

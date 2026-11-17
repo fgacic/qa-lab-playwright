@@ -29,13 +29,6 @@ export function fetchOutcome(page: Page, url: string, method: string, headers: R
   );
 }
 
-/** Milliseconds `action` takes. Timing is the thing under test in the delay specs, so the clock lives here, not in a spec. */
-export async function elapsedMs(action: () => Promise<unknown>): Promise<number> {
-  const started = Date.now();
-  await action();
-  return Date.now() - started;
-}
-
 /**
  * Asks `url` once per body, `gapMs` apart so the later one is certainly asked later, and returns the bodies' `page` values
  * in the order their answers arrived.

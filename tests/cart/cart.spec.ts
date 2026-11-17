@@ -1,6 +1,7 @@
 import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
 import { CHECKOUT_STEPS } from '@components/checkout/StepIndicator';
 import { expect, mock, test, withMocks } from '@fixtures';
+import { emptyCartMock } from '@fixtures/mocks';
 import { twoProductCart } from '@fixtures/pages';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { failureFeedback } from '@support/feedback';
@@ -258,9 +259,11 @@ test.describe('Cart', () => {
       await expect(row.title).toBeVisible();
       await expect(row.linePrice).toShowAmount(product.price);
 
-      // Either way of refusing the line is a fix: a notice on it (or an alert), or a Proceed that cannot be pressed.
+      // Either way of refusing the line is a fix: a notice on it (or an alert), or a Proceed that cannot be pressed (disabled, or gone:
+      // the count is read first, as isDisabled() would wait for a button that is gone and overrun the window).
+      const { proceedButton } = checkout.cart;
       await expect
-        .poll(async () => (await row.outOfStock.or(checkout.shell.errorAlert).first().isVisible()) || (await checkout.cart.proceedButton.isDisabled()), {
+        .poll(async () => (await row.outOfStock.or(checkout.shell.errorAlert).first().isVisible()) || (await proceedButton.count()) === 0 || (await proceedButton.isDisabled()), {
           message: 'BUG-44: the cart says the out-of-stock line cannot be bought, or will not go on to checkout',
           timeout: BUG_TIMEOUT,
         })
@@ -288,7 +291,7 @@ test.describe('Cart', () => {
   });
 
   test.describe('when the cart comes back without items', { tag: ['@mocked'] }, () => {
-    test.use(withMocks(mock.respond('GET', CART, { id: 'qa-lab', additional_discount_percentage: null, lat: null, lng: null, cart_items: [] })));
+    test.use(withMocks(emptyCartMock));
 
     test('the empty-cart message is shown', async ({ checkout }) => {
       await expect(checkout.cart.emptyMessage).toBeVisible();

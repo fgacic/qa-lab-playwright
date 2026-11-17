@@ -1,5 +1,5 @@
-import { expect, mock, test, withMocks } from '@fixtures';
-import { allowLoggedFailure } from '@pages/admin/alerts';
+import { expect, mock, test } from '@fixtures';
+import { withLoggedFailure } from '@pages/admin/alerts';
 import { spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
@@ -35,8 +35,7 @@ test.describe('Admin product specifications (mocked back office)', { tag: ['@moc
   });
 
   test.describe('when a specification cannot be added', { tag: ['@negative'] }, () => {
-    test.use(withMocks(mock.fail('POST', SPECS, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('POST', SPECS, 500)));
 
     test('the failure is shown and no row is added', async ({ adminProducts, backOffice }) => {
       const form = await adminProducts.edit(backOffice.product.id);
@@ -51,8 +50,7 @@ test.describe('Admin product specifications (mocked back office)', { tag: ['@moc
   });
 
   test.describe('when a specification cannot be removed', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('DELETE', SPEC, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('DELETE', SPEC, 500)));
 
     test('the admin is told the specification stays', async ({ adminProducts, backOffice, apiMock }) => {
       knownBug('ADM-19', 'a specification the API refuses to remove (500) stays in the list and nothing says so.', { absence: true });

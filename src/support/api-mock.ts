@@ -263,7 +263,10 @@ export class ApiMock {
   /** Waits for the next request to an endpoint, mocked or real, and returns it. */
   waitForRequest(method: HttpMethod, path: MockRoute['path'], options: WaitOptions = {}): Promise<Request> {
     assertPath(path);
-    return this.page.waitForRequest((r) => r.method() === method && isApiUrl(r.url()) && matches(path, apiPath(r.url())), options);
+    const request = this.page.waitForRequest((r) => r.method() === method && isApiUrl(r.url()) && matches(path, apiPath(r.url())), options);
+    // Observed from the start: if the action throws before the test awaits it, a timeout is not left as an unhandled rejection. Awaiting it still rejects.
+    request.catch(() => undefined);
+    return request;
   }
 
   /**

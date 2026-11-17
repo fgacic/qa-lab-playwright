@@ -4,13 +4,13 @@ End-to-end UI tests for the Toolshop demo shop (practicesoftwaretesting.com), ru
 
 **Live report: [fgacic.github.io/qa-lab-playwright](https://fgacic.github.io/qa-lab-playwright/)**, with Allure trends across runs. The Playwright HTML report is under [/playwright](https://fgacic.github.io/qa-lab-playwright/playwright/).
 
-The suite runs **1,452 tests in Chromium and 622 each in Firefox and WebKit** (the axe, keyboard, translation and API suites are Chromium-only), in 67 spec files (and 17 more for the framework). On top of that come:
+The suite runs **1,457 tests in Chromium and 626 each in Firefox and WebKit** (the axe, keyboard, translation and API suites are Chromium-only), in 69 spec files (and 16 more for the framework). On top of that come:
 
 - 19 performance tests, measured alone in a project of their own, with no retries: 16 measurements (five pages, two phone loads, the page weight of two pages, and the layout shifts) and the three controls that prove the collector sees a long task, a slow click and a known document;
 - an 18-test smoke set on a Pixel 7;
 - 30 visual baselines (31 tests: one more checks that no baseline on disk is orphaned);
 - 29 tests in the real-account and real-admin projects: 27 journeys and the 2 sign-ins they start from;
-- 179 framework tests (no site involved, bar the few that start a nested run): the mock layer, the target configuration, the write guard and its teardown check, the answer gate that holds a request open for the double-click pins, the console guard (its allowance for a logged failed request, in the shape of each engine), the run guard, the lint configuration (each banned pattern has a sample that must be refused and one that must not), the preflight and the health check, the Toolshop API helpers, the a11y ratchet's decision (`diffFindings`) and its refusal to record on CI, the performance baseline arithmetic, the `test-all` runner, the security header matchers (run offline on sample values), the verdicts and the orchestration of verify-bugs (every engine a pin is scheduled in, a rerun of a pin that passes, the per-project shards), and a check that every defect id in the code is in COVERAGE and the reverse.
+- 197 framework tests (no site involved, bar the few that start a nested run): the mock layer, the target configuration, the write guard and its teardown check, the answer gate that holds a request open for the double-click pins, the console guard (its allowance for a logged failed request, in the shape of each engine), the run guard, the lint configuration (each banned pattern has a sample that must be refused and one that must not), the preflight and the health check, the Toolshop API helpers, the a11y ratchet's decision (`diffFindings`) and its refusal to record on CI, the custom matchers (`toBeSorted`, `toShowAmount` and the amount parser), the performance baseline arithmetic, the `test-all` runner, the security header matchers (run offline on sample values), the verdicts and the orchestration of verify-bugs (every engine a pin is scheduled in, a rerun of a pin that passes, the per-project shards), and a check that every defect id in the code is in COVERAGE and the reverse.
 
 Every control the site exposes, the back office included, is listed in [docs/COVERAGE.md](docs/COVERAGE.md) with the test that covers it.
 
@@ -62,7 +62,7 @@ Guards in the framework, so a run cannot quietly prove nothing:
 - The self-hosted test timeout is 45 s, so a hung test fails early; live gets 90 s.
 
 
-Static checks: `npm run lint` (ESLint with `eslint-plugin-playwright`, zero warnings allowed) runs next to `tsc --noEmit`, locally and in CI. A spec may not run code in the page (`evaluate`, `evaluateAll`, `evaluateHandle`, `$eval`, `$$eval` and `waitForFunction`, on any receiver: a page, a locator, a frame or a handle), nor read the clock (`Date.now()`, `new Date()`, `performance.now()`) or `Math.random()`: it uses a named helper (`storedToken`, `fetchStatus`, `consoleArgsText`, `elapsedMs`) or a fixed value. The workflow linter (actionlint) runs from an image pinned by digest.
+Static checks: `npm run lint` (ESLint with `eslint-plugin-playwright`, zero warnings allowed) runs next to `tsc --noEmit`, locally and in CI. A spec may not run code in the page (`evaluate`, `evaluateAll`, `evaluateHandle`, `$eval`, `$$eval` and `waitForFunction`, on any receiver: a page, a locator, a frame or a handle), nor read the clock (`Date.now()`, `new Date()`, `performance.now()`) or `Math.random()`: it uses a named helper (`storedToken`, `fetchStatus`, `consoleArgsText`) or a fixed value. The workflow linter (actionlint) runs from an image pinned by digest.
 
 Allure labels are derived in one fixture (`fixtures/allure-labels.ts`):
 - epic from the spec folder, feature from the file, story from the innermost describe;

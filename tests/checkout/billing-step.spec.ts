@@ -1,5 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
-import { POSTCODE_LOOKUP_RESULT, postcodeLookupMock } from '@fixtures/pages';
+import { POSTCODE_LOOKUP_RESULT, postcodeLookupMock } from '@fixtures/mocks';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
@@ -10,6 +10,10 @@ const TEXT = {
   serverError: 'Server Error',
   postcodeInvalid: 'The postal code format is not valid for the selected country.',
 } as const;
+
+/** The country the address is switched to, and the city the lookup answers when it is switched back. */
+const OTHER_COUNTRY = 'DE';
+const BACK_CITY = 'Backstad';
 
 /** The two answers of the late-answer race: the slow one is for the first house number, the fast one for the second. */
 const RACE = {
@@ -52,16 +56,12 @@ test.describe('Checkout: billing address step', () => {
 
     test('browser Back from the billing step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {
       const [{ product }] = cartItems;
-      // The cart opened from the shop, so there is a page to go Back to; the steps are then walked again from the cart.
-      await checkout.header.goHomeViaLogo();
-      await checkout.header.openCart();
-      await checkout.cart.proceed();
-      await checkout.signIn.continueAsGuest(fakeGuest());
-      await expect(checkout.billing.heading).toBeVisible();
 
-      await page.goBack();
-      await expect(page).toHaveURL('/');
-      await page.goForward();
+      await checkout.walkThenBackAndForward(async () => {
+        await checkout.cart.proceed();
+        await checkout.signIn.continueAsGuest(fakeGuest());
+        await expect(checkout.billing.heading).toBeVisible();
+      });
 
       await expect(page).toHaveURL(/\/checkout$/);
       await expect(checkout.cart.table.row(product.name).title, 'the cart still holds its line').toBeVisible();
@@ -89,22 +89,23 @@ test.describe('Checkout: billing address step', () => {
 
     test('changing the country after filling the address asks the lookup again and shows its answer', async ({ checkout, apiMock }) => {
       const { billing } = checkout;
-      await billing.enterAddress(fakeAddress());
+      const address = fakeAddress();
+      await billing.enterAddress(address);
 
       // The lookup now refuses the postcode for the new country: the page shows why.
       await apiMock.use(mock.fail('GET', '/postcode-lookup', 422, { message: TEXT.postcodeInvalid }));
       const refused = apiMock.waitForResponse('GET', '/postcode-lookup');
-      await billing.country.input.selectOption('DE');
+      await billing.country.input.selectOption(OTHER_COUNTRY);
       expect((await refused).response.status(), 'the lookup refuses the postcode for the new country').toBe(422);
       await expect(billing.lookupError).toHaveText(TEXT.postcodeInvalid);
 
       // And back: a good answer clears the error and fills the address again.
-      await apiMock.use(mock.respond('GET', '/postcode-lookup', { ...POSTCODE_LOOKUP_RESULT, city: 'Backstad' }));
+      await apiMock.use(mock.respond('GET', '/postcode-lookup', { ...POSTCODE_LOOKUP_RESULT, city: BACK_CITY }));
       const found = apiMock.waitForResponse('GET', '/postcode-lookup');
-      await billing.country.input.selectOption('NL');
+      await billing.country.input.selectOption(address.country);
       expect((await found).response.status(), 'the lookup finds the address for the original country').toBe(200);
       await expect(billing.lookupError).toBeHidden();
-      await expect(billing.city.input).toHaveValue('Backstad');
+      await expect(billing.city.input).toHaveValue(BACK_CITY);
     });
   });
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mergeTests, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
-import { cleanupTest } from '@fixtures/security';
+import { worldTest } from '@fixtures/security';
 import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, removeLater, type Account, type World } from '@support/authz';
 import { knownBug } from '@support/known-bug';
 import { base64Url, fakeJwt, fromBase64Url } from '@support/payloads';
@@ -29,7 +29,7 @@ import type { Product, ToolshopApi } from '@support/toolshop-api';
  *
  * The file runs on `apiOnlyTest`: no browser context is opened, since every check is a plain HTTP call.
  */
-const test = mergeTests(apiOnlyTest, cleanupTest);
+const test = mergeTests(apiOnlyTest, worldTest);
 
 type Caller = 'anonymous' | 'customer';
 const CALLERS: Caller[] = ['anonymous', 'customer'];
@@ -37,6 +37,11 @@ const WHO: Record<Caller, string> = { anonymous: 'an anonymous caller', customer
 
 /** What creating a record answers. */
 const CREATED = 201;
+/** The first names the profile checks write: the owner's own change, and the one an intruder tries. */
+const OWN_NAME = 'Changed';
+const INTRUDER_NAME = 'Hijacked';
+/** The subject and body of the contact message the checks send. */
+const MESSAGE = { subject: 'webmaster', message: 'Sent by the authorisation checks to see who may list or change it.' } as const;
 
 /** Whether an answer is a verdict on authorisation at all: accepted (2xx) or refused (401, 403). Anything else is not one. */
 function expectVerdict(response: APIResponse, what: string): void {
@@ -53,7 +58,7 @@ async function tokenFor(world: World, caller: Caller): Promise<string | undefine
  * paged, so every page is read until it turns up) and its id returned. A message nobody can delete is left behind, uniquely named.
  */
 async function contactMessage(world: World, name: string): Promise<string> {
-  await world.api.sendContactMessage({ name, email: uniqueEmail('authz'), subject: 'webmaster', message: 'Sent by the authorisation checks to see who may list or change it.' });
+  await world.api.sendContactMessage({ name, email: uniqueEmail('authz'), ...MESSAGE });
   const admin = await world.adminToken();
   const inboxPage = async (page: number) => (await call(world.request, 'GET', `/messages?page=${page}`, { token: admin })).json();
   const first = await inboxPage(1);
@@ -306,10 +311,9 @@ test.describe('API authorisation, catalogue writes (self-hosted only)', { tag: [
 
     test.describe(`${kind.plural}, writes`, { tag: ['@bug'] }, () => {
       for (const caller of CALLERS) {
-        test(`${kind.noun}: ${WHO[caller]} cannot create one`, async ({ request, api, adminToken, cleanups, catalog }) => {
+        test(`${kind.noun}: ${WHO[caller]} cannot create one`, async ({ request, catalog, world }) => {
           knownBug(kind.id, `POST ${kind.path} is accepted from ${WHO[caller]}: the write is not authorised.`);
           const template = await catalog.inStock();
-          const world = { request, api, adminToken, cleanups };
           const token = await tokenFor(world, caller);
           const name = unique(kind.noun);
 
@@ -321,10 +325,9 @@ test.describe('API authorisation, catalogue writes (self-hosted only)', { tag: [
           expect.soft(landed, `${kind.id}: the record ${WHO[caller]} posted was created (read back as the admin)`).toBe(false);
         });
 
-        test(`${kind.noun}: ${WHO[caller]} cannot change one`, async ({ request, api, adminToken, cleanups, catalog }) => {
+        test(`${kind.noun}: ${WHO[caller]} cannot change one`, async ({ request, adminToken, catalog, world }) => {
           knownBug(kind.id, `PUT ${kind.path}/{id} is accepted from ${WHO[caller]}: the write is not authorised.`);
           const template = await catalog.inStock();
-          const world = { request, api, adminToken, cleanups };
           const token = await tokenFor(world, caller);
           const name = unique(kind.noun);
           // The record is the test's own, made by the admin: whatever the attempt does, no seeded record is touched.
@@ -342,9 +345,8 @@ test.describe('API authorisation, catalogue writes (self-hosted only)', { tag: [
     });
 
     for (const caller of CALLERS) {
-      test(`${kind.noun}: ${WHO[caller]} cannot delete one`, async ({ request, api, adminToken, cleanups, catalog }) => {
+      test(`${kind.noun}: ${WHO[caller]} cannot delete one`, async ({ request, adminToken, catalog, world }) => {
         const template = await catalog.inStock();
-        const world = { request, api, adminToken, cleanups };
         const token = await tokenFor(world, caller);
         const id = await makeRecord(world, kind, unique(kind.noun), template);
 
@@ -375,8 +377,7 @@ test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@se
     expect((listed.data as { id: string }[]).map((invoice) => invoice.id), "a new customer's invoice list is empty: it holds no one else's order").toEqual([]);
   });
 
-  test('a customer lists no contact message that somebody else sent', async ({ request, api, adminToken, cleanups }) => {
-    const world = { request, api, adminToken, cleanups };
+  test('a customer lists no contact message that somebody else sent', async ({ request, world }) => {
     // The control: the admin's inbox holds the message (found by paging through it), so its absence below is about who is asking.
     await contactMessage(world, `Authz scoping ${randomUUID().slice(0, 8)}`);
     const { token } = await newCustomer(world);
@@ -386,8 +387,7 @@ test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@se
     expect((listed.data as { name: string }[]).map((message) => message.name), "a new customer's message list holds no one else's message").toEqual([]);
   });
 
-  test("a customer lists no favourite that is another customer's", async ({ request, api, adminToken, cleanups, catalog }) => {
-    const world = { request, api, adminToken, cleanups };
+  test("a customer lists no favourite that is another customer's", async ({ request, api, cleanups, catalog, world }) => {
     const owner = await newCustomer(world);
     const other = await newCustomer(world);
     await api.addFavorite(owner.token, (await catalog.inStock()).id);
@@ -442,25 +442,24 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   const profileOf = (account: Account, firstName: string) => profileBody(account, { firstName });
   const nameOf = async (request: APIRequestContext, token: string) => ((await (await call(request, 'GET', '/users/me', { token })).json()) as { first_name: string }).first_name;
 
-  test("a customer cannot change another customer's profile", async ({ request, api, adminToken, cleanups }) => {
-    const world = { request, api, adminToken, cleanups };
+  test("a customer cannot change another customer's profile", async ({ request, world }) => {
     const owner = await newCustomer(world);
     const intruder = await newCustomer(world);
     // The control: the owner's own PUT with the same body is accepted and lands, so a refusal is about who is asking.
-    const own = await call(request, 'PUT', `/users/${owner.id}`, { token: owner.token, data: profileOf(owner, 'Changed') });
+    const own = await call(request, 'PUT', `/users/${owner.id}`, { token: owner.token, data: profileOf(owner, OWN_NAME) });
     expect(own.status(), 'the owner could change their own profile with this body').toBe(200);
-    expect(await nameOf(request, owner.token), 'the owner read the change back').toBe('Changed');
+    expect(await nameOf(request, owner.token), 'the owner read the change back').toBe(OWN_NAME);
 
-    const response = await call(request, 'PUT', `/users/${owner.id}`, { token: intruder.token, data: profileOf(owner, 'Hijacked') });
+    const response = await call(request, 'PUT', `/users/${owner.id}`, { token: intruder.token, data: profileOf(owner, INTRUDER_NAME) });
 
     expect(REFUSED, `a customer changing another customer's profile got ${response.status()}`).toContain(response.status());
-    expect(await nameOf(request, owner.token), "the owner's name is untouched").toBe('Changed');
+    expect(await nameOf(request, owner.token), "the owner's name is untouched").toBe(OWN_NAME);
   });
 
   test("an anonymous caller cannot change a customer's profile", async ({ request, api, adminToken, cleanups }) => {
     const owner = await newCustomer({ request, api, adminToken, cleanups });
 
-    const response = await call(request, 'PUT', `/users/${owner.id}`, { data: profileOf(owner, 'Hijacked') });
+    const response = await call(request, 'PUT', `/users/${owner.id}`, { data: profileOf(owner, INTRUDER_NAME) });
 
     expect(REFUSED, `an anonymous PUT of a customer's profile got ${response.status()}`).toContain(response.status());
     expect(await nameOf(request, owner.token), "the owner's name is untouched").toBe(owner.customer.firstName);
@@ -475,8 +474,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
     expect((await call(request, 'GET', `/users/${owner.id}`, { token: await adminToken() })).status(), 'the account is still there').toBe(200);
   });
 
-  test("a customer cannot delete another customer's account", async ({ request, api, adminToken, cleanups }) => {
-    const world = { request, api, adminToken, cleanups };
+  test("a customer cannot delete another customer's account", async ({ request, adminToken, world }) => {
     const owner = await newCustomer(world);
     const intruder = await newCustomer(world);
 
@@ -499,8 +497,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   const hasFavourite = async (request: APIRequestContext, owner: Account, id: string) =>
     ((await (await call(request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[]).some((favourite) => favourite.id === id);
 
-  test('a customer can remove their own favourite', async ({ request, api, adminToken, cleanups, catalog }) => {
-    const world = { request, api, adminToken, cleanups };
+  test('a customer can remove their own favourite', async ({ request, catalog, world }) => {
     const owner = await newCustomer(world);
     const id = await favouriteOf(world, owner, await catalog.inStock());
 
@@ -510,8 +507,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
     expect(await hasFavourite(request, owner, id), 'it is gone').toBe(false);
   });
 
-  test("a customer cannot remove another customer's favourite", async ({ request, api, adminToken, cleanups, catalog }) => {
-    const world = { request, api, adminToken, cleanups };
+  test("a customer cannot remove another customer's favourite", async ({ request, catalog, world }) => {
     const owner = await newCustomer(world);
     const intruder = await newCustomer(world);
     const id = await favouriteOf(world, owner, await catalog.inStock());
@@ -522,8 +518,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
     expect(await hasFavourite(request, owner, id), "the owner's favourite is still there").toBe(true);
   });
 
-  test("an anonymous caller cannot remove a customer's favourite", async ({ request, api, adminToken, cleanups, catalog }) => {
-    const world = { request, api, adminToken, cleanups };
+  test("an anonymous caller cannot remove a customer's favourite", async ({ request, catalog, world }) => {
     const owner = await newCustomer(world);
     const id = await favouriteOf(world, owner, await catalog.inStock());
 
@@ -534,9 +529,8 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   });
 
   test.describe('the answer to the same attempt', { tag: ['@bug'] }, () => {
-    test("removing another customer's favourite is refused, not answered with a success", async ({ request, api, adminToken, cleanups, catalog }) => {
+    test("removing another customer's favourite is refused, not answered with a success", async ({ request, catalog, world }) => {
       knownBug('SEC-12', "DELETE /favorites/{id} by another customer answers 204 (success) although nothing is deleted: the refusal is silent and the caller cannot tell it from a delete.");
-      const world = { request, api, adminToken, cleanups };
       const owner = await newCustomer(world);
       const intruder = await newCustomer(world);
       const id = await favouriteOf(world, owner, await catalog.inStock());
@@ -563,8 +557,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   /** A short key no other test, worker, retry or run shares: a contact message's name is capped, and a UUID is longer than the cap. */
   const newKey = () => randomUUID().slice(0, 8);
 
-  test('the admin can change the status of an order and of a message, with the bodies the attempts below send', async ({ request, api, adminToken, cleanups, catalog }) => {
-    const world = { request, api, adminToken, cleanups };
+  test('the admin can change the status of an order and of a message, with the bodies the attempts below send', async ({ request, adminToken, catalog, world }) => {
     const admin = await adminToken();
     const order = await guestOrder(world, catalog);
     const message = await contactMessage(world, `Authz admin ${newKey()}`);

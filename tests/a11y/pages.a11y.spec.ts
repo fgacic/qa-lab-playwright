@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import type { Page } from '@playwright/test';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
-import { postcodeLookupMock } from '@fixtures/pages';
+import { emptyCartMock, postcodeLookupMock } from '@fixtures/mocks';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { brand, customer } from '@support/admin-payloads';
 import { holdTimer } from '@support/clock';
@@ -24,7 +24,7 @@ import { diffFindings, KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-bas
 import { IS_SELF_HOSTED } from '@support/env';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { horizontalOverflow } from '@support/page-metrics';
-import { acceptedGuestInvoice, fakeUser } from '@support/payloads';
+import { acceptedGuestInvoice, fakeUser, listOf } from '@support/payloads';
 import { fakeAddress, fakeGuest } from '@support/test-data';
 
 /** How long the shop's alerts stay before they fade (its own 3 s timer): what `holdTimer` keeps from firing during a scan. */
@@ -129,7 +129,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
 
   test.describe('empty cart (mocked)', { tag: ['@mocked'] }, () => {
     // The shop answers the cart with no lines: the state it words ("The cart is empty."), unlike a visitor with no cart at all (BUG-13).
-    test.use(withMocks(mock.respond('GET', /^\/carts\/[^/]+$/, { id: 'qa-lab', additional_discount_percentage: null, lat: null, lng: null, cart_items: [] })));
+    test.use(withMocks(emptyCartMock));
 
     test('no new violations on an empty cart', async ({ checkout, a11y }) => {
       await expectNoNewViolations(await a11y.scan('empty cart', { ready: [checkout.cart.emptyMessage] }), 'empty cart');
@@ -298,8 +298,8 @@ test.describe('Accessibility scan: phone width', { tag: ['@a11y', '@axe'] }, () 
 test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '@axe', '@mocked'] }, () => {
   test.use(withMocks(
     mock.respond('GET', '/favorites', []),
-    mock.respond('GET', '/invoices', { current_page: 1, data: [], last_page: 1, total: 0, per_page: 15 }),
-    mock.respond('GET', '/messages', { current_page: 1, data: [], last_page: 1, total: 0, per_page: 15 }),
+    mock.respond('GET', '/invoices', listOf([])),
+    mock.respond('GET', '/messages', listOf([])),
     mock.respond('POST', '/totp/setup', {}),
   ));
 

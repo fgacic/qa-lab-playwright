@@ -1,5 +1,5 @@
-import { expect, mock, test, withMocks } from '@fixtures';
-import { allowLoggedFailure } from '@pages/admin/alerts';
+import { expect, mock, test } from '@fixtures';
+import { withLoggedFailure } from '@pages/admin/alerts';
 import { DELETABLE, deletedMessage } from '@support/admin-deletable';
 import { LIST_ANSWERS } from '@support/admin-payloads';
 
@@ -28,8 +28,7 @@ for (const { list, entity, row, path, anyRecord } of DELETABLE) {
     });
 
     test.describe(`when the ${entity} is still in use`, { tag: ['@negative'] }, () => {
-      test.use(withMocks(mock.fail('DELETE', anyRecord, 409, { message: `Seems like this ${entity} is used elsewhere.` })));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('DELETE', anyRecord, 409, { message: `Seems like this ${entity} is used elsewhere.` })));
 
       test(`the reason is shown and the ${entity} stays`, async ({ adminList, apiMock }) => {
         // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
@@ -45,8 +44,7 @@ for (const { list, entity, row, path, anyRecord } of DELETABLE) {
     });
 
     test.describe(`when deleting the ${entity} fails on the server`, { tag: ['@negative'] }, () => {
-      test.use(withMocks(mock.fail('DELETE', anyRecord, 500)));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('DELETE', anyRecord, 500)));
 
       test(`the failure is shown and the ${entity} stays`, async ({ adminList, apiMock }) => {
         // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.

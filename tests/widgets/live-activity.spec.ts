@@ -8,6 +8,8 @@ import { escapeRegExp } from '@support/regexp';
  * tests assert what the stream delivered, and the one real feed (below) proves the "Live" state.
  */
 const CONNECTING = 'Connecting to the live feed…';
+/** A row names the product among other text (who bought it, when), so it is matched as a substring. */
+const matchesName = (name: string) => new RegExp(escapeRegExp(name));
 
 /** The feed is Server-Sent Events. Mocking it with a fixed stream makes the panel deterministic. */
 test.describe('Live shop activity', () => {
@@ -51,7 +53,7 @@ test.describe('Live shop activity', () => {
       await liveActivity.open();
 
       // The newest sale is listed first.
-      await expect(liveActivity.items).toHaveText([saw.name, hammer.name].map((name) => new RegExp(escapeRegExp(name))));
+      await expect(liveActivity.items).toHaveText([saw.name, hammer.name].map(matchesName));
       await expect(liveActivity.salesCount).toHaveText('2');
       await expect(liveActivity.revenue).toHaveText(`$${revenue.toFixed(2)}`);
     });
@@ -106,7 +108,7 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
 
-      await expect(liveActivity.items).toHaveText([new RegExp(escapeRegExp(intact.name))]);
+      await expect(liveActivity.items).toHaveText([matchesName(intact.name)]);
       await expect(liveActivity.salesCount).toHaveText('1');
     });
   });
@@ -124,7 +126,7 @@ test.describe('Live shop activity', () => {
 
       await liveActivity.open();
 
-      await expect(liveActivity.items).toHaveText([new RegExp(escapeRegExp(reconnected.name))]);
+      await expect(liveActivity.items).toHaveText([matchesName(reconnected.name)]);
       await expect(liveActivity.salesCount).toHaveText('1');
     });
   });

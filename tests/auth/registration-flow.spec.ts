@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { ACCOUNT_TITLE } from '@pages/account/AccountPage';
 import { fakeJwt, fakeUser } from '@support/payloads';
 import { fakeCustomer } from '@support/test-data';
 
@@ -26,7 +27,7 @@ test.describe('Registration flow (mocked auth API)', { tag: ['@flow', '@mocked']
     const account = await loginPage.login(customer.email, customer.password);
 
     await expect(page).toHaveURL('/account');
-    await expect(account.title).toHaveText('My account');
+    await expect(account.title).toHaveText(ACCOUNT_TITLE);
     await expect(account.header.userMenu).toHaveText(`${customer.firstName} ${customer.lastName}`);
   });
 });

@@ -12,6 +12,15 @@ test.describe('Product grid', () => {
     }
   });
 
+  test('every card shows the price the list holds for its product', async ({ homePage, api }) => {
+    const { data: listed } = await api.listProducts();
+
+    await expect(homePage.grid.cards).toHaveCount(listed.length);
+    for (const [index, product] of listed.entries()) {
+      await expect(homePage.grid.nth(index).price, `the price of "${product.name}"`).toShowAmount(product.price);
+    }
+  });
+
   test('a card of a product that is out of stock says so, and a card of one in stock does not', async ({ homePage, catalog }) => {
     const [soldOut, available] = [await catalog.outOfStock(), await catalog.inStock()];
 

@@ -1,8 +1,13 @@
 import { mergeTests, type Page } from '@playwright/test';
 import { AdminBrandForm, AdminCategoryForm, AdminProductForm, AdminUserForm } from '@pages/admin/AdminForms';
+import { allowLoggedFailure } from '@pages/admin/alerts';
 import { AdminListPage } from '@pages/admin/AdminListPage';
 import { ADMIN_LISTS, type AdminListName } from '@pages/admin/admin-lists';
-import { AdminDashboardPage, AdminMessagePage, AdminOrderPage, AdminSalesReportPage, AdminSettingsPage, AdminStatisticsPage } from '@pages/admin/AdminPages';
+import { AdminDashboardPage } from '@pages/admin/AdminDashboardPage';
+import { AdminMessagePage } from '@pages/admin/AdminMessagePage';
+import { AdminOrderPage } from '@pages/admin/AdminOrderPage';
+import { AdminSalesReportPage, AdminStatisticsPage } from '@pages/admin/AdminReports';
+import { AdminSettingsPage } from '@pages/admin/AdminSettingsPage';
 import * as A from '@support/admin-payloads';
 import { mock } from '@support/api-mock';
 import { fakeJwt } from '@support/payloads';
@@ -10,6 +15,7 @@ import { installToken } from '@support/session';
 import type { Product } from '@support/toolshop-api';
 import { test as adminTokenTest } from './admin-token';
 import { test as cleanupTest } from './admin-cleanup';
+import { test as consoleGuardTest } from './console-guard';
 import { test as mocksTest } from './mocks';
 
 /** The records the mocked back office serves, so specs can assert against them. (The real one has none to hand out: reading them there throws.) */
@@ -22,6 +28,10 @@ const NO_REAL_RECORDS = 'backOffice.product and backOffice.order exist only in t
 
 /** The page-object fixtures; the session option and the cleanup fixtures (`createdProducts`, `createdUsers`, `brandFactory`) come from admin-cleanup.ts. */
 export interface AdminFixtures {
+  /** Set by `withLoggedFailure` (src/pages/admin/alerts.ts): the test mocks a failing request, so the console line the SPA logs for it is allowed. */
+  loggedFailure: boolean;
+  /** Auto: applies `loggedFailure` to the console guard. */
+  loggedFailureAllowance: void;
   /** Which list `adminList` opens, for specs that run the same case over every list. */
   adminListName: AdminListName;
   adminList: AdminListPage<unknown>;
@@ -96,8 +106,18 @@ function backOfficeMocks(product: Product, order: MockedBackOffice['order']) {
 }
 
 /** The mocked back office and its pages; the cleanup of what a real-backend test creates is in fixtures/admin-cleanup.ts. */
-export const test = mergeTests(adminTokenTest, mocksTest, cleanupTest).extend<AdminFixtures>({
+export const test = mergeTests(adminTokenTest, mocksTest, cleanupTest, consoleGuardTest).extend<AdminFixtures>({
   adminListName: ['products', { option: true }],
+  loggedFailure: [false, { option: true }],
+
+  // Declared once per test, whatever the spec: the allowance is in place whenever the failed request gets logged.
+  loggedFailureAllowance: [
+    async ({ consoleGuard, loggedFailure }, use) => {
+      if (loggedFailure) allowLoggedFailure(consoleGuard);
+      await use();
+    },
+    { auto: true },
+  ],
 
   backOffice: async ({ page, adminSession, apiMock, adminToken }, use) => {
     if (adminSession === 'storage-state') {

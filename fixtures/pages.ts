@@ -10,9 +10,8 @@ import { LoginPage } from '@pages/LoginPage';
 import { ProductPage } from '@pages/ProductPage';
 import { RegisterPage } from '@pages/RegisterPage';
 import { RentalsPage } from '@pages/RentalsPage';
-import { mock } from '@support/api-mock';
 import { installToken } from '@support/session';
-import type { CartItem, Product, ToolshopApi } from '@support/toolshop-api';
+import type { CartItem, Product } from '@support/toolshop-api';
 import { test as apiTest, type Catalog } from './api';
 import { test as authTest } from './auth';
 import { test as mocksTest } from './mocks';
@@ -40,29 +39,12 @@ export interface PageOptions {
  * the cart total is the plain sum of its lines, so a spec can state the figure instead of reading it.
  * `test.use({ cartItems: twoProductCart })`
  */
-export const twoProductCart = async ({ catalog, api }: { catalog: Catalog; api: ToolshopApi }, use: (items: CartItem[]) => Promise<void>): Promise<void> => {
-  const first = await catalog.nonEco();
-  const second = await api.findProduct('second non-eco', (p) => p.in_stock && !p.is_rental && !p.is_eco_friendly && p.id !== first.id);
+export const twoProductCart = async ({ catalog }: { catalog: Catalog }, use: (items: CartItem[]) => Promise<void>): Promise<void> => {
   await use([
-    { product: first, quantity: 2 },
-    { product: second, quantity: 1 },
+    { product: await catalog.nonEco(), quantity: 2 },
+    { product: await catalog.secondNonEco(), quantity: 1 },
   ]);
 };
-
-/**
- * An answer for GET /postcode-lookup, for specs that are not about the lookup: the address is then
- * filled from this and a lookup outage cannot fail them. Specs that mock other routes list it too,
- * since a describe's `withMocks` replaces the file's.
- */
-export const POSTCODE_LOOKUP_RESULT = {
-  street: 'Mockstraat',
-  house_number: '1',
-  city: 'Mockstad',
-  state: 'Mockland',
-  country: 'NL',
-  postcode: '1234 AB',
-};
-export const postcodeLookupMock = mock.respond('GET', '/postcode-lookup', POSTCODE_LOOKUP_RESULT);
 
 /**
  * Page fixtures. Each one builds its page object, does the setup the page needs (a cart, a
@@ -87,7 +69,7 @@ export interface PageFixtures {
    * Page objects that are not opened yet, for journeys that move between areas (back office,
    * then shop): the test opens them when the story gets there.
    */
-  shop: { home: HomePage; contact: ContactPage; login: LoginPage; appShell: AppShell };
+  shop: { home: HomePage; contact: ContactPage; login: LoginPage; register: RegisterPage; appShell: AppShell };
 }
 
 export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions & PageFixtures>({
@@ -174,6 +156,7 @@ export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions 
       home: new HomePage(page),
       contact: new ContactPage(page),
       login: new LoginPage(page),
+      register: new RegisterPage(page),
       appShell: new AppShell(page),
     }),
   contactPage: async ({ page }, use) => {

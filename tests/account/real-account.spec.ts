@@ -1,4 +1,5 @@
 import { expect, test } from '@fixtures';
+import { ACCOUNT_TITLE } from '@pages/account/AccountPage';
 import { fakeAddress, fakeCustomer } from '@support/test-data';
 
 /**
@@ -21,7 +22,7 @@ test.describe('Real account', { tag: ['@account'] }, () => {
       await expect(page).toHaveURL('/auth/login');
       const account = await loginPage.login(customer.email, customer.password);
 
-      await expect(account.title).toHaveText('My account');
+      await expect(account.title).toHaveText(ACCOUNT_TITLE);
       await expect(account.header.userMenu).toHaveText(`${customer.firstName} ${customer.lastName}`);
     });
 
@@ -40,7 +41,7 @@ test.describe('Real account', { tag: ['@account'] }, () => {
 
     // A saved session that has lapsed is refused by the `session` fixture itself (fixtures/auth.ts), with the reason.
     test('opens the account area without signing in again', async ({ accountPage }) => {
-      await expect(accountPage.title).toHaveText('My account');
+      await expect(accountPage.title).toHaveText(ACCOUNT_TITLE);
       await expect(accountPage.header.userMenu).toBeVisible();
     });
   });

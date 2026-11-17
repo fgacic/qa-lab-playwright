@@ -1,6 +1,6 @@
 import { mergeTests } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
-import { cleanupTest } from '@fixtures/security';
+import { worldTest } from '@fixtures/security';
 import { call, newCustomer, REFUSED_OR_HIDDEN, removeLater } from '@support/authz';
 import { knownBug } from '@support/known-bug';
 
@@ -14,7 +14,7 @@ import { knownBug } from '@support/known-bug';
  * What the API does today: an id that was never issued is a 404 for everybody (the control), the ids are 26 random characters (not a
  * counter to walk through), and the cart answers whoever presents its id, with no token at all (SEC-15 pins that for a signed-in owner).
  */
-const test = mergeTests(apiOnlyTest, cleanupTest);
+const test = mergeTests(apiOnlyTest, worldTest);
 
 /** The shape of a cart answer this file reads. */
 interface Cart {
@@ -22,10 +22,15 @@ interface Cart {
   cart_items: { product: { id: string }; quantity: number }[];
 }
 
+/** The shape of a cart id (a ULID, lower-cased): 26 characters of digits and letters. */
+const CART_ID = /^[0-9a-z]{26}$/;
+/** An id of that shape that was never issued. */
+const UNISSUED_CART_ID = '01zzzzzzzzzzzzzzzzzzzzzzzz';
+
 test.describe('API authorisation, carts (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
   test('a cart id that was never issued is answered 404, to an anonymous caller and to a customer', async ({ request, api, adminToken, cleanups }) => {
-    // 26 characters of the id's alphabet, made up: the answer is about the id, not the shape of the path.
-    const unissued = '01zzzzzzzzzzzzzzzzzzzzzzzz';
+    // Made up from the id's alphabet: the answer is about the id, not the shape of the path.
+    const unissued = UNISSUED_CART_ID;
     const { token } = await newCustomer({ request, api, adminToken, cleanups });
 
     const anonymous = await call(request, 'GET', `/carts/${unissued}`);
@@ -34,8 +39,7 @@ test.describe('API authorisation, carts (self-hosted only)', { tag: ['@security'
     expect([anonymous.status(), customer.status()], 'GET /carts/{id} of an id nobody was given, as an anonymous caller and as a customer').toEqual([404, 404]);
   });
 
-  test('cart ids are not a counter: the random part of each of five new carts is different', async ({ request, api, adminToken, cleanups }) => {
-    const world = { request, api, adminToken, cleanups };
+  test('cart ids are not a counter: the random part of each of five new carts is different', async ({ request, world }) => {
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) {
       const response = await call(request, 'POST', '/carts', { data: {} });
@@ -45,15 +49,14 @@ test.describe('API authorisation, carts (self-hosted only)', { tag: ['@security'
       ids.push(id);
     }
 
-    expect(ids.every((id) => /^[0-9a-z]{26}$/.test(id)), `every id is 26 lower-case letters and digits (${ids.join(', ')})`).toBe(true);
+    expect(ids.every((id) => CART_ID.test(id)), `every id is 26 lower-case letters and digits (${ids.join(', ')})`).toBe(true);
     // A ULID: 10 characters of time, then 16 random ones. Carts made within a millisecond or two share the time, never the rest.
     expect(new Set(ids.map((id) => id.slice(10))).size, 'the 16 trailing characters of the five ids are all different').toBe(5);
   });
 
   test.describe("another caller's cart", { tag: ['@bug'] }, () => {
-    test("the cart of a signed-in customer cannot be read, added to or deleted by somebody else's token", async ({ request, api, adminToken, cleanups, catalog }) => {
+    test("the cart of a signed-in customer cannot be read, added to or deleted by somebody else's token", async ({ request, catalog, world }) => {
       knownBug('SEC-15', "a cart a signed-in customer made answers anybody who has its id: another customer, or no token at all, can read it, add a line to it and delete it.");
-      const world = { request, api, adminToken, cleanups };
       const product = await catalog.inStock();
       const owner = await newCustomer(world);
       const intruder = await newCustomer(world);

@@ -1,7 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ProductPage } from '@pages/ProductPage';
-import { REPORT_TITLES, reportColumns } from '@pages/admin/AdminPages';
-import { ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts';
+import { REPORT_TITLES, reportColumns } from '@pages/admin/AdminReports';
+import { ADMIN_MESSAGES, appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
 import { category, paginated, product, reports } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { storedToken } from '@support/session';
@@ -42,10 +42,9 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
   });
 
   test.describe('when the reports fail to load', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(...[
+    test.use(withLoggedFailure(...[
       '/reports/top10-best-selling-categories', '/reports/top10-purchased-products', '/reports/customers-by-country', '/reports/total-sales-per-country',
     ].map((feed) => mock.fail('GET', feed, 500))));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
 
     test('the admin is told the statistics could not be loaded', async ({ adminStatistics }) => {
       knownBug('ADM-15', 'failed statistics requests leave empty tables with no message.', { absence: true });
@@ -76,6 +75,19 @@ test.describe('Admin reports (mocked back office)', { tag: ['@mocked'] }, () => 
 
         expect(new URL(reloaded.url()).searchParams.get('year'), 'the year the page asked for').toBe(year);
         await expect(adminSalesReport.year).toHaveValue(year);
+      });
+    });
+
+    // An empty answer is not a failure: the report is drawn (heading, year picker, chart area) and says nothing.
+    test.describe(`average sales per ${period} with no figures yet`, () => {
+      test.use({ adminSalesPeriod: period, ...withMocks(mock.respond('GET', `/reports/average-sales-per-${period}`, [])) });
+
+      test(`an empty ${period} report keeps its chart area and raises no alert`, async ({ adminSalesReport }) => {
+        await expect(adminSalesReport.heading).toBeVisible();
+        await expect(adminSalesReport.chart).toBeVisible();
+        await expect(adminSalesReport.yearOptions).not.toHaveCount(0);
+
+        expect(await appearsWithin(adminSalesReport.failure), `no failure message appears on an empty ${period} report`).toBe(false);
       });
     });
   }

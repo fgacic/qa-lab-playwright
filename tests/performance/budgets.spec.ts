@@ -83,8 +83,8 @@ const scaled = (ms: number, budget: number) => Math.min(Math.round(ms * CI_SLOWD
  * recorded without a push, so on a runner these are what makes a perf test mean more than "inside Google's good limits".
  * Each is derived from the values recorded on an idle machine (tests/performance/baseline.json) with the margin stated here;
  * the time metrics are scaled on CI (CI_SLOWDOWN):
- * - LCP: the recorded median times 1.5, rounded up to 50 ms, and well under the 2 500 ms budget. Recorded medians: home 1 248,
- *   search 1 252, product 1 288, cart 1 064, contact 1 056 ms; on a phone (the same throttling, no click) home 1 216, product 1 260 ms.
+ * - LCP: the recorded median times 1.5, rounded up to 50 ms, and well under the 2 500 ms budget. Recorded medians (baseline.json): home 1 224,
+ *   search 1 224, product 1 264, cart 1 048, contact 1 044 ms; on a phone (the same throttling, no click) home 1 216, product 1 260 ms.
  * - TBT: 100 ms, half the 200 ms budget and twice the 50 ms noise floor. Recorded 0 on every page: the shop does not block the
  *   main thread under 4x throttling, and a 100 ms block is a real regression, not noise.
  * - INP proxy: 80 ms, 2.5 times the highest recorded median (32 ms, search; the others 16 to 24 ms, and event timing is rounded to 8 ms, so

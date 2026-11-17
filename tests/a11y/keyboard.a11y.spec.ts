@@ -13,6 +13,12 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
  */
 test.use({ reducedMotion: 'reduce' });
 
+/** How long a Tab press is given to land the focus on the stop it is meant for. */
+const TAB_SETTLE_MS = 1_000;
+
+/** The links of the account menu, in the order it draws them ("Sign out" is not a stop: A11Y-04). */
+const ACCOUNT_MENU_LINKS = ['My account', 'My favorites', 'My profile', 'My invoices', 'My messages'] as const;
+
 /**
  * Presses Tab until each target has the focus, in this order. Returns what was not reached, as a list for the spec to assert on:
  * the first target that takes more than `within` presses from the one before it is out of reach (or out of order), and the walk stops there.
@@ -24,7 +30,13 @@ async function missedInTabOrder(page: Page, targets: { name: string; control: Lo
     let reached = false;
     for (let presses = 0; presses < within && !reached; presses++) {
       await page.keyboard.press('Tab');
-      reached = await focusWithin(control);
+      // Polled for a moment, so a stop that takes the focus late still counts; a control that never gets it is reported below.
+      try {
+        await expect.poll(() => focusWithin(control), { timeout: TAB_SETTLE_MS }).toBe(true);
+        reached = true;
+      } catch {
+        // Not here: the next press of Tab, if the stretch allows one.
+      }
     }
     if (!reached) return [`${name} was not reached within ${within} press(es) of Tab from the one before`];
   }
@@ -267,7 +279,7 @@ test.describe('Keyboard: the account menu', { tag: ['@a11y', '@axe', '@mocked'] 
     // "Sign out" is not a stop (A11Y-04, pinned in account-area): the walk is the five links above it.
     const missed = await missedInTabOrder(
       page,
-      (['My account', 'My favorites', 'My profile', 'My invoices', 'My messages'] as const).map((name) => ({ name, control: header.userMenuItem(name) })),
+      ACCOUNT_MENU_LINKS.map((name) => ({ name, control: header.userMenuItem(name) })),
     );
     expect(missed, 'Tab goes down the account menu in the order it is drawn').toEqual([]);
 
@@ -284,7 +296,7 @@ test.describe('Keyboard: the account menu', { tag: ['@a11y', '@axe', '@mocked'] 
     await page.keyboard.press('Enter');
     await expect(header.userMenuItem('My account')).toBeVisible();
 
-    for (const name of ['My account', 'My favorites', 'My profile', 'My invoices', 'My messages'] as const) {
+    for (const name of ACCOUNT_MENU_LINKS) {
       await expect.poll(() => focusRingDrawn(page, header.userMenuItem(name)), { message: `${name} looks different when it has the keyboard focus` }).toBe(true);
     }
   });

@@ -1,6 +1,6 @@
 import { INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
-import { postcodeLookupMock } from '@fixtures/pages';
+import { postcodeLookupMock } from '@fixtures/mocks';
 import { holdAnswers } from '@support/answer-gate';
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -16,6 +16,9 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
 const PLAIN_TEXT = 'QA Lab';
 /** The instalment plan the passing BNPL check chooses. */
 const INSTALMENT_PLAN = '6';
+
+/** `Object.entries` that keeps the type of the keys, so a payment method needs no cast where it is passed on. */
+const entriesOf = <K extends string, V>(record: Record<K, V>): [K, V][] => Object.entries(record) as [K, V][];
 
 /** `length` characters that are neither digits nor letters. */
 const junkOf = (length: number) => '!'.repeat(length);
@@ -38,15 +41,11 @@ test.describe('Checkout: payment step', () => {
 
   test('browser Back from the payment step leaves the checkout, and Forward returns to the cart with its lines', async ({ checkout, cartItems, page }) => {
     const [{ product }] = cartItems;
-    // The cart opened from the shop, so there is a page to go Back to; the steps are then walked again from the cart.
-    await checkout.header.goHomeViaLogo();
-    await checkout.header.openCart();
-    await checkout.proceedToPayment(fakeGuest(), fakeAddress());
-    await expect(checkout.payment.heading).toBeVisible();
 
-    await page.goBack();
-    await expect(page).toHaveURL('/');
-    await page.goForward();
+    await checkout.walkThenBackAndForward(async () => {
+      await checkout.proceedToPayment(fakeGuest(), fakeAddress());
+      await expect(checkout.payment.heading).toBeVisible();
+    });
 
     await expect(page).toHaveURL(/\/checkout$/);
     await expect(checkout.cart.table.row(product.name).title, 'the cart still holds its line').toBeVisible();
@@ -65,9 +64,9 @@ test.describe('Checkout: payment step', () => {
     'gift-card': [FIELD.giftCardNumber, FIELD.validationCode],
   } as const;
 
-  for (const [method, labels] of Object.entries(fields)) {
-    test(`${PAYMENT_METHODS[method as keyof typeof fields]} asks for ${labels.join(', ')}`, async ({ checkout }) => {
-      await checkout.payment.choose(method as keyof typeof fields);
+  for (const [method, labels] of entriesOf(fields)) {
+    test(`${PAYMENT_METHODS[method]} asks for ${labels.join(', ')}`, async ({ checkout }) => {
+      await checkout.payment.choose(method);
 
       for (const label of labels) await expect(checkout.payment.field(label)).toBeVisible();
     });
@@ -159,10 +158,10 @@ test.describe('Checkout: payment step', () => {
     },
   } as const;
 
-  for (const [method, { valid, invalid }] of Object.entries(junk)) {
-    test(`${PAYMENT_METHODS[method as keyof typeof junk]} rejects characters that are not digits or letters and blocks the check`, { tag: ['@negative'] }, async ({ checkout }) => {
+  for (const [method, { valid, invalid }] of entriesOf(junk)) {
+    test(`${PAYMENT_METHODS[method]} rejects characters that are not digits or letters and blocks the check`, { tag: ['@negative'] }, async ({ checkout }) => {
       const { payment } = checkout;
-      await payment.choose(method as keyof typeof junk);
+      await payment.choose(method);
       for (const label of valid) await payment.field(label).fill(PLAIN_TEXT);
 
       for (const [label, { value, message }] of Object.entries(invalid)) {

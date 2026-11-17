@@ -1,8 +1,11 @@
-import { expect, mock, test, withMocks } from '@fixtures';
-import { ADMIN_MESSAGES, allowLoggedFailure, appearsWithin } from '@pages/admin/alerts';
-import { ORDER_STATUSES } from '@pages/admin/AdminPages';
+import { expect, mock, test } from '@fixtures';
+import { ADMIN_MESSAGES, appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
+import { ORDER_STATUSES } from '@pages/admin/AdminOrderPage';
 import { ORDER_STATUS, dollars, orderLine, orderPayment, orderTotalField, paginated } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+
+/** What a status update is refused with: a conflict (the order changed meanwhile), invalid, and a server failure. */
+const STATUS_REFUSALS = [409, 422, 500] as const;
 
 test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each order with status and total', async ({ adminOrders, backOffice }) => {
@@ -52,8 +55,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
   }
 
   test.describe('when the order cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('GET', /^\/invoices\/[^/]+$/, 500)));
-    test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+    test.use(withLoggedFailure(mock.fail('GET', /^\/invoices\/[^/]+$/, 500)));
 
     test('the page does not claim the invoice is gone', async ({ adminOrders, backOffice, apiMock }) => {
       knownBug('ADM-13', 'an order whose load fails (500) is reported as "This invoice doesn\'t exist.", the message for a missing one.');
@@ -70,11 +72,10 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     });
   });
 
-  // Refused as a conflict (the order changed meanwhile), as invalid, and failed outright: each is shown, none is reported as saved.
-  for (const status of [409, 422, 500]) {
+  // Each refusal is shown, none is reported as saved.
+  for (const status of STATUS_REFUSALS) {
     test.describe(`when the status update is answered ${status}`, { tag: ['@negative'] }, () => {
-      test.use(withMocks(mock.fail('PUT', /^\/invoices\/[^/]+\/status$/, status)));
-      test.beforeEach(({ consoleGuard }) => allowLoggedFailure(consoleGuard));
+      test.use(withLoggedFailure(mock.fail('PUT', /^\/invoices\/[^/]+\/status$/, status)));
 
       test('the admin is told the status was not saved', async ({ adminOrders, backOffice }) => {
         const order = await adminOrders.edit(backOffice.order.invoice_number);

@@ -1,5 +1,4 @@
 import { expect, test } from '@fixtures';
-import { RegisterPage } from '@pages/RegisterPage';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Routing', () => {
@@ -17,6 +16,8 @@ test.describe('Routing', () => {
   test('/admin sends a signed-out visitor to the login page', { tag: ['@negative', '@bug'] }, async ({ shop, page }) => {
     knownBug('BUG-01', '/admin keeps its URL and renders an empty page instead of redirecting to login.');
     await shop.appShell.goto('/admin');
+    // The page around the route is there, so a redirect that never comes is the defect and not a page that never loaded.
+    await expect(shop.home.shell.header.brandLink).toBeVisible();
 
     await expect(page, 'BUG-01: /admin redirects to the login page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
   });
@@ -55,7 +56,7 @@ test.describe('Routing', () => {
 
     test('/auth/register does not show the registration form again', async ({ signedIn: _, shop, page }) => {
       knownBug('BUG-65', 'a signed-in customer who opens /auth/register is shown the registration form instead of being sent on to the account.');
-      const register = new RegisterPage(page);
+      const register = shop.register;
       await register.open();
       // Precondition, true whether or not the bug is fixed: the customer is signed in (the account menu is in the header).
       await expect(shop.login.shell.header.userMenu).toBeVisible();
