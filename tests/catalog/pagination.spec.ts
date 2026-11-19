@@ -11,6 +11,9 @@ const CURRENT_PAGE = /\bactive\b/;
 /** The deepest page any test here visits (Next from page 3 reaches 4): the catalogue must have at least this many. */
 const PAGES_NEEDED = 4;
 
+/** Why both A11Y-03 pins exist: the same defect on each end button. */
+const END_BUTTONS_ONLY_STYLED = 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.';
+
 /** The answer for one page of the product list (page numbers are 1-based in the request). */
 const pageAnswer = (apiMock: ApiMock, n: number) => apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === String(n));
 
@@ -166,14 +169,14 @@ test.describe('Pagination', () => {
 
     // Two pins, one per button, so each is verified (and will go green) on its own.
     test('Previous is disabled on page 1 for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage }) => {
-      knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
+      knownBug('A11Y-03', END_BUTTONS_ONLY_STYLED);
       await expect(homePage.pagination.item(1)).toHaveClass(CURRENT_PAGE);
 
       await expect(homePage.pagination.previous, 'A11Y-03: Previous is disabled on page 1').toBeDisabled({ timeout: BUG_TIMEOUT });
     });
 
     test('Next is disabled on the last page for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage, apiMock }) => {
-      knownBug('A11Y-03', 'the end buttons are only styled as disabled (class on the <li>); the <button> stays enabled and focusable.');
+      knownBug('A11Y-03', END_BUTTONS_ONLY_STYLED);
       const lastPage = await homePage.pagination.pageCount();
       const last = pageAnswer(apiMock, lastPage);
       await homePage.pagination.goTo(lastPage);

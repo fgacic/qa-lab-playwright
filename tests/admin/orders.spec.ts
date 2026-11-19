@@ -21,9 +21,9 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
     await apiMock.use(mock.respond('QUERY', '/invoices/search', paginated([match])));
     const sent = apiMock.waitForRequest('QUERY', '/invoices/search');
 
-    await adminOrders.search.searchFor('INV-2026999991');
+    await adminOrders.search.searchFor(match.invoice_number);
 
-    expect((await sent).postDataJSON()).toMatchObject({ q: 'INV-2026999991' });
+    expect((await sent).postDataJSON()).toMatchObject({ q: match.invoice_number });
     await expect(adminOrders.table.row(match.invoice_number)).toBeVisible();
     await expect(adminOrders.table.row(backOffice.order.invoice_number)).toHaveCount(0);
   });

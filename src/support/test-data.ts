@@ -3,6 +3,7 @@
  * Emails use example.com (RFC 2606), so nothing is ever delivered anywhere.
  */
 // The worker's parallel index makes two workers that start in the same millisecond with the same random digits still differ.
+// Not replayable on purpose (it must differ from every other run's data). It is part of every email below, so the data of a failure names its run.
 const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}w${process.env.TEST_PARALLEL_INDEX ?? '0'}`;
 let counter = 0;
 

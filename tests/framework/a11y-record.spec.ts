@@ -1,5 +1,5 @@
 // A11Y_RECORD rebuilds the accessibility baseline from what a scan finds, asserting nothing: on CI that would turn every violation into
-// "known". tests/a11y/pages.a11y.spec.ts refuses it there; this runs one real scan (the home page's, by its title; the phone-width one matches too and refuses alike) under CI=1 and A11Y_RECORD set and reads the refusal.
+// "known". tests/a11y/pages.a11y.spec.ts refuses it there, in the body of its scan, so nothing but a real run of that spec can reach the refusal: this runs one real scan (the home page's, by its title; the phone-width one matches too and refuses alike) under CI=1 and A11Y_RECORD set and reads the refusal.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,8 +22,11 @@ test.describe('recording the accessibility baseline', { tag: ['@framework', '@se
         env: { ...process.env, CI: '1', A11Y_RECORD: record },
       });
       expect(run.error, 'the nested run started').toBeUndefined();
+      const output = `${run.stdout}${run.stderr}`;
+      // The grep is the spec's title: a renamed title selects nothing, and that must read as what it is, not as a missing refusal.
+      expect(output, 'the --grep still selects the home page scan (was its title renamed?)').not.toContain('No tests found');
       expect(run.status, 'the scan fails instead of recording').not.toBe(0);
-      expect(`${run.stdout}${run.stderr}`).toContain('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
+      expect(output, 'the refusal names the variable and CI').toContain('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

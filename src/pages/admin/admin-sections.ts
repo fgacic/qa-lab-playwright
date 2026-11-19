@@ -24,6 +24,9 @@ export const ADMIN_SECTION_PATHS: Record<AdminSection, string> = {
   Settings: '/admin/settings',
 };
 
+/** Where the SPA sends someone who may not see the back office. */
+export const SIGN_IN_PATH = '/auth/login';
+
 /** The address of each report page, stated once. */
 export const ADMIN_REPORT_PATHS = {
   statistics: '/admin/reports/statistics',

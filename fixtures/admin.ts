@@ -4,6 +4,7 @@ import { allowLoggedFailure } from '@pages/admin/alerts';
 import { AdminListPage } from '@pages/admin/AdminListPage';
 import { ADMIN_LISTS, type AdminListName } from '@pages/admin/admin-lists';
 import { AdminDashboardPage } from '@pages/admin/AdminDashboardPage';
+import { AdminEntrance } from '@pages/admin/AdminEntrance';
 import { AdminMessagePage } from '@pages/admin/AdminMessagePage';
 import { AdminOrderPage } from '@pages/admin/AdminOrderPage';
 import { AdminSalesReportPage, AdminStatisticsPage } from '@pages/admin/AdminReports';
@@ -49,8 +50,8 @@ export interface AdminFixtures {
   adminSalesReport: AdminSalesReportPage;
   /** The monthly report, whatever `adminSalesPeriod` says: for specs that are about that one report. */
   adminMonthlySales: AdminSalesReportPage;
-  /** The dashboard page object, not opened and with no back office behind it: for a visitor who may be turned away before the dashboard asks for anything. */
-  adminEntrance: AdminDashboardPage;
+  /** The way into the back office, with no back office behind it: for a visitor who may be turned away before the dashboard asks for anything. */
+  adminEntrance: AdminEntrance;
   adminSettings: AdminSettingsPage;
 }
 
@@ -162,7 +163,7 @@ export const test = mergeTests(adminTokenTest, mocksTest, cleanupTest, consoleGu
   adminSalesReport: async ({ page, adminSalesPeriod, backOffice: _ }, use) => use(await openSalesReport(page, adminSalesPeriod)),
   adminMonthlySales: async ({ page, backOffice: _ }, use) => use(await openSalesReport(page, 'month')),
   // Unlike the other admin pages it needs no back office: it is also for a visitor who is not an admin.
-  adminEntrance: async ({ page }, use) => use(new AdminDashboardPage(page)),
+  adminEntrance: async ({ page }, use) => use(new AdminEntrance(page)),
   adminSettings: async ({ page, backOffice: _ }, use) => {
     const settings = new AdminSettingsPage(page);
     await settings.open();

@@ -1,7 +1,7 @@
 import { expect, test } from '@fixtures';
 import type { Page } from '@playwright/test';
 import { BUG_TIMEOUT } from '@support/known-bug';
-import { applyTextSpacing, clippedText, horizontalOverflow } from '@support/page-metrics';
+import { applyTextSpacing, clippedText, horizontalOverflow, textLostBySpacing } from '@support/page-metrics';
 
 /**
  * Two more things axe cannot say, because it reads one page at one size with one set of styles: the page at twice the size
@@ -55,42 +55,41 @@ test.describe('Zoomed to 200%', { tag: ['@a11y', '@axe'] }, () => {
 });
 
 test.describe('With the text spacing of WCAG 1.4.12', { tag: ['@a11y', '@axe'] }, () => {
-  /** What the page cuts off once the spacing is applied and did not before: new loss, not what the layout always hid. */
-  const lostByTheSpacing = async (page: Page): Promise<string[]> => {
-    const before = await clippedText(page);
-    await applyTextSpacing(page);
-    return (await clippedText(page)).filter((clipped) => !before.includes(clipped));
+  /** Text the spacing cuts off, polled like the overflow checks above: a late image can still move the layout after the spacing is applied. */
+  const expectNoTextLost = async (page: Page) => {
+    const lost = await textLostBySpacing(page);
+    await expect.poll(lost, { message: 'text cut off by its box once the spacing is applied' }).toEqual([]);
   };
 
   test('the home page loses no text', async ({ homePage, page }) => {
     await expect(homePage.grid.cards.first()).toBeVisible();
 
-    expect(await lostByTheSpacing(page), 'text cut off by its box once the spacing is applied').toEqual([]);
+    await expectNoTextLost(page);
   });
 
   test('a product page loses no text', async ({ productPage, page }) => {
     await expect(productPage.addToCartButton).toBeVisible();
 
-    expect(await lostByTheSpacing(page), 'text cut off by its box once the spacing is applied').toEqual([]);
+    await expectNoTextLost(page);
   });
 
   test('the login form loses no text', async ({ loginPage, page }) => {
     await expect(loginPage.loginButton).toBeVisible();
 
-    expect(await lostByTheSpacing(page), 'text cut off by its box once the spacing is applied').toEqual([]);
+    await expectNoTextLost(page);
   });
 
   test('the contact form loses no text', async ({ contactPage, page }) => {
     await expect(contactPage.sendButton).toBeVisible();
 
-    expect(await lostByTheSpacing(page), 'text cut off by its box once the spacing is applied').toEqual([]);
+    await expectNoTextLost(page);
   });
 
   test('the cart loses no text', async ({ checkout, page }) => {
     await expect(checkout.cart.table.rows).toHaveCount(1);
     await expect(checkout.cart.proceedButton).toBeVisible();
 
-    expect(await lostByTheSpacing(page), 'text cut off by its box once the spacing is applied').toEqual([]);
+    await expectNoTextLost(page);
   });
 
   // Guards the guard: a check that lists nothing for any page would pass the five above for the wrong reason.

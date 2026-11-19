@@ -4,6 +4,9 @@ import { AVAILABILITY, COMPARE_STORAGE_KEY, COMPARISON_ROW, priceText } from '@p
 import { failureFeedback } from '@support/feedback';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
+/** The most products the shop lets a shopper compare at once. */
+const MAX_COMPARED = 4;
+
 test.describe('Product comparison', () => {
   /** Puts the first two products of the grid in the comparison and returns their names. */
   const pickTwo = async ({ grid }: HomePage): Promise<[string, string]> => {
@@ -48,12 +51,12 @@ test.describe('Product comparison', () => {
 
   test('at most four products can be compared', { tag: ['@negative'] }, async ({ homePage }) => {
     await homePage.grid.waitForLoaded();
-    for (let i = 0; i < 5; i++) await homePage.grid.nth(i).compareButton.click();
+    for (let i = 0; i <= MAX_COMPARED; i++) await homePage.grid.nth(i).compareButton.click();
 
     // The shop says nothing about the refused fifth click (no toast, no message): the only sign is that it stays out.
-    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(4));
-    await expect(homePage.grid.nth(4).compareButton).toHaveAttribute('aria-pressed', 'false');
-    await expect.poll(() => homePage.comparison.selectedIds(), 'the refused product is not stored either').toHaveLength(4);
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(MAX_COMPARED));
+    await expect(homePage.grid.nth(MAX_COMPARED).compareButton).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => homePage.comparison.selectedIds(), 'the refused product is not stored either').toHaveLength(MAX_COMPARED);
   });
 
   test('the selection survives opening a product and coming back', async ({ homePage }) => {

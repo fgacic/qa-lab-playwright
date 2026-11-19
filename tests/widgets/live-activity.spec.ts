@@ -8,6 +8,8 @@ import { escapeRegExp } from '@support/regexp';
  * tests assert what the stream delivered, and the one real feed (below) proves the "Live" state.
  */
 const CONNECTING = 'Connecting to the live feed…';
+/** The badge a sale that took the last of a product carries: case-insensitive on purpose, the capitalisation is the shop's styling choice. */
+const SOLD_OUT = /sold out/i;
 /** A row names the product among other text (who bought it, when), so it is matched as a substring. */
 const matchesName = (name: string) => new RegExp(escapeRegExp(name));
 
@@ -71,8 +73,8 @@ test.describe('Live shop activity', () => {
       await liveActivity.open();
 
       await expect(liveActivity.items).toHaveCount(2);
-      await expect(liveActivity.item(lastOne.name)).toContainText(/sold out/i);
-      await expect(liveActivity.item(ordinary.name)).not.toContainText(/sold out/i);
+      await expect(liveActivity.item(lastOne.name)).toContainText(SOLD_OUT);
+      await expect(liveActivity.item(ordinary.name)).not.toContainText(SOLD_OUT);
     });
   });
 

@@ -66,6 +66,7 @@ test.describe('Real account', { tag: ['@account'] }, () => {
     });
 
     test('a signed-in purchase skips the guest step and is saved to the account', { tag: ['@flow'] }, async ({ api, workerAccount, checkout }) => {
+      // The `checkout` fixture seeded the cart with its default: one in-stock product (`cartItems`, fixtures/pages.ts).
       await checkout.cart.proceed();
       await expect(checkout.signIn.guestTab, 'a signed-in customer is not offered the guest step').toBeHidden();
       await checkout.signIn.proceedSignedInButton.click();

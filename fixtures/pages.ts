@@ -74,6 +74,7 @@ export interface PageFixtures {
 
 export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions & PageFixtures>({
   productKind: ['in-stock', { option: true }],
+  // Resolved only by a test that opens /checkout (an option fixture is lazy). The catalogue lookup is one API read, cached per worker by `catalog`; a spec that needs another cart overrides this with `test.use`.
   cartItems: [async ({ catalog }, use) => use([{ product: await catalog.inStock(), quantity: 1 }]), { option: true }],
   comparedProducts: [[], { option: true }],
   refuseUnmockedWrites: [false, { option: true }],

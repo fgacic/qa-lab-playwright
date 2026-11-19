@@ -69,12 +69,11 @@ export interface MockAnswer {
   outcome: number | 'aborted';
 }
 
-/**
- * Suite-wide allowances: noise that is not the shop's own fault and that no test could act on.
- * Everything else a page logs fails the test that caused it. A test that provokes an error on purpose (a mocked failure the
- * app logs) declares it with `consoleGuard.allow(pattern, reason)`, so the allowance is recorded next to the test.
+/*
+ * There is no list of third-party noise: the shop's page loads nothing of a third party that logs. An error a page logs
+ * fails the test that caused it, unless it is on one of the lists below or the test declares it with
+ * `consoleGuard.allow(pattern, reason)`, so the allowance is recorded next to the test.
  */
-export const THIRD_PARTY_NOISE: readonly Allowance[] = [];
 
 /**
  * The shop answering a request with an error the suite expects, and its SPA logging that answer with `console.error`. These are
@@ -115,7 +114,7 @@ export const EXPECTED_ANSWER_LOGS: readonly Allowance[] = [
  * error and fails while it is raised). A test that judges something else (a scan, a translation visit, a screenshot) must not
  * fail on a defect another test already owns; when the defect is fixed the pin reports it and the line goes from here.
  */
-export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string })[] = [
+export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string; perTest?: true })[] = [
   {
     id: 'BUG-37',
     pattern: /angularx-qrcode.*Field `qrdata` is empty/,
@@ -137,6 +136,10 @@ export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string })[] = [
   {
     id: 'BUG-02',
     pattern: /NG04002/,
+    // Not suite-wide, and not scoped by `route`: the guard reads the route AFTER the redirect (the log names an unknown path, but the page is
+    // already on "/"), so a `route` scope never matches (found in iteration 1). The tests that navigate to an unknown path opt in
+    // (`UNKNOWN_ROUTE_LOG`), so a broken link anywhere else that lands on an unknown route still fails.
+    perTest: true,
     reason: 'the router has no route for an unknown path and logs it before redirecting home',
   },
   {
@@ -154,14 +157,18 @@ export const PINNED_DEFECT_LOGS: readonly (Allowance & { id: string })[] = [
   },
   {
     id: 'ADM-21',
+    // One Angular error, named by its code in some engines and by its message in others; both are the same "no value for a form control" and only on /admin/users.
     pattern: /NG01002|Must supply a value for form control/,
     route: /^\/admin\/users(?:\/|$)/,
     reason: 'after the API accepts a new user the SPA throws an unhandled Angular error although the form says "User saved!"',
   },
 ];
 
-/** Everything allowed in every test (whatever the engine: `allowancesFor` narrows it to one). */
-export const SUITE_WIDE_ALLOWANCES: readonly Allowance[] = [...THIRD_PARTY_NOISE, ...EXPECTED_ANSWER_LOGS, ...PINNED_DEFECT_LOGS];
+/** The BUG-02 log, for the tests that navigate to a path the router does not know: `consoleGuard.allow(UNKNOWN_ROUTE_LOG.pattern, UNKNOWN_ROUTE_LOG.reason)`. */
+export const UNKNOWN_ROUTE_LOG: Allowance = PINNED_DEFECT_LOGS.find(({ id }) => id === 'BUG-02')!;
+
+/** Everything allowed in every test (whatever the engine: `allowancesFor` narrows it to one). The pins marked `perTest` are left out: a test opts into those. */
+export const SUITE_WIDE_ALLOWANCES: readonly Allowance[] = [...EXPECTED_ANSWER_LOGS, ...PINNED_DEFECT_LOGS.filter(({ perTest }) => !perTest)];
 
 /** The suite-wide allowances that apply in `browserName`: the ones with no engine of their own, and the ones of that engine. */
 export const allowancesFor = (browserName: string): Allowance[] => SUITE_WIDE_ALLOWANCES.filter((allowance) => allowance.browser === undefined || allowance.browser === browserName);

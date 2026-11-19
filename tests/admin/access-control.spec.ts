@@ -1,5 +1,5 @@
 import { expect, test } from '@fixtures';
-import { ADMIN_ADDRESSES } from '@pages/admin/admin-sections';
+import { ADMIN_ADDRESSES, SIGN_IN_PATH } from '@pages/admin/admin-sections';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /**
@@ -19,7 +19,7 @@ test.describe('Admin access control (mocked sessions)', { tag: ['@mocked', '@neg
       test(`cannot open ${address}`, async ({ signedIn: _, adminEntrance, page, apiMock }) => {
         await adminEntrance.tryToOpen(address);
 
-        await expect(page, `${address} sends a customer to the sign-in page`).toHaveURL('/auth/login');
+        await expect(page, `${address} sends a customer to the sign-in page`).toHaveURL(SIGN_IN_PATH);
         await expect(apiMock.expectNoRequest('GET', ADMIN_ONLY_ENDPOINTS), 'no admin endpoint was called for a customer').resolves.toBeUndefined();
       });
     }
@@ -30,7 +30,7 @@ test.describe('Admin access control (mocked sessions)', { tag: ['@mocked', '@neg
     knownBug('ADM-24', 'a signed-in customer who opens /admin keeps that URL and gets an empty page, while every address below it (/admin/dashboard ...) sends them to the sign-in page.');
     await adminEntrance.tryToOpen('/admin');
 
-    await expect(page, 'ADM-24: /admin sends a customer to the sign-in page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
+    await expect(page, 'ADM-24: /admin sends a customer to the sign-in page').toHaveURL(SIGN_IN_PATH, { timeout: BUG_TIMEOUT });
   });
 
   test.describe('a visitor who is not signed in', () => {
@@ -39,7 +39,7 @@ test.describe('Admin access control (mocked sessions)', { tag: ['@mocked', '@neg
         consoleGuard.allow(/^Failed to load resource: the server responded with a status of 500\b/, 'BUG-54: the guard asks GET /users/refresh with no token, which answers 500 (the suite-wide allowance covers /account and the login page only)');
         await adminEntrance.tryToOpen(address);
 
-        await expect(page, `${address} sends a signed-out visitor to the sign-in page`).toHaveURL('/auth/login');
+        await expect(page, `${address} sends a signed-out visitor to the sign-in page`).toHaveURL(SIGN_IN_PATH);
         await expect(apiMock.expectNoRequest('GET', ADMIN_ONLY_ENDPOINTS), 'no admin endpoint was called for a signed-out visitor').resolves.toBeUndefined();
       });
     }

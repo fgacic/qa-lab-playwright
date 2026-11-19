@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { step } from '@support/step';
 
 /** The documentation notice, the testing-practice bar and the course promo above the shop. */
@@ -29,9 +29,9 @@ export class PromoBanners {
 
   /** How many steps the guide has, read from its progress line. */
   async guideStepCount(): Promise<number> {
-    const text = (await this.guideProgress.textContent()) ?? '';
-    const count = /of (\d+)$/.exec(text)?.[1];
-    if (!count) throw new Error(`The guide's progress line does not say how many steps there are: "${text}"`);
+    // Waits for the progress line to say it ("Step 1 of 5") before reading: the total is fixed once it is drawn.
+    await expect(this.guideProgress).toHaveText(/of \d+$/);
+    const count = /of (\d+)$/.exec((await this.guideProgress.textContent()) ?? '')?.[1];
     return Number(count);
   }
 

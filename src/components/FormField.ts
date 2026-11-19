@@ -6,6 +6,16 @@ import type { Locator } from '@playwright/test';
  * A field built without that id has no `error`: reading it throws, instead of pointing at an
  * element that does not exist and letting a spec wait on it.
  */
+/**
+ * What the shop's forms say under a field, word for word. The wording is the shop's (typed once here, so a changed message is
+ * one edit and not one per spec): the sign-in, registration, contact and chat tests read these.
+ */
+export const FIELD_ERRORS = {
+  required: (field: string) => `${field} is required`,
+  emailInvalid: 'Email format is invalid',
+  passwordRules: 'Password must be minimal 6 characters long. Password can not include invalid characters.',
+} as const;
+
 export class FormField {
   readonly input: Locator;
   private readonly errorLocator?: Locator;

@@ -3,9 +3,17 @@
 // (fixtures/matchers.ts: the amount a text holds, the order a list is in). The budgets themselves are measured in tests/performance.
 import { expect, test } from '@playwright/test';
 import { collectionExpect, moneyExpect, parseAmount } from '@fixtures/matchers';
-import { isNoisy, onCI, ratchetLimits } from '@fixtures/performance-baseline';
+import { isNoisy, onCI, ratchetLimits, summarise } from '@fixtures/performance-baseline';
 
 test.describe('the performance baseline arithmetic', { tag: ['@framework'] }, () => {
+  test('a measurement is summarised by the median and the spread of its samples, rounded as the baseline file holds them', () => {
+    const sample = (lcp: number, cls: number) => ({ lcp, cls, tbt: 0, inp: 16 });
+    const odd = summarise([sample(900.4, 0.1234), sample(1000, 0.1), sample(1100, 0.2)]);
+    expect(odd.median, 'the middle sample of an odd count, whatever order they came in').toEqual({ lcp: 1000, cls: 0.123, tbt: 0, inp: 16 });
+    expect(odd.spread, 'largest minus smallest').toEqual({ lcp: 200, cls: 0.1, tbt: 0, inp: 0 });
+    expect(summarise([sample(1000, 0), sample(1100, 0)]).median.lcp, 'the mean of the two middle samples of an even count').toBe(1050);
+  });
+
   test('no recorded entry means no limits at all, so the spec says the baseline is missing', () => {
     expect(ratchetLimits(undefined, ['lcp'])).toEqual({ limits: undefined, unratcheted: [] });
   });

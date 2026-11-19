@@ -1,3 +1,4 @@
+import { CART_MESSAGES } from '@components/CartTable';
 import { devices } from '@playwright/test';
 import { expect, test } from '@fixtures';
 import { knownBug } from '@support/known-bug';
@@ -191,7 +192,7 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hoste
       await expect(productPage.addToCartButton).toBeVisible();
       await productPage.increaseQuantityButton.click();
       await productPage.addToCart();
-      await expect(productPage.toast.message('Product added to shopping cart.')).toBeVisible();
+      await expect(productPage.toast.message(CART_MESSAGES.added)).toBeVisible();
     };
 
     // A cart of its own in every sample: the add would otherwise land in a cart the earlier samples filled.

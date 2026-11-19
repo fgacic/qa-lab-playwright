@@ -34,12 +34,8 @@ async function shop(config: Shop): Promise<{ url: string; api: string; server: S
   return { url, api: `${url}/api`, server };
 }
 
-/** An address nothing listens on: a port that was free a moment ago. */
-async function closedUrl(): Promise<string> {
-  const { url, server } = await shop({});
-  await new Promise((resolve) => server.close(resolve));
-  return url;
-}
+/** An address nothing listens on: port 1 (tcpmux, which no machine of ours runs), so it cannot be taken by another process the way a port that was merely free a moment ago can. */
+const closedUrl = (): string => httpUrl('127.0.0.1', '', 1);
 
 test.describe('the toolshop health check', { tag: ['@framework'] }, () => {
   let open: Server[] = [];
@@ -84,7 +80,7 @@ test.describe('the toolshop health check', { tag: ['@framework'] }, () => {
   });
 
   test('an unreachable target resolves to the reason within the deadline instead of hanging, and probe itself rejects', async () => {
-    const url = await closedUrl();
+    const url = closedUrl();
     await expect(probe({ api: `${url}/api`, ui: url })).rejects.toThrow();
     const state = await waitForToolshop({ api: `${url}/api`, ui: url, timeoutMs: 400, intervalMs: 50 });
     expect(state, 'ECONNREFUSED or the fetch failure, not "ok"').not.toBe('ok');
@@ -127,7 +123,7 @@ test.describe('the preflight', { tag: ['@framework'] }, () => {
   });
 
   test('a self-hosted shop that is down stops the run before any test, naming the address and the way to start it', async () => {
-    const url = await closedUrl();
+    const url = closedUrl();
     const { status, output } = await preflight({ TARGET: 'local', BASE_URL: url, API_URL: `${url}/api` });
     expect(status).not.toBe(0);
     expect(output).toContain(`The self-hosted Toolshop at ${url} is not ready`);
@@ -147,7 +143,7 @@ test.describe('the preflight', { tag: ['@framework'] }, () => {
     const challenged = await shop({ total: 0, ui: 'error-page' });
     open.push(challenged.server);
     expect((await preflight({ TARGET: 'live', BASE_URL: challenged.url, API_URL: challenged.api })).status, 'a page that is not the shop still answers').toBe(0);
-    const url = await closedUrl();
+    const url = closedUrl();
     const down = await preflight({ TARGET: 'live', BASE_URL: url, API_URL: `${url}/api` });
     expect(down.status).not.toBe(0);
     expect(down.output).toContain('is not reachable');

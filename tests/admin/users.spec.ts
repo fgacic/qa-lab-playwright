@@ -15,9 +15,13 @@ const ADD_USER = 'Add User';
 /** The fields the add form cannot be saved without (Postal code, State, Phone and Password are optional). */
 const REQUIRED_FIELDS = ['First Name', 'Last Name', 'Date of birth', 'Street', 'City', 'Country', 'Email'];
 /** What a user who has never failed to sign in shows in the form. */
+/** An email the form must refuse: no at sign, no domain. */
+const MALFORMED_EMAIL = 'not-an-email';
 const NO_FAILED_ATTEMPTS = '0';
 /** The first name an edit gives the user. */
 const RENAMED = 'Renamed';
+/** The first name the searched-for user has, and the term typed into the search box. */
+const SEARCHED = 'searched';
 
 test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows name and email', async ({ adminUsers }) => {
@@ -26,13 +30,13 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
 
   test('searching sends the term and lists the matches', async ({ adminUsers, apiMock }) => {
     // The answer differs from the full list, so a table that shows it has really been replaced.
-    const match = { ...customer, id: '01QALABUSERHIT0000000000', first_name: 'Searched', email: 'searched.hit@example.com' };
+    const match = { ...customer, id: '01QALABUSERHIT0000000000', first_name: SEARCHED, email: 'searched.hit@example.com' };
     await apiMock.use(mock.respond('QUERY', '/users/search', paginated([match])));
     const sent = apiMock.waitForRequest('QUERY', '/users/search');
 
-    await adminUsers.search.searchFor('searched');
+    await adminUsers.search.searchFor(SEARCHED);
 
-    expect((await sent).postDataJSON()).toMatchObject({ q: 'searched' });
+    expect((await sent).postDataJSON()).toMatchObject({ q: SEARCHED });
     await expect(adminUsers.table.row(match.email)).toContainText(match.first_name);
     await expect(adminUsers.table.row(customer.email)).toHaveCount(0);
   });
@@ -57,6 +61,19 @@ test.describe('Admin users (mocked back office)', { tag: ['@mocked'] }, () => {
     for (const field of REQUIRED_FIELDS) {
       await expect(form.chrome.required(field), field).toBeVisible();
     }
+  });
+
+  test('a new user needs a well-formed email', { tag: ['@negative'] }, async ({ adminUsers, apiMock }) => {
+    const form = await adminUsers.add();
+    await expect(form.chrome.heading).toHaveText(ADD_USER);
+    await form.fillIn({ ...newUser, email: MALFORMED_EMAIL });
+    const before = await apiMock.mark();
+
+    await form.chrome.save();
+
+    // The form's own check stops it (it shows an alert box, with no text in it: not a pin, the wording is not what is tested here).
+    await expect(apiMock.expectNoRequest('POST', '/users/register', { since: before }), 'a malformed email is not sent to the API').resolves.toBeUndefined();
+    await expect(form.chrome.alert(ADMIN_MESSAGES.userSaved)).toBeHidden();
   });
 
   test('editing loads the user, including the account flags, and saves the change', async ({ adminUsers, apiMock }) => {

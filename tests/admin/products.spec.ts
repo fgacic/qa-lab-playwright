@@ -1,5 +1,5 @@
 import { expect, mock, test } from '@fixtures';
-import { SEARCH_HIT, dollars, paginated } from '@support/admin-payloads';
+import { NO_MATCH, SEARCH_HIT, SEARCH_TERM, dollars, paginated } from '@support/admin-payloads';
 
 test.describe('Admin products list (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each product with its stock status and price', async ({ adminProducts, backOffice }) => {
@@ -16,16 +16,16 @@ test.describe('Admin products list (mocked back office)', { tag: ['@mocked'] }, 
     await apiMock.use(mock.respond('QUERY', '/products/search', paginated([match], 9)));
     const sent = apiMock.waitForRequest('QUERY', '/products/search');
 
-    await adminProducts.search.searchFor('pliers');
+    await adminProducts.search.searchFor(SEARCH_TERM);
 
-    expect((await sent).postDataJSON()).toEqual({ q: 'pliers' });
+    expect((await sent).postDataJSON()).toEqual({ q: SEARCH_TERM });
     await expect(adminProducts.table.row(match.name)).toBeVisible();
     await expect(adminProducts.table.rows).toHaveCount(1);
   });
 
   test('Reset clears the search and lists the whole catalogue again', async ({ adminProducts, backOffice, apiMock }) => {
     await apiMock.use(mock.respond('QUERY', '/products/search', paginated([], 9)));
-    await adminProducts.search.searchFor('no such product');
+    await adminProducts.search.searchFor(NO_MATCH);
     await expect(adminProducts.table.rows).toHaveCount(0);
 
     await adminProducts.search.reset();

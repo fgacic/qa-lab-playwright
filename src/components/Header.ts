@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { step } from '@support/step';
 import { LanguageSwitcher } from './LanguageSwitcher';
 
@@ -56,6 +56,9 @@ export class Header {
   /** Below 992 px the menu hides behind a toggler; open it so the links can be used. */
   @step('Expand the navigation menu if collapsed')
   async expand(): Promise<void> {
+    // The header has drawn one of the two states below before either is read: the toggle (phone) or the links (desktop). Without
+    // this, a header still rendering would look "not collapsed" and the menu would be left shut.
+    await expect(this.menuToggle.or(this.homeLink)).toBeVisible();
     if ((await this.menuToggle.isVisible()) && !(await this.homeLink.isVisible())) {
       await this.toggleMenu();
     }

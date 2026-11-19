@@ -72,6 +72,7 @@ export function perfAloneViolationFor(argv: readonly string[], configured: reado
   if (!configured.includes('perf')) return undefined;
   if (projectPatterns(argv).length) return perfAloneViolation(selectedProjects(argv, configured));
   if (!filtersTests(argv)) return perfAloneViolation(configured);
+  // Any argument containing "perf" counts as naming it: it errs on the refusing side, and the message says what to pass instead.
   if (/perf/i.test(userArgs(argv).join(' '))) {
     return 'This run names perf in a filter but no --project, so which projects it schedules cannot be told. Pass --project=perf (the perf budgets run alone: `npm run test:perf`).';
   }

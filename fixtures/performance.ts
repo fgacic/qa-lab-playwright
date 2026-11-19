@@ -1,7 +1,7 @@
 import { loadavg } from 'node:os';
 import { test as base } from '@playwright/test';
 import { collect, throttle, read, THROTTLING, type Observed } from './performance-collector';
-import { assertCanRecord, baselineEnvironment, baselineLimits, hostLoadNote, missingBaseline, record, type Recording, type Vitals } from './performance-baseline';
+import { assertCanRecord, baselineEnvironment, baselineLimits, hostLoadNote, missingBaseline, record, summarise, type Recording, type Vitals } from './performance-baseline';
 
 export { isNoisy, onCI, ratchetLimits, type Vitals } from './performance-baseline';
 export { THROTTLING, type Observed } from './performance-collector';
@@ -145,15 +145,7 @@ export const test = base.extend<PerformanceFixtures, PerformanceWorkerFixtures>(
         }
         testInfo.annotations.push({ type: 'host-load', description: hostLoadNote(name, runStartLoad) });
         const all = taken.map((t) => t.vitals);
-        const column = (metric: keyof Vitals) => all.map((v) => v[metric]);
-        const median: Vitals = {
-          lcp: Math.round(middle(column('lcp'))),
-          cls: Number(middle(column('cls')).toFixed(3)),
-          tbt: Math.round(middle(column('tbt'))),
-          inp: Math.round(middle(column('inp'))),
-        };
-        const range = (metric: keyof Vitals) => Math.max(...column(metric)) - Math.min(...column(metric));
-        const spread: Vitals = { lcp: Math.round(range('lcp')), cls: Number(range('cls').toFixed(3)), tbt: Math.round(range('tbt')), inp: Math.round(range('inp')) };
+        const { median, spread } = summarise(all);
         const observed: Observed = {
           fcpObserved: taken.every((t) => t.entries.fcpObserved),
           lcpEntries: Math.min(...taken.map((t) => t.entries.lcpEntries)),
@@ -194,9 +186,3 @@ export const test = base.extend<PerformanceFixtures, PerformanceWorkerFixtures>(
     });
   },
 });
-
-function middle(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}

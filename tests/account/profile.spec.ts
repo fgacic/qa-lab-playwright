@@ -1,6 +1,6 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-import { fakeUser } from '@support/payloads';
+import { fakeUser, serverError } from '@support/payloads';
 
 const PROFILE_PATH = /^\/users\/[^/]+$/;
 const [OLD_PASSWORD, NEW_PASSWORD, WRONG_PASSWORD] = ['Qa-lab-old-pass-1!', 'Qa-lab-new-pass-2!', 'Qa-lab-wrong-pass-1!'];
@@ -9,7 +9,10 @@ const SAVED_NOTICE = 'successfully updated';
 const PROFILE_SAVED = 'Your profile is successfully updated!';
 const PASSWORD_SAVED = 'Your password is successfully updated!';
 const FORM_INVALID = 'Please correct the highlighted fields before saving.';
-const SERVER_ERROR = 'Server Error';
+const SERVER_ERROR = serverError.message;
+const INVALID_PHONE = 'Please enter a valid phone number (digits, spaces and ( ) + - only).';
+/** What the page shows when the request never gets an answer. */
+const UNEXPECTED_ERROR = 'An unexpected error occurred.';
 const RENAMED = 'Renamed';
 const MOVED = { country: 'BE', postal_code: '9000', state: 'Oost-Vlaanderen' };
 const NOT_A_PHONE = 'abc';
@@ -149,7 +152,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alert('Please enter a valid phone number (digits, spaces and ( ) + - only).')).toBeVisible();
+    await expect(profilePage.alert(INVALID_PHONE)).toBeVisible();
     await apiMock.expectNoRequest('PUT', PROFILE_PATH);
   });
 
@@ -179,7 +182,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
     await profilePage.update();
     await attempted;
 
-    await expect(profilePage.alert('An unexpected error occurred.')).toBeVisible();
+    await expect(profilePage.alert(UNEXPECTED_ERROR)).toBeVisible();
     await expect(profilePage.alert(SAVED_NOTICE)).toHaveCount(0);
   });
 

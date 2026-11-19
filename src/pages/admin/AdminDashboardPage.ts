@@ -42,10 +42,4 @@ export class AdminDashboardPage {
   async open(): Promise<void> {
     await this.shell.gotoAndSettle(ADMIN_SECTION_PATHS.Dashboard, 'GET', /^\/invoices$/);
   }
-
-  /** Goes to a back-office address (the dashboard's by default) without waiting for its data: for a visitor who may be turned away before it asks for any. */
-  @step('Try to open {0}')
-  async tryToOpen(address: string = ADMIN_SECTION_PATHS.Dashboard): Promise<void> {
-    await this.shell.goto(address);
-  }
 }

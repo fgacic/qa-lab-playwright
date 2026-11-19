@@ -3,6 +3,7 @@ import { searchedFor } from '@components/SearchBar';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/mocks';
 import { twoProductCart } from '@fixtures/pages';
+import type { HomePage } from '@pages/HomePage';
 import { holdAnswers } from '@support/answer-gate';
 import { CART, PAYMENT_PASSED } from '@support/cart-routes';
 import { knownBug } from '@support/known-bug';
@@ -16,6 +17,17 @@ const ORDERED_QUANTITY = 2;
 
 /** The cart's discount for an eco-friendly product: 5% off the subtotal (the cart specs hold the rule itself to literal figures). */
 const ECO_DISCOUNT = 0.05;
+
+/** Browses to the first in-stock product, adds ORDERED_QUANTITY of it and opens the cart, which must show that quantity. */
+const addFirstInStockAndOpenCart = async (homePage: HomePage) => {
+  const { name, productPage } = await homePage.openFirstInStockProduct();
+  await productPage.addToCart(ORDERED_QUANTITY);
+  await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
+
+  const checkout = await productPage.openCart();
+  await expect(checkout.cart.table.row(name).quantity).toHaveValue(String(ORDERED_QUANTITY));
+  return checkout;
+};
 
 interface GuestInvoice {
   invoice_number: string;
@@ -37,12 +49,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
     test.use(withMocks(postcodeLookupMock));
 
     test('browse, add a product and reach the payment step as a guest', { tag: ['@smoke'] }, async ({ homePage }) => {
-      const { name, productPage } = await homePage.openFirstInStockProduct();
-      await productPage.addToCart(ORDERED_QUANTITY);
-      await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
-
-      const checkout = await productPage.openCart();
-      await expect(checkout.cart.table.row(name).quantity).toHaveValue(String(ORDERED_QUANTITY));
+      const checkout = await addFirstInStockAndOpenCart(homePage);
       await checkout.proceedToPayment(fakeGuest(), fakeAddress());
 
       await expect(checkout.payment.heading).toBeVisible();
@@ -51,12 +58,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
   });
 
   test('browse, buy one product as a guest and get an invoice number', { tag: ['@smoke', '@self-hosted'] }, async ({ homePage, apiMock }) => {
-    const { name, productPage } = await homePage.openFirstInStockProduct();
-    await productPage.addToCart(ORDERED_QUANTITY);
-    await expect(productPage.toast.message(MESSAGES.added)).toBeVisible();
-
-    const checkout = await productPage.openCart();
-    await expect(checkout.cart.table.row(name).quantity).toHaveValue(String(ORDERED_QUANTITY));
+    const checkout = await addFirstInStockAndOpenCart(homePage);
     const [{ response, json: invoice }] = await Promise.all([
       apiMock.waitForResponse<GuestInvoice>('POST', '/invoices/guest'),
       checkout.checkOutAsGuest(fakeGuest(), fakeAddress()),

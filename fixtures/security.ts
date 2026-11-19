@@ -372,6 +372,10 @@ export const test = cleanupTest.extend<SecurityFixtures>({
       await use(async () => {
         const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
         contexts.push(visitor);
+        // No console guard here, on purpose: the guard is built on the test's own `context` fixture and its allowances, annotations and
+        // per-test verdict belong to that one context. These visitors only send or read a record and the specs that use them judge
+        // the page through the sentinel (a payload that ran is a hit) and through `expectNoInjectedElements`, and the storefront pages
+        // they open are guarded for console errors in every other spec.
         // Watched like the test's own, before their page is created.
         if (xssWatch) await xss.watch(visitor);
         return visitor.newPage();

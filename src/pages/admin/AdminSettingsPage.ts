@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
+import { ADMIN_SECTION_PATHS } from './admin-sections';
 import { ADMIN_MESSAGES } from './alerts';
 
 export class AdminSettingsPage {
@@ -27,7 +28,7 @@ export class AdminSettingsPage {
 
   @step('Open the settings')
   async open(): Promise<void> {
-    await this.shell.goto('/admin/settings');
+    await this.shell.goto(ADMIN_SECTION_PATHS.Settings);
   }
 
   @step('Save the settings')
@@ -35,13 +36,25 @@ export class AdminSettingsPage {
     await this.saveButton.click();
   }
 
+  /** Switches one setting off and saves: the sequence the shop-facing journeys share (the spec asserts the confirmation). */
+  @step('Switch the setting off and save')
+  async switchOff(setting: Locator): Promise<void> {
+    await setting.uncheck();
+    await this.saveButton.click();
+  }
+
+  @step('Reload the settings')
+  async reload(): Promise<void> {
+    await this.page.reload();
+  }
+
   @step('Clear the stored settings')
   async clearStorage(): Promise<void> {
     await this.clearStorageButton.click();
   }
 
-  /** The settings live in localStorage; reading them back is how a save is verified. */
-  storedSetting(key: 'PAYMENT_ENDPOINT' | 'CO2_SCALE_ENABLED' | 'ECO_BADGE_ENABLED' | 'RETRIEVE_GEOLOCATION'): Promise<string | null> {
+  /** The settings live in localStorage; reading them back is how a save is verified (callers read it through `expect.poll`). */
+  storedSetting(key: 'PAYMENT_ENDPOINT' | 'ECO_BADGE_ENABLED' | 'RETRIEVE_GEOLOCATION'): Promise<string | null> {
     return this.page.evaluate((k) => localStorage.getItem(k), key);
   }
 }

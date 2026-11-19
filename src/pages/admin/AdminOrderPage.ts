@@ -10,7 +10,6 @@ export class AdminOrderPage {
   readonly invoiceNumber: Locator;
   readonly total: Locator;
   readonly status: Locator;
-  readonly statusMessage: Locator;
   readonly updateStatusButton: Locator;
   readonly paymentMethod: Locator;
   readonly billingCity: Locator;
@@ -30,7 +29,6 @@ export class AdminOrderPage {
     // exact: "Subtotal" is a field of the same page.
     this.total = page.getByRole('textbox', { name: 'Total', exact: true });
     this.status = page.getByRole('combobox', { name: 'Status' });
-    this.statusMessage = page.getByTestId('status-message');
     this.updateStatusButton = page.getByRole('button', { name: 'Update status' });
     this.paymentMethod = page.getByRole('textbox', { name: 'Payment Method' });
     this.billingCity = page.getByRole('textbox', { name: 'City', exact: true });

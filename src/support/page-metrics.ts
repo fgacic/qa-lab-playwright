@@ -19,6 +19,18 @@ export async function applyTextSpacing(page: Page): Promise<void> {
 }
 
 /**
+ * What the page cuts off once the spacing is applied and did not before: new loss, not what the layout always hid. The "before" list
+ * is read once the web fonts are in, so a font swap is not mistaken for loss; the "after" list is the caller's to poll, because a late
+ * image can still change the layout a moment after the spacing is applied.
+ */
+export const textLostBySpacing = async (page: Page): Promise<() => Promise<string[]>> => {
+  await page.evaluate(() => document.fonts.ready);
+  const before = await clippedText(page);
+  await applyTextSpacing(page);
+  return async () => (await clippedText(page)).filter((clipped) => !before.includes(clipped));
+};
+
+/**
  * The elements whose text is cut off by their own box: they hide what overflows (`overflow: hidden` or `clip`, which no scrollbar
  * undoes) and hold more than they show, in width or height. Each is named by its tag, test id and the start of its text, sorted, so
  * two reads of one page can be compared and what changed between them is the difference. Boxes that scroll (`auto`, `scroll`) are not

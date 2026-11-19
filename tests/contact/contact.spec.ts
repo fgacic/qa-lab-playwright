@@ -1,10 +1,11 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { FIELD_ERRORS } from '@components/FormField';
 import { holdAnswers } from '@support/answer-gate';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { failureFeedback } from '@support/feedback';
 import type { ContactMessage, ContactPage } from '@pages/ContactPage';
 import type { ApiMock } from '@support/api-mock';
-import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug, fakeUser } from '@support/payloads';
+import { CONTACT_SUBJECTS, acceptedMessage, contactSubjectSlug, fakeUser, serverError } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 /** The subject a test uses when it does not care which one, and a second one for the test that does. */
@@ -39,18 +40,18 @@ test.describe('Contact form', () => {
     test('an empty form flags every required field', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.submit();
 
-      await expect(contactPage.firstName.error).toHaveText('First name is required');
-      await expect(contactPage.lastName.error).toHaveText('Last name is required');
-      await expect(contactPage.email.error).toHaveText('Email is required');
-      await expect(contactPage.subject.error).toHaveText('Subject is required');
-      await expect(contactPage.message.error).toHaveText('Message is required');
+      await expect(contactPage.firstName.error).toHaveText(FIELD_ERRORS.required('First name'));
+      await expect(contactPage.lastName.error).toHaveText(FIELD_ERRORS.required('Last name'));
+      await expect(contactPage.email.error).toHaveText(FIELD_ERRORS.required('Email'));
+      await expect(contactPage.subject.error).toHaveText(FIELD_ERRORS.required('Subject'));
+      await expect(contactPage.message.error).toHaveText(FIELD_ERRORS.required('Message'));
       await apiMock.expectNoRequest('POST', '/messages');
     });
 
     test('a malformed email is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ from: { ...fakeGuest(), email: 'not-an-email' } }));
 
-      await expect(contactPage.email.error).toHaveText('Email format is invalid');
+      await expect(contactPage.email.error).toHaveText(FIELD_ERRORS.emailInvalid);
       await apiMock.expectNoRequest('POST', '/messages');
     });
 
@@ -162,7 +163,7 @@ test.describe('Contact form', () => {
     test('the error is shown and the form stays', async ({ contactPage }) => {
       await contactPage.send(message());
 
-      await expect(contactPage.statusMessage('Server Error')).toBeVisible();
+      await expect(contactPage.statusMessage(serverError.message)).toBeVisible();
       await expect(contactPage.sendButton).toBeVisible();
     });
   });

@@ -51,7 +51,10 @@ test.describe('fixture teardown guards', { tag: ['@framework', '@self-hosted'] }
   // One nested run feeds every test below: in one worker, so a retry or a second worker never repeats it.
   test.describe.configure({ mode: 'default' });
   let outcomes: Record<string, Outcome>;
-  /** What happened to the probe of this title (tests/framework/probe/guarded-writes.probe.ts); a renamed probe is named here, not a TypeError on `undefined`. */
+  /**
+   * What happened to the probe of this title (tests/framework/probe/guarded-writes.probe.ts); a renamed probe is named here, not a TypeError on `undefined`.
+   * The titles are strings on both sides, not shared constants: Playwright refuses to import a file that declares tests into another one.
+   */
   const outcomeOf = (title: string): Outcome => {
     const outcome = outcomes[title];
     if (!outcome) throw new Error(`no probe titled "${title}" ran; the nested run reported: ${Object.keys(outcomes).join(' | ')}`);

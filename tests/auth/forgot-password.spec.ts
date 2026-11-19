@@ -1,6 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { FIELD_ERRORS } from '@components/FormField';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-import { UNKNOWN_EMAIL, fakeUser } from '@support/payloads';
+import { UNKNOWN_EMAIL, fakeUser, serverError } from '@support/payloads';
 
 /** Some text, and none of it a translation key such as "page.forgot-password.confirm". */
 const READABLE = /^(?!.*\bpage\.[\w-]+\.[\w-]+)\s*\S/s;
@@ -15,7 +16,7 @@ test.describe('Forgot password', () => {
 
     await forgotPasswordPage.submitButton.click();
 
-    await expect(forgotPasswordPage.email.error).toHaveText('Email is required');
+    await expect(forgotPasswordPage.email.error).toHaveText(FIELD_ERRORS.required('Email'));
     await apiMock.expectNoRequest('POST', '/users/forgot-password');
   });
 
@@ -26,7 +27,7 @@ test.describe('Forgot password', () => {
     await expect(forgotPasswordPage.email.error).toBeAttached();
     await apiMock.expectNoRequest('POST', '/users/forgot-password');
 
-    await expect(forgotPasswordPage.email.error, 'BUG-19: the email error names the problem').toHaveText('Email format is invalid', { timeout: BUG_TIMEOUT });
+    await expect(forgotPasswordPage.email.error, 'BUG-19: the email error names the problem').toHaveText(FIELD_ERRORS.emailInvalid, { timeout: BUG_TIMEOUT });
   });
 
   // The real refusal is a failed request on the shop's own log, so it runs on the self-hosted shop only;
@@ -84,7 +85,7 @@ test.describe('Forgot password', () => {
     test('the error is shown', async ({ forgotPasswordPage }) => {
       await forgotPasswordPage.requestReset(fakeUser.email);
 
-      await expect(forgotPasswordPage.alert).toHaveText('Server Error');
+      await expect(forgotPasswordPage.alert).toHaveText(serverError.message);
     });
   });
 });

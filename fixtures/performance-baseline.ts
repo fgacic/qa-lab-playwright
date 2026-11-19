@@ -19,6 +19,21 @@ export interface Measured {
   spread: Vitals;
 }
 
+/** The median and the spread (largest minus smallest) of each vital over a measurement's samples, rounded the way the baseline file holds them. */
+export function summarise(samples: Vitals[]): { median: Vitals; spread: Vitals } {
+  const column = (metric: keyof Vitals) => samples.map((v) => v[metric]);
+  const median = (metric: keyof Vitals) => {
+    const sorted = [...column(metric)].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  const range = (metric: keyof Vitals) => Math.max(...column(metric)) - Math.min(...column(metric));
+  return {
+    median: { lcp: Math.round(median('lcp')), cls: Number(median('cls').toFixed(3)), tbt: Math.round(median('tbt')), inp: Math.round(median('inp')) },
+    spread: { lcp: Math.round(range('lcp')), cls: Number(range('cls').toFixed(3)), tbt: Math.round(range('tbt')), inp: Math.round(range('inp')) },
+  };
+}
+
 /** A measurement and the metrics of it to record, held until the test has finished (see `record`). */
 export interface Recording {
   measurement: Measured;

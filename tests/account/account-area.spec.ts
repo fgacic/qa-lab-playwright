@@ -9,6 +9,8 @@ import { storedToken } from '@support/session';
 /**
  * The signed-in area with a mocked session: a fake token and mocked account endpoints, so it
  * runs anywhere without an account. The real thing is covered in real-account.spec.ts.
+ * One file on purpose: the sections share the mocked-session set below and each block mirrors one account page object, so a
+ * split would repeat that set per file without making any test easier to find.
  */
 test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   // An account with nothing in it. Any section the SPA opens needs its endpoint mocked: the fake token
@@ -66,7 +68,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use({
       apiMocks: async ({ catalog }, use) => {
         const product = await catalog.inStock();
-        await use({ routes: [mock.sequence('GET', '/favorites', { status: 200, json: [fakeFavorite(product)] }, { status: 200, json: [] }), mock.respond('DELETE', /^\/favorites\/.+$/, '', 204)] });
+        await use({ routes: [mock.respond('GET', '/favorites', [fakeFavorite(product)]), mock.respond('DELETE', /^\/favorites\/.+$/, '', 204)] });
       },
     });
 
@@ -74,8 +76,9 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       const product = await catalog.inStock();
       await expect(favoritesPage.favorite(product.name)).toBeVisible();
 
-      // The page lists once on opening and again after a removal: the sequence's second answer (empty) belongs
-      // to that second list, so wait for it to be served before asserting what the page shows.
+      // The list the shop answers with changes with the removal, not with how many times the page asks: from here on it is empty
+      // (a later mock wins), so it does not matter how often the page lists again; wait for that answer before asserting.
+      await apiMock.use(mock.respond('GET', '/favorites', []));
       const removal = apiMock.waitForRequest('DELETE', /^\/favorites\/.+$/);
       const relisted = apiMock.waitForResponse('GET', '/favorites');
       await favoritesPage.remove(product.name);
@@ -197,10 +200,9 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
   test.describe('messages', () => {
     const REPLY = 'A mocked reply from the qa-lab suite.';
-    // The page reloads the message after a reply, so the second answer lists it.
     test.use(withMocks(
       mock.respond('GET', '/messages', listOf([fakeMessage])),
-      mock.sequence('GET', `/messages/${fakeMessage.id}`, { status: 200, json: fakeMessage }, { status: 200, json: { ...fakeMessage, replies: [fakeReply(REPLY)] } }),
+      mock.respond('GET', `/messages/${fakeMessage.id}`, fakeMessage),
     ));
 
     test('lists the contact messages, opens one and replies to it', async ({ messagesPage, apiMock }) => {
@@ -211,7 +213,9 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       await expect(details.text(fakeMessage.message)).toBeVisible();
       await expect(details.repliesHeading).toBeVisible();
 
-      // The message is read once on opening and again after the reply: wait for that second read, which lists the reply.
+      // The page reads the message again after the reply. From the reply on, the shop's answer lists it (a later mock wins), whatever
+      // number of reads that takes; wait for a read, which lists the reply.
+      await apiMock.use(mock.respond('GET', `/messages/${fakeMessage.id}`, { ...fakeMessage, replies: [fakeReply(REPLY)] }));
       const reply = apiMock.waitForRequest('POST', `/messages/${fakeMessage.id}/reply`);
       const reread = apiMock.waitForResponse('GET', `/messages/${fakeMessage.id}`);
       await details.sendReply(REPLY);

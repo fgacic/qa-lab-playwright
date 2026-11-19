@@ -1,5 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { FIELD_ERRORS } from '@components/FormField';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { serverError } from '@support/payloads';
 import { fakeCustomer } from '@support/test-data';
 
 /** A password the form accepts, typed where a test only needs some password, and the id the mocked register answers with. */
@@ -13,6 +15,8 @@ const HOUSE_NUMBER = '1';
 const LOOKUP = { street: 'Mockstraat', city: 'Mockstad', state: 'Mockland' };
 /** The minimum length the page's password rules list (BUG-31 is about the validation message disagreeing with it). */
 const LISTED_MINIMUM = 8;
+/** What the postcode-lookup failure test types by hand, and expects to find still there. */
+const TYPED = { street: 'Typed Street', city: 'Typed City' };
 
 /**
  * Nothing here creates a real account. Submissions with valid data are answered by a mocked
@@ -20,18 +24,18 @@ const LISTED_MINIMUM = 8;
  */
 test.describe('Registration form', () => {
   const required = {
-    'First name': 'First name is required',
-    'Last name': 'Last name is required',
+    'First name': FIELD_ERRORS.required('First name'),
+    'Last name': FIELD_ERRORS.required('Last name'),
     'Date of birth': 'Please enter a valid date in YYYY-MM-DD format. Date of Birth is required',
-    Country: 'Country is required',
-    'Postal code': 'Postcode is required',
-    'House number': 'House number is required',
-    Street: 'Street is required',
-    City: 'City is required',
-    State: 'State is required',
+    Country: FIELD_ERRORS.required('Country'),
+    'Postal code': FIELD_ERRORS.required('Postcode'),
+    'House number': FIELD_ERRORS.required('House number'),
+    Street: FIELD_ERRORS.required('Street'),
+    City: FIELD_ERRORS.required('City'),
+    State: FIELD_ERRORS.required('State'),
     Phone: 'Phone is required.',
-    Email: 'Email is required',
-    Password: 'Password is required Password must be minimal 6 characters long. Password can not include invalid characters.',
+    Email: FIELD_ERRORS.required('Email'),
+    Password: `${FIELD_ERRORS.required('Password')} ${FIELD_ERRORS.passwordRules}`,
   } as const;
 
   // The form's own validation must stop the negative tests below. Nothing answers POST /users/register in
@@ -53,8 +57,8 @@ test.describe('Registration form', () => {
     { field: 'dateOfBirth', label: 'date of birth', value: '01/01/1990', message: 'Please enter a valid date in YYYY-MM-DD format.' },
     { field: 'dateOfBirth', label: 'date of birth', value: '2020-13-45', message: 'Please enter a valid date in YYYY-MM-DD format.' },
     { field: 'phone', label: 'phone number', value: 'abc', message: 'Only numbers are allowed.' },
-    { field: 'email', label: 'email', value: 'not-an-email', message: 'Email format is invalid' },
-    { field: 'password', label: 'password', value: 'a', message: 'Password must be minimal 6 characters long. Password can not include invalid characters.' },
+    { field: 'email', label: 'email', value: 'not-an-email', message: FIELD_ERRORS.emailInvalid },
+    { field: 'password', label: 'password', value: 'a', message: FIELD_ERRORS.passwordRules },
   ] as const;
 
   for (const { field, label, value, message } of invalid) {
@@ -167,15 +171,19 @@ test.describe('Registration form', () => {
   test.describe('when the postcode lookup fails', { tag: ['@mocked', '@negative'] }, () => {
     test.use(withMocks(mock.fail('GET', '/postcode-lookup', 500)));
 
-    test('the address stays as typed and the form is still usable', async ({ registerPage }) => {
-      await registerPage.street.input.fill('Typed Street');
+    test('the address stays as typed and the form is still usable', async ({ registerPage, apiMock }) => {
+      await registerPage.street.input.fill(TYPED.street);
       await registerPage.country.input.selectOption(COUNTRY);
       await registerPage.postalCode.input.fill(POSTCODE);
+      const lookedUp = apiMock.waitForResponse('GET', '/postcode-lookup');
       await registerPage.houseNumber.input.fill(HOUSE_NUMBER);
 
-      await expect(registerPage.street.input).toHaveValue('Typed Street');
-      await registerPage.city.input.fill('Typed City');
-      await expect(registerPage.city.input).toHaveValue('Typed City');
+      expect((await lookedUp).response.status()).toBe(500);
+
+      await expect(registerPage.street.input).toHaveValue(TYPED.street);
+      await registerPage.city.input.fill(TYPED.city);
+      await expect(registerPage.city.input).toHaveValue(TYPED.city);
+      // The failed lookup has answered (above), so "no alert" is a look after the failure and not before it.
       await expect(registerPage.error).toHaveCount(0);
     });
   });
@@ -257,7 +265,7 @@ test.describe('Registration form', () => {
 
   const failures = [
     { status: 422, json: { email: ['A customer with this email address already exists.'] }, shown: 'A customer with this email address already exists.' },
-    { status: 500, json: { message: 'Server Error' }, shown: 'Server Error' },
+    { status: 500, json: serverError, shown: serverError.message },
   ];
   for (const { status, json, shown } of failures) {
     test.describe(`when registration answers ${status}`, { tag: ['@mocked', '@negative'] }, () => {

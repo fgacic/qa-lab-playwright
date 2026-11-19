@@ -14,12 +14,15 @@
 
 import fs from 'node:fs';
 import type { Page } from '@playwright/test';
+import { PAYMENT_FIELDS } from '@components/checkout/PaymentStep';
+import { CART_MESSAGES } from '@components/CartTable';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
 import { emptyCartMock, postcodeLookupMock } from '@fixtures/mocks';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { brand, customer } from '@support/admin-payloads';
 import { holdTimer } from '@support/clock';
+import { UNKNOWN_ROUTE_LOG } from '@support/console-guard';
 import { diffFindings, KNOWN_VIOLATIONS, type ScanName } from '@support/a11y-baseline';
 import { IS_SELF_HOSTED } from '@support/env';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
@@ -61,7 +64,6 @@ test.beforeAll(() => {
 
 // Before any navigation, on the context, so the page's own scripts and transitions see it from the first paint (the scan fixture checks it).
 test.use({ reducedMotion: 'reduce' });
-
 
 test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('no new violations on the home page', async ({ homePage, a11y }) => {
@@ -160,7 +162,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     await billing.enterAddress(fakeAddress());
     await billing.proceed();
     await payment.choose('credit-card');
-    await expectNoNewViolations(await a11y.scan('checkout payment', { ready: [payment.heading, payment.method, payment.field('Credit Card Number'), payment.checkPaymentButton] }), 'checkout payment');
+    await expectNoNewViolations(await a11y.scan('checkout payment', { ready: [payment.heading, payment.method, payment.field(PAYMENT_FIELDS.cardNumber), payment.checkPaymentButton] }), 'checkout payment');
   });
 
   test.describe('order confirmation (mocked order)', { tag: ['@mocked'] }, () => {
@@ -211,7 +213,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
 
   test('no new violations on the add-to-cart toast', async ({ productPage, a11y }) => {
     await productPage.addToCart();
-    await expectNoNewViolations(await a11y.scan('product with a toast', { ready: [productPage.toast.message('Product added to shopping cart.'), productPage.addToCartButton] }), 'product with a toast');
+    await expectNoNewViolations(await a11y.scan('product with a toast', { ready: [productPage.toast.message(CART_MESSAGES.added), productPage.addToCartButton] }), 'product with a toast');
   });
 
   test('no new violations on the compare bar', async ({ homePage, a11y }) => {
@@ -231,7 +233,8 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
     await expectNoNewViolations(await a11y.scan('privacy policy', { ready: [page.getByRole('heading', { level: 1 })] }), 'privacy policy');
   });
 
-  test('no new violations on an unknown route', async ({ page, homePage, a11y }) => {
+  test('no new violations on an unknown route', async ({ page, homePage, a11y, consoleGuard }) => {
+    consoleGuard.allow(UNKNOWN_ROUTE_LOG.pattern, UNKNOWN_ROUTE_LOG.reason);
     // There is no 404 page: an unknown route redirects to / but the page stays empty (BUG-02), so what renders is
     // the shell alone. It is ready once the redirect has happened and the shell's last part, the footer, has drawn.
     await page.goto('/this/route/does/not/exist', { waitUntil: 'domcontentloaded' });

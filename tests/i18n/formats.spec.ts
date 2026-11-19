@@ -42,7 +42,7 @@ test.describe('Numbers and dates follow the language', { tag: ['@i18n', '@mocked
     const written = new Set(LANGUAGES.map(figure));
     expect(written.size, `the ways the seven languages write ${TOTAL}: ${[...written].join(' | ')}`).toBeGreaterThan(2);
     expect(Object.keys(FIGURES).sort(), 'the table holds every language the shop offers').toEqual([...LANGUAGES]);
-      });
+  });
 
   for (const language of LANGUAGES) {
     test(`I18N-29: the total of an order is written as a reader of ${language} writes it`, { tag: ['@bug'] }, async ({ invoicesPage }) => {

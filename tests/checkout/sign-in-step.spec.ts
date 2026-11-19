@@ -16,6 +16,8 @@ const TEXT = {
 } as const;
 /** An email the step's own validation refuses, in the sign-in form and the guest form alike. */
 const MALFORMED_EMAIL = 'not-an-email';
+/** A password under the shop's minimum length. */
+const TOO_SHORT_PASSWORD = 'x';
 
 test.describe('Checkout: sign-in step', () => {
   test.beforeEach(async ({ checkout }) => {
@@ -41,7 +43,7 @@ test.describe('Checkout: sign-in step', () => {
   });
 
   test('a malformed email and a too-short password show errors and send no sign-in', { tag: ['@negative'] }, async ({ checkout, apiMock }) => {
-    await checkout.signIn.signIn(MALFORMED_EMAIL, 'x');
+    await checkout.signIn.signIn(MALFORMED_EMAIL, TOO_SHORT_PASSWORD);
 
     await expect(checkout.signIn.email.error).toHaveText(TEXT.emailInvalid);
     await expect(checkout.signIn.password.error).toHaveText(TEXT.passwordInvalid);

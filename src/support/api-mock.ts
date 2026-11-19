@@ -158,6 +158,7 @@ export class ApiMock {
 
   /** Fallback answers that any `use()` or describe-level mock overrides, e.g. a mocked back office. */
   async useDefaults(...routes: MockRoute[]): Promise<void> {
+    // Pushed, where `use` unshifts: the FIRST default registered wins among defaults (a later one does not override an earlier one), and every `use` beats all of them.
     this.defaults.push(...routes);
     await this.install();
   }

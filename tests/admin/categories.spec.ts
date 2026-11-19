@@ -3,11 +3,11 @@ import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@page
 import { REFUSED_STATUSES, SEARCH_HIT, SEARCH_TERM, category, subcategory } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
-/** The slug an edit gives the category, and the one it gives a subcategory. */
 /** The subcategory the add form creates under the listed category. */
 const NEW_SUBCATEGORY = { name: 'Qa Lab Sub', slug: 'qa-lab-sub' };
 /** The name given to a category whose save is refused. */
 const NEW_CATEGORY_NAME = 'Qa Lab New Category';
+/** The slug an edit gives the category, and the one it gives a subcategory. */
 const RENAMED_SLUG = 'qa-lab-renamed';
 const RENAMED_SUBSLUG = `${RENAMED_SLUG}-sub`;
 

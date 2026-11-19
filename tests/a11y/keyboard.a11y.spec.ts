@@ -18,6 +18,10 @@ const TAB_SETTLE_MS = 1_000;
 
 /** The links of the account menu, in the order it draws them ("Sign out" is not a stop: A11Y-04). */
 const ACCOUNT_MENU_LINKS = ['My account', 'My favorites', 'My profile', 'My invoices', 'My messages'] as const;
+/** The first entry of the menu, the one the open-and-close tests look for. */
+const [MENU_FIRST_LINK] = ACCOUNT_MENU_LINKS;
+/** A category the header offers on the home page. */
+const CATEGORY = 'Hand Tools';
 
 /**
  * Presses Tab until each target has the focus, in this order. Returns what was not reached, as a list for the spec to assert on:
@@ -248,11 +252,11 @@ test.describe('Keyboard: menus and widgets', { tag: ['@a11y', '@axe'] }, () => {
     const { header } = homePage;
     await header.categoriesButton.focus();
     await page.keyboard.press('Enter');
-    await expect(header.categoryLink('Hand Tools')).toBeVisible();
+    await expect(header.categoryLink(CATEGORY)).toBeVisible();
 
     await page.keyboard.press('Escape');
 
-    await expect(header.categoryLink('Hand Tools')).toBeHidden();
+    await expect(header.categoryLink(CATEGORY)).toBeHidden();
     await expect(header.categoriesButton).toBeFocused();
   });
 
@@ -274,7 +278,7 @@ test.describe('Keyboard: the account menu', { tag: ['@a11y', '@axe', '@mocked'] 
     const { header } = accountPage.shell;
     await header.userMenu.focus();
     await page.keyboard.press('Enter');
-    await expect(header.userMenuItem('My account')).toBeVisible();
+    await expect(header.userMenuItem(MENU_FIRST_LINK)).toBeVisible();
 
     // "Sign out" is not a stop (A11Y-04, pinned in account-area): the walk is the five links above it.
     const missed = await missedInTabOrder(
@@ -286,7 +290,7 @@ test.describe('Keyboard: the account menu', { tag: ['@a11y', '@axe', '@mocked'] 
     await header.userMenu.focus();
     await page.keyboard.press('Escape');
 
-    await expect(header.userMenuItem('My account')).toBeHidden();
+    await expect(header.userMenuItem(MENU_FIRST_LINK)).toBeHidden();
     await expect(header.userMenu).toBeFocused();
   });
 
@@ -294,7 +298,7 @@ test.describe('Keyboard: the account menu', { tag: ['@a11y', '@axe', '@mocked'] 
     const { header } = accountPage.shell;
     await header.userMenu.focus();
     await page.keyboard.press('Enter');
-    await expect(header.userMenuItem('My account')).toBeVisible();
+    await expect(header.userMenuItem(MENU_FIRST_LINK)).toBeVisible();
 
     for (const name of ACCOUNT_MENU_LINKS) {
       await expect.poll(() => focusRingDrawn(page, header.userMenuItem(name)), { message: `${name} looks different when it has the keyboard focus` }).toBe(true);

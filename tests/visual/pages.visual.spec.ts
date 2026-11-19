@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { PAYMENT_FIELDS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { Page } from '@playwright/test';
 import type { HomePage } from '@pages/HomePage';
@@ -155,7 +156,7 @@ test.describe('Visual regression', { tag: ['@visual'] }, () => {
   test('checkout payment step', async ({ checkout, page }) => {
     await checkout.proceedToPayment(fakeGuest(), fakeAddress());
     await checkout.payment.choose('credit-card');
-    await expect(checkout.payment.field('Credit Card Number')).toBeVisible();
+    await expect(checkout.payment.field(PAYMENT_FIELDS.cardNumber)).toBeVisible();
     // The guest summary line carries the generated email.
     await settleImages(page);
     await expect(page).toHaveScreenshot('checkout-payment.png', { fullPage: true, mask: [checkout.signIn.guestSummary] });

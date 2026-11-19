@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { FIELD_ERRORS } from '@components/FormField';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { MOCKED_PASSWORD, UNKNOWN_EMAIL, UNKNOWN_PASSWORD, fakeJwt, fakeUser } from '@support/payloads';
 import { storedToken } from '@support/session';
@@ -10,6 +11,8 @@ const WRONG_TOTP_CODE = '000000';
 /** What the shop's refusals say, typed once for the mock and the assertion. */
 const REFUSED = 'Invalid email or password';
 const LOCKED = 'Account locked, too many failed attempts. Please contact the administrator.';
+/** The error body of the API's 401: the word the page shows as it is when a TOTP code is refused. */
+const UNAUTHORIZED = 'Unauthorized';
 
 /**
  * Real requests in this file use only obviously fake credentials (UNKNOWN_EMAIL, UNKNOWN_PASSWORD).
@@ -22,8 +25,8 @@ test.describe('Login', () => {
 
     await loginPage.loginButton.click();
 
-    await expect(loginPage.email.error).toHaveText('Email is required');
-    await expect(loginPage.password.error).toHaveText('Password is required');
+    await expect(loginPage.email.error).toHaveText(FIELD_ERRORS.required('Email'));
+    await expect(loginPage.password.error).toHaveText(FIELD_ERRORS.required('Password'));
     await apiMock.expectNoRequest('POST', '/users/login');
   });
 
@@ -33,12 +36,13 @@ test.describe('Login', () => {
 
     await loginPage.login('not-an-email', 'x');
 
-    await expect(loginPage.email.error).toHaveText('Email format is invalid');
+    await expect(loginPage.email.error).toHaveText(FIELD_ERRORS.emailInvalid);
     await expect(loginPage.password.error).toHaveText('Password length is invalid');
     await apiMock.expectNoRequest('POST', '/users/login');
   });
 
-  // The real refusal is a failed sign-in on the shop's own log, so it runs on the self-hosted shop only;
+  // The real refusal is a failed sign-in on the shop's own log, so it runs on the self-hosted shop only (the one unknown
+  // credential per browser project is harmless there: security/login-lockout owns the lockout, and the account is unknown);
   // the mocked twin below proves the same page behaviour everywhere, the live site included.
   test('unknown credentials are refused by the shop', { tag: ['@negative', '@self-hosted'] }, async ({ loginPage, page }) => {
     await loginPage.login(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
@@ -49,7 +53,7 @@ test.describe('Login', () => {
 
   test.describe('when the shop refuses the credentials', { tag: ['@mocked', '@negative'] }, () => {
     // The body the real API answers with (401).
-    test.use(withMocks(mock.fail('POST', '/users/login', 401, { error: 'Unauthorized' })));
+    test.use(withMocks(mock.fail('POST', '/users/login', 401, { error: UNAUTHORIZED })));
 
     test('the shopper is told so and stays on the login page', { tag: ['@smoke'] }, async ({ loginPage, page }) => {
       await loginPage.login(UNKNOWN_EMAIL, UNKNOWN_PASSWORD);
@@ -153,7 +157,7 @@ test.describe('Login', () => {
     // The first answer asks for a code; the second refuses it, the way the real API refuses a bad credential.
     test.use(withMocks(mock.sequence('POST', '/users/login',
       { status: 200, json: { requires_totp: true, access_token: PENDING_TOTP } },
-      { status: 401, json: { error: 'Unauthorized' } })));
+      { status: 401, json: { error: UNAUTHORIZED } })));
 
     test('the code is refused and the customer stays on login', async ({ loginPage, apiMock, page }) => {
       await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
@@ -163,7 +167,9 @@ test.describe('Login', () => {
       await loginPage.verifyTotp(WRONG_TOTP_CODE);
 
       expect((await verification).response.status()).toBe(401);
-      await expect(loginPage.error).toHaveText('Unauthorized');
+      // The page shows the API's raw word: that is the shop's current wording for a refused code (it has no sentence for it),
+      // so the test pins what is on screen today and a reworded message is a deliberate edit here.
+      await expect(loginPage.error).toHaveText(UNAUTHORIZED);
       await expect(page).toHaveURL('/auth/login');
       // The error above is on screen, so a header that is still without a user menu is settled, not early.
       await expect(loginPage.shell.header.userMenu).toHaveCount(0);

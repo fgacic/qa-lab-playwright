@@ -1,3 +1,4 @@
+import { PAYMENT_FIELDS } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import type { Locator } from '@playwright/test';
 import { NO_SUCH_PRODUCT, type A11yFixtures } from '@fixtures/a11y';
@@ -107,7 +108,6 @@ function homeVisits(violation: PinnedViolation, homePage: HomePage, productName:
 // Before any navigation, on the context: the scan fixture refuses to read a page that may still be mid-fade.
 test.use({ reducedMotion: 'reduce' });
 
-
 test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug'] }, () => {
   for (const violation of on('home')) {
     test(`${violation.id} ${violation.rule} on ${violation.target} (home)`, async ({ homePage, product, a11y }) => {
@@ -154,7 +154,7 @@ test.describe('Known accessibility violations', { tag: ['@a11y', '@axe', '@bug']
           await checkout.billing.enterAddress(fakeAddress());
           await checkout.billing.proceed();
           await checkout.payment.choose('credit-card');
-          await expect(checkout.payment.field('Credit Card Number')).toBeVisible();
+          await expect(checkout.payment.field(PAYMENT_FIELDS.cardNumber)).toBeVisible();
           return checkout.header.cartLink;
         },
       });

@@ -228,13 +228,13 @@ export class AdminUserForm {
     this.firstName = page.getByRole('textbox', { name: 'First Name' });
     this.lastName = page.getByRole('textbox', { name: 'Last Name' });
     this.dateOfBirth = page.getByRole('textbox', { name: 'Date of birth' });
-    this.street = page.getByRole('textbox', { name: 'Street' });
+    this.street = page.getByRole('textbox', { name: 'Street', exact: true });
     this.postalCode = page.getByRole('textbox', { name: 'Postal code' });
-    this.city = page.getByRole('textbox', { name: 'City' });
-    this.state = page.getByRole('textbox', { name: 'State' });
+    this.city = page.getByRole('textbox', { name: 'City', exact: true });
+    this.state = page.getByRole('textbox', { name: 'State', exact: true });
     this.country = page.getByRole('combobox', { name: 'Country' });
-    this.phone = page.getByRole('textbox', { name: 'Phone' });
-    this.email = page.getByRole('textbox', { name: 'Email' });
+    this.phone = page.getByRole('textbox', { name: 'Phone', exact: true });
+    this.email = page.getByRole('textbox', { name: 'Email', exact: true });
     this.enabled = page.getByRole('checkbox', { name: 'Enabled' });
     this.failedLoginAttempts = page.getByRole('textbox', { name: 'Failed login attempts' });
     // By label, not role: a password field is not a textbox, and the form's is (ADM-17), so a role locator would stop finding it the day that is fixed.

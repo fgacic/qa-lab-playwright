@@ -1,11 +1,11 @@
-import type { APIRequestContext, APIResponse } from '@playwright/test';
+import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import type { Cleanups } from '@fixtures/cleanups';
 import { API_URL } from '@support/env';
-import { fakeCustomer, type Customer } from '@support/test-data';
+import { fakeCustomer, uniqueEmail, type Customer } from '@support/test-data';
 import type { ToolshopApi } from '@support/toolshop-api';
 
 /**
- * What the API-level security specs (tests/security/authorization, cart-access, login-lockout) share: one authenticated-or-not call,
+ * What the API-level security specs (tests/security/authorization-*, cart-access, login-lockout) share: one authenticated-or-not call,
  * the statuses that count as a refusal, and the accounts and removals a test arranges. Every helper here writes to the shop's database,
  * so the specs that use them are `@self-hosted`.
  */
@@ -77,4 +77,45 @@ export function profileBody({ customer }: Pick<Account, 'customer'>, { firstName
     address: { street: customer.address.street, city: customer.address.city, state: customer.address.state, country: customer.address.country, postal_code: customer.address.postalCode },
     ...(role ? { role } : {}),
   };
+}
+
+// Shared by the four authorization-*.spec.ts files.
+export type Caller = 'anonymous' | 'customer';
+export const CALLERS: Caller[] = ['anonymous', 'customer'];
+export const WHO: Record<Caller, string> = { anonymous: 'an anonymous caller', customer: 'a customer' };
+
+/** What creating a record answers. */
+export const CREATED = 201;
+/** The first names the profile checks write: the owner's own change, and the one an intruder tries. */
+export const OWN_NAME = 'Changed';
+export const INTRUDER_NAME = 'Hijacked';
+/** The subject and body of the contact message the checks send. */
+export const MESSAGE = { subject: 'webmaster', message: 'Sent by the authorisation checks to see who may list or change it.' } as const;
+
+/** Whether an answer is a verdict on authorisation at all: accepted (2xx) or refused (401, 403). Anything else is not one. */
+export function expectVerdict(response: APIResponse, what: string): void {
+  expect(response.ok() || REFUSED.includes(response.status()), `${what} answered ${response.status()}: neither accepted nor refused, so it says nothing about who may call it`).toBe(true);
+}
+
+/** The token a caller presents: none for an anonymous one, a freshly registered customer's otherwise. */
+export async function tokenFor(world: World, caller: Caller): Promise<string | undefined> {
+  return caller === 'customer' ? (await newCustomer(world)).token : undefined;
+}
+
+/**
+ * A contact message of the test's own: sent through the public API, then found again in the admin's inbox by its sender (the inbox is
+ * paged, so every page is read until it turns up) and its id returned. A message nobody can delete is left behind, uniquely named.
+ */
+export async function contactMessage(world: World, name: string): Promise<string> {
+  await world.api.sendContactMessage({ name, email: uniqueEmail('authz'), ...MESSAGE });
+  const admin = await world.adminToken();
+  const inboxPage = async (page: number) => (await call(world.request, 'GET', `/messages?page=${page}`, { token: admin })).json();
+  const first = await inboxPage(1);
+  const lastPage = first.last_page as number;
+  for (let page = 1; page <= lastPage; page++) {
+    const inbox = page === 1 ? first : await inboxPage(page);
+    const found = (inbox.data as { id: string; name: string }[]).find((message) => message.name === name);
+    if (found) return found.id;
+  }
+  throw new Error(`the message from "${name}" is not in the admin's inbox (${lastPage} page(s) read)`);
 }

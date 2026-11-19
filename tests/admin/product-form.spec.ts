@@ -183,6 +183,20 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     });
   });
 
+  test.describe('when the server fails to save a new product', { tag: ['@negative'] }, () => {
+    test.use(withLoggedFailure(mock.fail('POST', '/products', 500, { message: 'The product could not be saved.' })));
+
+    test('the failure is shown and the product is not reported as saved', async ({ adminProducts }) => {
+      const form = await adminProducts.add();
+
+      await form.fillIn(newProduct);
+      await form.chrome.save();
+
+      await expect(form.chrome.failure).toBeVisible();
+      await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved)).toBeHidden();
+    });
+  });
+
   for (const status of REFUSED_STATUSES) {
     test.describe(`when saving an edited product is refused (${status})`, { tag: ['@negative'] }, () => {
       test.use(withLoggedFailure(mock.fail('PUT', PRODUCT, status, { message: 'The product could not be saved.' })));

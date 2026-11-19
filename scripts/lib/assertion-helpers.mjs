@@ -10,6 +10,7 @@ export const ASSERTION_HELPERS = [
   'expectNoNewViolations',
   'expectNoRequest',
   'expectNoSidewaysScroll',
+  'expectNoTextLost',
   'expectNotExecuted',
   'expectNoWorseShift',
   'expectPageText',

@@ -1,26 +1,46 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { failureFeedback } from '@support/feedback';
-import { CONTACT_SUBJECTS, contactSubjectSlug, emptyProductPage, listOf } from '@support/payloads';
+import { CONTACT_SUBJECTS, contactSubjectSlug, emptyProductPage, listOf, serverError } from '@support/payloads';
 import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
-/** What the visitor asks for, and what the assistant answers when it finds something. */
+/** What the visitor asks for. */
 const SEARCH_TERM = 'hammer';
-const FOUND_REPLY = 'Here are some products I found:';
-/** What "Order a product" answers to a search term, instead of FOUND_REPLY. */
-const ORDER_RESULTS_REPLY = 'Here are some products I found. Click one to order:';
-/** The questions the support-ticket dialogue asks, in order, as far as two tests quote them. */
-const EMAIL_PROMPT = 'What is your email address?';
-const SUBJECT_PROMPT = 'Please select a subject for your ticket:';
-const DESCRIPTION_PROMPT = 'Please describe your issue (minimum 50 characters):';
-const ATTACHMENT_PROMPT = 'Would you like to add an attachment?';
-/** The answer to the attachment question that sends the ticket without one. */
-const SKIP_ATTACHMENT = 'Skip';
-/** How the dialogue ends: the ticket was sent, or it was not (the reason follows the second). */
-const TICKET_SUBMITTED = "Your support ticket has been submitted successfully! We'll get back to you soon.";
-const TICKET_ERROR = 'There was an error submitting your ticket:';
 /** The quantity the order dialogue is answered with. */
 const QUANTITY = 2;
+/**
+ * What the assistant says, word for word, in the order of its dialogues: one script for the whole file (the wording is the
+ * shop's, so a changed sentence is one edit here and not one per test). Each line is read as "the newest reply with this text".
+ */
+const ASSISTANT = {
+  found: 'Here are some products I found:',
+  nothingFound: 'No products found. Try a different search.',
+  // "Order a product": answers a search term with its own list, then walks through product, quantity and summary.
+  orderWhat: 'What product would you like to order? Type a product name to search.',
+  orderResults: 'Here are some products I found. Click one to order:',
+  orderChosen: 'Great choice! You selected:',
+  orderQuantity: 'How many would you like to order?',
+  orderSummary: 'Order Summary:',
+  orderConfirm: 'Would you like to add this to your cart?',
+  orderAdded: 'Added to your cart!',
+  cartTotal: 'Your cart total:',
+  emptyCart: 'Your cart is empty. Please add some products first.',
+  // The support-ticket dialogue, in order.
+  ticketStart: "I'll help you create a support ticket. What is your first name?",
+  lastName: 'What is your last name?',
+  email: 'What is your email address?',
+  emailAgain: 'Please enter a valid email address.',
+  subject: 'Please select a subject for your ticket:',
+  description: 'Please describe your issue (minimum 50 characters):',
+  descriptionAgain: 'Your message must be at least 50 characters long.',
+  attachment: 'Would you like to add an attachment?',
+  // How the dialogue ends: the ticket was sent, or it was not (the reason follows the second).
+  submitted: "Your support ticket has been submitted successfully! We'll get back to you soon.",
+  error: 'There was an error submitting your ticket:',
+} as const;
+/** The answer to the attachment question that sends the ticket without one, and the two answers of the order dialogue's last question. */
+const SKIP_ATTACHMENT = 'Skip';
+const ADD_TO_CART = 'Yes, add to cart';
 /** The subject the ticket dialogue picks: any of the contact form's, named from the same list. */
 const TICKET_SUBJECT = CONTACT_SUBJECTS[1].label;
 
@@ -48,7 +68,7 @@ test.describe('Chat assistant', () => {
 
     await chat.findProduct(SEARCH_TERM);
 
-    await expect(chat.reply(FOUND_REPLY)).toBeVisible();
+    await expect(chat.reply(ASSISTANT.found)).toBeVisible();
     await expect(chat.productResults.first()).toContainText(/hammer/i);
   });
 
@@ -58,7 +78,7 @@ test.describe('Chat assistant', () => {
 
     await chat.choose('Order a product');
 
-    await expect(chat.reply('What product would you like to order? Type a product name to search.')).toBeVisible();
+    await expect(chat.reply(ASSISTANT.orderWhat)).toBeVisible();
   });
 
   test.describe('"Order a product" with a search term', { tag: ['@mocked'] }, () => {
@@ -75,16 +95,38 @@ test.describe('Chat assistant', () => {
       await chat.open();
       await chat.choose('Order a product');
       await chat.send(product.name);
-      await expect(chat.reply(ORDER_RESULTS_REPLY)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.orderResults)).toBeVisible();
 
       await chat.productResult(product.name).click();
-      await expect(chat.reply('Great choice! You selected:')).toBeVisible();
-      await expect(chat.reply('How many would you like to order?')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.orderChosen)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.orderQuantity)).toBeVisible();
       await chat.pick(String(QUANTITY));
 
-      await expect(chat.reply('Order Summary:')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.orderSummary)).toBeVisible();
       await expect(chat.reply(`$${(product.price * QUANTITY).toFixed(2)}`)).toBeVisible();
-      await expect(chat.reply('Would you like to add this to your cart?')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.orderConfirm)).toBeVisible();
+    });
+
+    // The rest of the dialogue, which the test above stops short of: the answer to its last question puts the order in the cart
+    // (an anonymous cart, the one write the guard lets through on every target) and the menu's Checkout then has something to check out.
+    test('adds the order to the cart, and "Checkout" then shows the cart total', async ({ homePage, catalog }) => {
+      const { chat, header } = homePage.shell;
+      const product = await catalog.inStock();
+      await chat.open();
+      await chat.choose('Order a product');
+      await chat.send(product.name);
+      await chat.productResult(product.name).click();
+      await chat.pick(String(QUANTITY));
+      await expect(chat.reply(ASSISTANT.orderConfirm)).toBeVisible();
+
+      await chat.pick(ADD_TO_CART);
+
+      await expect(chat.reply(ASSISTANT.orderAdded)).toBeVisible();
+      await expect(header.cartLink).toHaveText(String(QUANTITY));
+      await chat.choose('Checkout');
+      await expect(chat.reply(ASSISTANT.cartTotal)).toBeVisible();
+      await expect(chat.reply(`$${(product.price * QUANTITY).toFixed(2)}`)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.emptyCart)).toHaveCount(0);
     });
   });
 
@@ -94,7 +136,7 @@ test.describe('Chat assistant', () => {
 
     await chat.choose('Checkout');
 
-    await expect(chat.reply('Your cart is empty. Please add some products first.')).toBeVisible();
+    await expect(chat.reply(ASSISTANT.emptyCart)).toBeVisible();
   });
 
   test('"Back to menu" returns to the choices', async ({ homePage }) => {
@@ -127,7 +169,7 @@ test.describe('Chat assistant', () => {
 
       expect((await searched).postDataJSON()).toMatchObject({ q: SEARCH_TERM });
       await expect(chat.line(SEARCH_TERM)).toBeVisible();
-      await expect(chat.reply(FOUND_REPLY)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.found)).toBeVisible();
     });
   });
 
@@ -152,22 +194,22 @@ test.describe('Chat assistant', () => {
       const guest = fakeGuest();
       await chat.open();
       await chat.choose('Create support ticket');
-      await expect(chat.reply("I'll help you create a support ticket. What is your first name?")).toBeVisible();
+      await expect(chat.reply(ASSISTANT.ticketStart)).toBeVisible();
 
       await chat.send(guest.firstName);
-      await expect(chat.reply('What is your last name?')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.lastName)).toBeVisible();
       await chat.send(guest.lastName);
-      await expect(chat.reply(EMAIL_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.email)).toBeVisible();
       await chat.send(guest.email);
-      await expect(chat.reply(SUBJECT_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.subject)).toBeVisible();
       await chat.pick(TICKET_SUBJECT);
-      await expect(chat.reply(DESCRIPTION_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.description)).toBeVisible();
       await chat.send(CONTACT_MESSAGE);
-      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.attachment)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', '/messages');
       await chat.pick(SKIP_ATTACHMENT);
 
-      await expect(chat.reply(TICKET_SUBMITTED)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.submitted)).toBeVisible();
       expect((await sent).postDataJSON()).toMatchObject({
         name: `${guest.firstName} ${guest.lastName}`,
         email: guest.email,
@@ -184,14 +226,14 @@ test.describe('Chat assistant', () => {
       const { chat } = homePage.shell;
       await chat.open();
       await chat.fillTicketUntilAttachment(fakeGuest(), TICKET_SUBJECT, CONTACT_MESSAGE);
-      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.attachment)).toBeVisible();
       const answered = apiMock.waitForResponse('POST', '/messages');
       await chat.pick(SKIP_ATTACHMENT);
 
       expect((await answered).response.status()).toBe(500);
-      await expect(chat.reply(TICKET_ERROR)).toBeVisible();
-      await expect(chat.reply('Server Error')).toBeVisible();
-      await expect(chat.reply(TICKET_SUBMITTED)).toHaveCount(0);
+      await expect(chat.reply(ASSISTANT.error)).toBeVisible();
+      await expect(chat.reply(serverError.message)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.submitted)).toHaveCount(0);
     });
   });
 
@@ -203,13 +245,13 @@ test.describe('Chat assistant', () => {
       const { chat } = homePage.shell;
       await chat.open();
       await chat.fillTicketUntilAttachment(fakeGuest(), TICKET_SUBJECT, CONTACT_MESSAGE);
-      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.attachment)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', '/messages');
       await chat.pick(SKIP_ATTACHMENT);
       await sent;
       // Precondition, true whether or not the bug is fixed: the ticket is reported as failed, and not as submitted.
-      await expect(chat.reply(TICKET_ERROR)).toBeVisible();
-      await expect(chat.reply(TICKET_SUBMITTED)).toHaveCount(0);
+      await expect(chat.reply(ASSISTANT.error)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.submitted)).toHaveCount(0);
 
       await expect(chat.reply(/^\s*true\s*$/), 'BUG-55: the reason after the error is not the literal "true"').toBeHidden({ timeout: BUG_TIMEOUT });
     });
@@ -230,7 +272,7 @@ test.describe('Chat assistant', () => {
 
       await chat.findProduct(product.name);
 
-      await expect(chat.reply(FOUND_REPLY)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.found)).toBeVisible();
       await expect(chat.productResults).toHaveCount(1);
       await expect(chat.productResult(product.name)).toContainText(`$${product.price.toFixed(2)}`);
     });
@@ -246,19 +288,20 @@ test.describe('Chat assistant', () => {
 
     test('a malformed email is asked for again', async ({ homePage, apiMock }) => {
       const { chat } = homePage.shell;
-      await chat.send('Testy');
-      await chat.send('McTestface');
-      await expect(chat.reply(EMAIL_PROMPT)).toBeVisible();
+      const guest = fakeGuest();
+      await chat.send(guest.firstName);
+      await chat.send(guest.lastName);
+      await expect(chat.reply(ASSISTANT.email)).toBeVisible();
 
       await chat.send('not-an-email');
 
-      await expect(chat.reply('Please enter a valid email address.')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.emailAgain)).toBeVisible();
       await apiMock.expectNoRequest('POST', '/messages');
       // After the window above, so "hidden" means the next question was not asked, not that it has not arrived yet.
-      await expect(chat.reply(SUBJECT_PROMPT)).toBeHidden();
+      await expect(chat.reply(ASSISTANT.subject)).toBeHidden();
       // Still waiting for the email: the same question's answer, corrected, is what moves the dialogue on.
-      await chat.send(fakeGuest().email);
-      await expect(chat.line(SUBJECT_PROMPT)).toHaveCount(1);
+      await chat.send(guest.email);
+      await expect(chat.line(ASSISTANT.subject)).toHaveCount(1);
     });
 
     test('a description under 50 characters is asked for again', async ({ homePage, apiMock }) => {
@@ -268,17 +311,17 @@ test.describe('Chat assistant', () => {
       await chat.send(guest.lastName);
       await chat.send(guest.email);
       await chat.pick(TICKET_SUBJECT);
-      await expect(chat.reply(DESCRIPTION_PROMPT)).toBeVisible();
+      await expect(chat.reply(ASSISTANT.description)).toBeVisible();
 
       await chat.send('too short');
 
-      await expect(chat.reply('Your message must be at least 50 characters long.')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.descriptionAgain)).toBeVisible();
       await apiMock.expectNoRequest('POST', '/messages');
       // After the window above, so "hidden" means the next question was not asked, not that it has not arrived yet.
-      await expect(chat.reply(ATTACHMENT_PROMPT)).toBeHidden();
+      await expect(chat.reply(ASSISTANT.attachment)).toBeHidden();
       // Still waiting for the description: a long enough one is what moves the dialogue on.
       await chat.send(CONTACT_MESSAGE);
-      await expect(chat.line(ATTACHMENT_PROMPT)).toHaveCount(1);
+      await expect(chat.line(ASSISTANT.attachment)).toHaveCount(1);
     });
   });
 
@@ -291,7 +334,7 @@ test.describe('Chat assistant', () => {
 
       await chat.findProduct(SEARCH_TERM);
 
-      await expect(chat.reply('No products found. Try a different search.')).toBeVisible();
+      await expect(chat.reply(ASSISTANT.nothingFound)).toBeVisible();
     });
   });
 

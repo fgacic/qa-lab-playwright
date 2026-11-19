@@ -1,5 +1,6 @@
 import { expect, mock, test } from '@fixtures';
 import { ADM_25, withLoggedFailure } from '@pages/admin/alerts';
+import { SIGN_IN_PATH } from '@pages/admin/admin-sections';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 const UNAUTHORIZED = { message: 'Unauthorized' };
@@ -19,7 +20,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
       knownBug('ADM-25', ADM_25);
       await expect(adminDashboard.salesHeading).toBeVisible();
 
-      await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
+      await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL(SIGN_IN_PATH, { timeout: BUG_TIMEOUT });
     });
   });
 
@@ -30,7 +31,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
       knownBug('ADM-25', ADM_25);
       await expect(adminStatistics.heading).toBeVisible();
 
-      await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
+      await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL(SIGN_IN_PATH, { timeout: BUG_TIMEOUT });
     });
   });
 
@@ -42,7 +43,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
         knownBug('ADM-25', ADM_25);
         await expect(adminSalesReport.heading).toBeVisible();
 
-        await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
+        await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL(SIGN_IN_PATH, { timeout: BUG_TIMEOUT });
       });
     });
   }
@@ -59,7 +60,7 @@ test.describe('Admin pages on an expired session (mocked back office)', { tag: [
       await form.chrome.save();
 
       expect((await refused).response.status(), 'the save was refused with 401').toBe(401);
-      await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
+      await expect(page, 'ADM-25: a refused session sends the admin to the sign-in page').toHaveURL(SIGN_IN_PATH, { timeout: BUG_TIMEOUT });
     });
   });
 });

@@ -56,7 +56,10 @@ export class AdminStatisticsPage {
     return this.table(title).getByRole('columnheader');
   }
 
-  /** Returns once all four reports have been answered, so an empty table means an empty answer. */
+  /**
+   * Returns once all four reports have been answered, so an empty table means an empty answer. It waits for four feeds, which the
+   * shell's single-feed `gotoAndSettle` cannot, so it keeps its own wait.
+   */
   @step('Open the statistics')
   async open(): Promise<void> {
     const answered = Promise.all(REPORTS.map(({ feed }) => this.page.waitForResponse((r) => r.request().method() === 'GET' && apiPath(r.url()) === feed)));
@@ -96,10 +99,7 @@ export class AdminSalesReportPage {
   /** Returns once the report's data has been answered, so a later wait cannot catch this first load. */
   @step('Open the average sales report')
   async open(): Promise<void> {
-    const answered = this.page.waitForResponse((r) => r.request().method() === 'GET' && apiPath(r.url()) === this.feed);
-    answered.catch(() => undefined); // a failed navigation is reported by goto; this only keeps the rejection from going unhandled
-    await this.shell.goto(ADMIN_REPORT_PATHS[this.period]);
-    await answered;
+    await this.shell.gotoAndSettle(ADMIN_REPORT_PATHS[this.period], 'GET', new RegExp(`^${this.feed}$`));
   }
 
   /**

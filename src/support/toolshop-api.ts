@@ -82,6 +82,7 @@ export class ToolshopApi {
   }
 
   /** Walks the catalogue page by page until a product matches. Stops early, so usually 1-2 calls. */
+  @step('API: find a {0} product')
   async findProduct(description: string, matches: (p: Product) => boolean, query: ProductQuery = {}): Promise<Product> {
     for (let pageNo = 1; pageNo <= MAX_CATALOGUE_PAGES; pageNo++) {
       const result = await this.listProducts({ ...query, page: String(pageNo) });
@@ -94,22 +95,27 @@ export class ToolshopApi {
     throw new Error(`No ${description} product in the first ${MAX_CATALOGUE_PAGES} pages of the catalogue`);
   }
 
+  @step('API: find an in-stock product')
   inStockProduct(exclude: string[] = []) {
     return this.findProduct('in-stock', (p) => p.in_stock && !p.is_rental && !exclude.includes(p.id));
   }
 
+  @step('API: find an out-of-stock product')
   outOfStockProduct() {
     return this.findProduct('out-of-stock', (p) => !p.in_stock && !p.is_rental);
   }
 
+  @step('API: find an eco-friendly product')
   ecoProduct() {
     return this.findProduct('eco-friendly', (p) => p.in_stock && p.is_eco_friendly && !p.is_rental, { eco_friendly: 'true' });
   }
 
+  @step('API: find a non-eco product')
   nonEcoProduct() {
     return this.findProduct('non-eco', (p) => p.in_stock && !p.is_eco_friendly && !p.is_rental);
   }
 
+  @step('API: find a seeded rental product')
   rentalProduct() {
     return this.findProduct('seeded rental', (p) => p.is_rental && !SUITE_OWNED_NAME.test(p.name), { is_rental: 'true' });
   }
@@ -125,7 +131,7 @@ export class ToolshopApi {
     // Creating a cart is safe to repeat (a failed attempt leaves at most an empty anonymous cart), and
     // POST /carts is the call that answered 500 now and then, so it is retried like a read. Adding the
     // lines is not: a repeated add after a lost answer could double a quantity.
-    const { id } = await (await this.send(() => this.request.post(`${API_URL}/carts`, { data: {} }), { idempotent: true })).json();
+    const id = idOf(await (await this.send(() => this.request.post(`${API_URL}/carts`, { data: {} }), { idempotent: true })).json(), 'the cart it created');
     for (const { product, quantity } of items) {
       await this.send(() => this.request.post(`${API_URL}/carts/${id}`, { data: { product_id: product.id, quantity } }));
     }
@@ -214,7 +220,7 @@ export class ToolshopApi {
     assertSelfHosted('create a product');
     const data = { is_location_offer: false, is_rental: false, co2_rating: 'A', ...product };
     const response = await this.send(() => this.request.post(`${API_URL}/products`, { data, headers: { authorization: `Bearer ${token}` } }));
-    return { name: product.name, id: ((await response.json()) as { id: string }).id };
+    return { name: product.name, id: idOf(await response.json(), `the product "${product.name}" it created`) };
   }
 
   /** The id of an image the shop holds, for a product that needs one. */
@@ -230,7 +236,7 @@ export class ToolshopApi {
   async createBrand(token: string, brand: { name: string; slug: string }): Promise<{ id: string; name: string; slug: string }> {
     assertSelfHosted('create a brand');
     const response = await this.send(() => this.request.post(`${API_URL}/brands`, { data: brand, headers: { authorization: `Bearer ${token}` } }));
-    return { ...brand, id: ((await response.json()) as { id: string }).id };
+    return { ...brand, id: idOf(await response.json(), `the brand "${brand.name}" it created`) };
   }
 
   /** Every brand the shop lists (its brand list has no search and is not paged). */
@@ -292,6 +298,7 @@ export class ToolshopApi {
   }
 
   /** The back-office inbox (newest first, one page of it), as the admin whose token it is sees it. */
+  @step('API (admin): list the messages')
   async listMessages(token: string): Promise<{ name: string }[]> {
     const response = await this.read(() => this.request.get(`${API_URL}/messages`, { headers: { authorization: `Bearer ${token}` } }));
     return (await response.json()).data;
@@ -343,6 +350,16 @@ export class ToolshopApi {
   }
 }
 
+/**
+ * The id a create call answered with. A changed answer shape must fail here, not hand `undefined` on to a cleanup
+ * (`/brands/undefined`, `/carts/undefined`) that then fails silently and leaks the record.
+ */
+function idOf(body: unknown, what: string): string {
+  const id = (body as { id?: unknown } | null)?.id;
+  if (typeof id !== 'string' || !id) throw new Error(`The shop answered without an id for ${what}: ${JSON.stringify(body).slice(0, 200)}`);
+  return id;
+}
+
 /** Records on the running test that a call was attempted again, and why. */
 function noteRetry(attempt: number, attempts: number, why: string): void {
   test.info().annotations.push({ type: 'api retry', description: `attempt ${attempt} of ${attempts} failed (${why}): retried` });
@@ -350,5 +367,5 @@ function noteRetry(attempt: number, attempts: number, why: string): void {
 
 /** A failure of the connection itself (not a closed context or a test timeout, which must stay failures). */
 function isNetworkError(error: unknown): boolean {
-  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|network/i.test(String((error as Error)?.message ?? error));
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up|EAI_AGAIN/i.test(String((error as Error)?.message ?? error));
 }

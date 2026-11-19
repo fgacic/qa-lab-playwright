@@ -43,7 +43,7 @@ test.describe('Language switcher', () => {
       await expect(header.language.button).toHaveText(lang.toUpperCase());
       await expect(page.locator('html')).toHaveAttribute('lang', lang);
       for (const key of LABELLED_KEYS) {
-        await expect(header.navItem(key)).toHaveText(NAV_LABELS[lang][key]);
+        await expect.soft(header.navItem(key), key).toHaveText(NAV_LABELS[lang][key]);
       }
     });
   }
@@ -51,18 +51,18 @@ test.describe('Language switcher', () => {
   test('the chosen language survives a reload and a route change', async ({ homePage, page }) => {
     const { header } = homePage;
     await header.language.switchTo('de');
-    await expect(header.navItem('home')).toHaveText('Start');
+    await expect(header.navItem('home')).toHaveText(NAV_LABELS.de.home);
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
 
     await homePage.shell.reload();
-    await expect(header.navItem('home')).toHaveText('Start');
+    await expect(header.navItem('home')).toHaveText(NAV_LABELS.de.home);
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     await header.navItem('contact').click();
 
     await expect(page).toHaveURL('/contact');
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
-    await expect(header.navItem('home')).toHaveText('Start');
-    await expect(page.getByRole('heading', { name: 'Kontakt', exact: true })).toBeVisible();
+    await expect(header.navItem('home')).toHaveText(NAV_LABELS.de.home);
+    await expect(page.getByRole('heading', { name: NAV_LABELS.de.contact, exact: true })).toBeVisible();
   });
 
   // What a visitor's browser may hold under "language": a value the shop does not offer (a language it dropped, another case, an
@@ -88,7 +88,7 @@ test.describe('Language switcher', () => {
         await expect(homePage.header.language.button).toHaveText('EN');
         await expect(page.locator('html')).toHaveAttribute('lang', 'en');
         for (const key of LABELLED_KEYS) {
-          await expect(homePage.header.navItem(key)).toHaveText(NAV_LABELS.en[key]);
+          await expect.soft(homePage.header.navItem(key), key).toHaveText(NAV_LABELS.en[key]);
         }
       });
     });

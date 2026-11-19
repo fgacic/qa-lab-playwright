@@ -74,9 +74,10 @@ test.describe('Product filters', () => {
     // The request must carry every ticked box (the parent and its children), not only the one clicked.
     const tickedBoxes = filters.categories.getByRole('checkbox', { checked: true });
     await expect(tickedBoxes).toHaveCount(children.length + 1);
-    const ticked = await Promise.all((await tickedBoxes.all()).map((box) => box.inputValue()));
     const { body } = await results;
-    expect(String(body.by_category).split(',').sort()).toEqual(ticked.sort());
+    await expect
+      .poll(async () => Promise.all((await tickedBoxes.all()).map((box) => box.inputValue())).then((values) => values.sort()), 'the request carries exactly the ticked boxes')
+      .toEqual(String(body.by_category).split(',').sort());
   });
 
   test('a brand shows only products of that brand', async ({ homePage, apiMock }) => {

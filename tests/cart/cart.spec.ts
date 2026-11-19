@@ -127,7 +127,12 @@ test.describe('Cart', () => {
     test(`a quantity of ${label} is corrected to ${CORRECTED_MINIMUM}, also in the saved cart`, { tag: ['@negative'] }, async ({ checkout, cartItems, apiMock }) => {
       const [{ product }] = cartItems;
 
-      const [saved] = await Promise.all([apiMock.waitForResponse('PUT', SAVE_QUANTITY), checkout.cart.table.setQuantity(product.name, typed)]);
+      // The page reads the cart again after a save; a reload before that read ends would cancel it, and WebKit logs the cancelled request as an error.
+      const [saved] = await Promise.all([
+        apiMock.waitForResponse('PUT', SAVE_QUANTITY),
+        apiMock.waitForResponse('GET', CART),
+        checkout.cart.table.setQuantity(product.name, typed),
+      ]);
 
       expect(saved.response.status(), 'the shop saves the corrected quantity').toBe(200);
       await expect(checkout.cart.table.row(product.name).quantity).toHaveValue(String(CORRECTED_MINIMUM));

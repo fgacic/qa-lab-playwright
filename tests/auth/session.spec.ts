@@ -7,7 +7,8 @@ const REFRESH_URL = `${API_URL}/users/refresh`;
 
 /**
  * The session endpoints, judged on their own, in plain HTTP. `GET /users/refresh` is what the SPA calls on every protected
- * route a signed-out visitor opens, so its answer is the first thing a refused visitor's browser logs.
+ * route a signed-out visitor opens, so its answer is the first thing a refused visitor's browser logs. Plain HTTP on purpose: how
+ * the SPA behaves when its session is refused or expires is pinned in the browser, in tests/account/account-area.spec.ts (BUG-56/57).
  */
 test.describe('Session refresh', { tag: ['@self-hosted', '@api'] }, () => {
   // The control for the pin below: refresh works for a valid token, so the pin fails on the missing-token branch alone and not

@@ -130,34 +130,16 @@ export const test = mergeTests(apiTest, mocksTest).extend<AuthOptions & AuthFixt
     await use({ firstName: me.first_name, lastName: me.last_name, email: me.email });
   },
 
-  // Depends on `signedIn` so the session exists before the page opens.
-  accountPage: async ({ page, signedIn: _ }, use) => {
-    const accountPage = new AccountPage(page);
-    await accountPage.open();
-    await use(accountPage);
-  },
-  // Depends on `signedIn` so the session exists before the page opens.
-  favoritesPage: async ({ page, signedIn: _ }, use) => {
-    const favoritesPage = new FavoritesPage(page);
-    await favoritesPage.open();
-    await use(favoritesPage);
-  },
-  // Depends on `signedIn` so the session exists before the page opens.
-  invoicesPage: async ({ page, signedIn: _ }, use) => {
-    const invoicesPage = new InvoicesPage(page);
-    await invoicesPage.open();
-    await use(invoicesPage);
-  },
-  // Depends on `signedIn` so the session exists before the page opens.
-  messagesPage: async ({ page, signedIn: _ }, use) => {
-    const messagesPage = new MessagesPage(page);
-    await messagesPage.open();
-    await use(messagesPage);
-  },
-  // Depends on `signedIn` so the session exists before the page opens.
-  profilePage: async ({ page, signedIn: _ }, use) => {
-    const profilePage = new ProfilePage(page);
-    await profilePage.open();
-    await use(profilePage);
-  },
+  // Each depends on `signedIn` so the session exists before the page opens.
+  accountPage: async ({ page, signedIn: _ }, use) => openedPage(new AccountPage(page), use),
+  favoritesPage: async ({ page, signedIn: _ }, use) => openedPage(new FavoritesPage(page), use),
+  invoicesPage: async ({ page, signedIn: _ }, use) => openedPage(new InvoicesPage(page), use),
+  messagesPage: async ({ page, signedIn: _ }, use) => openedPage(new MessagesPage(page), use),
+  profilePage: async ({ page, signedIn: _ }, use) => openedPage(new ProfilePage(page), use),
 });
+
+/** Opens an account page object and hands it to the test. */
+async function openedPage<P extends { open(): Promise<void> }>(accountPage: P, use: (page: P) => Promise<void>): Promise<void> {
+  await accountPage.open();
+  await use(accountPage);
+}

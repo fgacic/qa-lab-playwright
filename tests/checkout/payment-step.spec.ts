@@ -24,6 +24,9 @@ const entriesOf = <K extends string, V>(record: Record<K, V>): [K, V][] => Objec
 /** `length` characters that are neither digits nor letters. */
 const junkOf = (length: number) => '!'.repeat(length);
 
+/** Mocks for a describe, plus the guard that makes any write they do not answer fail the test instead of reaching the shop. */
+const withRefusedWrites = (...mocks: Parameters<typeof withMocks>) => ({ ...withMocks(...mocks), refuseUnmockedWrites: true });
+
 /** The mock of the payment check passing. */
 const paymentPasses = mock.respond('POST', '/payment/check', PAYMENT_PASSED);
 
@@ -109,7 +112,7 @@ test.describe('Checkout: payment step', () => {
   });
 
   test.describe('when the payment check passes', { tag: ['@mocked', '@smoke'] }, () => {
-    test.use({ ...withMocks(postcodeLookupMock, paymentPasses), refuseUnmockedWrites: true });
+    test.use(withRefusedWrites(postcodeLookupMock, paymentPasses));
 
     test('Cash on Delivery needs no details and passes the payment check (mocked)', async ({ checkout }) => {
       await checkout.payment.choose(CASH_ON_DELIVERY);
@@ -131,7 +134,7 @@ test.describe('Checkout: payment step', () => {
   });
 
   test.describe('when the payment check passes for Buy Now Pay Later', { tag: ['@mocked'] }, () => {
-    test.use({ ...withMocks(postcodeLookupMock, paymentPasses), refuseUnmockedWrites: true });
+    test.use(withRefusedWrites(postcodeLookupMock, paymentPasses));
 
     test('a chosen instalment plan is sent with the check and the order can be confirmed', async ({ checkout, apiMock }) => {
       const { payment } = checkout;
@@ -200,7 +203,7 @@ test.describe('Checkout: payment step', () => {
 
   test.describe('when Check payment is double-clicked', { tag: ['@mocked', '@bug'] }, () => {
     // The order is answered too: if the second click lands on Confirm, which replaces the button, no real write can happen.
-    test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
+    test.use(withRefusedWrites(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)));
 
     test('a double click on Check payment sends one check', async ({ checkout, page }) => {
       knownBug('BUG-53', 'a double click on "Check payment" sends the check twice.');
@@ -218,7 +221,7 @@ test.describe('Checkout: payment step', () => {
   });
 
   test.describe('when the payment check is declined', { tag: ['@mocked'] }, () => {
-    test.use({ ...withMocks(postcodeLookupMock, mock.fail('POST', '/payment/check', 400, { error: PAYMENT_MESSAGES.declined })), refuseUnmockedWrites: true });
+    test.use(withRefusedWrites(postcodeLookupMock, mock.fail('POST', '/payment/check', 400, { error: PAYMENT_MESSAGES.declined })));
 
     test('the reason is shown and the order cannot be confirmed', async ({ checkout }) => {
       await checkout.payment.choose(CASH_ON_DELIVERY);
@@ -230,7 +233,7 @@ test.describe('Checkout: payment step', () => {
   });
 
   test.describe('when the payment check fails', { tag: ['@mocked'] }, () => {
-    test.use({ ...withMocks(postcodeLookupMock, mock.fail('POST', '/payment/check', 500)), refuseUnmockedWrites: true });
+    test.use(withRefusedWrites(postcodeLookupMock, mock.fail('POST', '/payment/check', 500)));
 
     test('a generic error is shown and the order cannot be confirmed', async ({ checkout }) => {
       await checkout.payment.choose(CASH_ON_DELIVERY);
@@ -243,7 +246,7 @@ test.describe('Checkout: payment step', () => {
 
   test.describe('when the order is accepted', { tag: ['@mocked'] }, () => {
     // The twin of the self-hosted order in purchase-flow: the same page behaviour on every target, with no order placed.
-    test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)), refuseUnmockedWrites: true });
+    test.use(withRefusedWrites(postcodeLookupMock, paymentPasses, mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201), mock.respond('DELETE', CART, undefined, 204)));
 
     test('the confirmation names the invoice number the shop issued', async ({ checkout, apiMock }) => {
       const placed = apiMock.waitForRequest('POST', '/invoices/guest');
@@ -264,7 +267,7 @@ test.describe('Checkout: payment step', () => {
   for (const { status, json } of orderFailures) {
     test.describe(`when placing the order answers ${status}`, { tag: ['@mocked', '@bug'] }, () => {
       // The check is answered by a mock and so is the order (refused): no real write can happen.
-      test.use({ ...withMocks(postcodeLookupMock, paymentPasses, mock.fail('POST', '/invoices/guest', status, json)), refuseUnmockedWrites: true });
+      test.use(withRefusedWrites(postcodeLookupMock, paymentPasses, mock.fail('POST', '/invoices/guest', status, json)));
 
       test('the shopper is told the order was not placed', async ({ checkout }) => {
         knownBug('BUG-17', 'a rejected order leaves "Payment was successful" on screen with no error, so the shopper cannot tell it failed.', { absence: true });

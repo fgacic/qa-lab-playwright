@@ -1,4 +1,5 @@
 import { expect, test } from '@fixtures';
+import { UNKNOWN_ROUTE_LOG } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 test.describe('Routing', () => {
@@ -22,7 +23,8 @@ test.describe('Routing', () => {
     await expect(page, 'BUG-01: /admin redirects to the login page').toHaveURL('/auth/login', { timeout: BUG_TIMEOUT });
   });
 
-  test('an unknown route lands on a working home page', { tag: ['@negative', '@bug'] }, async ({ page, shop }) => {
+  test('an unknown route lands on a working home page', { tag: ['@negative', '@bug'] }, async ({ page, shop, consoleGuard }) => {
+    consoleGuard.allow(UNKNOWN_ROUTE_LOG.pattern, UNKNOWN_ROUTE_LOG.reason);
     knownBug('BUG-02', 'an unknown route redirects to / but the product grid never renders.', { absence: true });
     await shop.appShell.goto('/this/route/does/not/exist');
     await expect(page).toHaveURL('/');
@@ -34,7 +36,8 @@ test.describe('Routing', () => {
 
   // Unknown routes redirect to the home page (BUG-02 is about the grid that page then fails to show).
   // This test asserts only the redirect and the header, so fixing that bug cannot change it.
-  test('/compare, which is not a page, redirects to the home page', { tag: ['@negative'] }, async ({ page, shop }) => {
+  test('/compare, which is not a page, redirects to the home page', { tag: ['@negative'] }, async ({ page, shop, consoleGuard }) => {
+    consoleGuard.allow(UNKNOWN_ROUTE_LOG.pattern, UNKNOWN_ROUTE_LOG.reason);
     await shop.appShell.goto('/compare');
 
     await expect(page).toHaveURL('/');

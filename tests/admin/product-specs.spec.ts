@@ -3,7 +3,6 @@ import { withLoggedFailure } from '@pages/admin/alerts';
 import { spec } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
-/** The specifications of one product, and one of them. */
 /** The spec the add form is filled in with. */
 const NEW_SPEC = { name: 'Length', value: '200', unit: 'mm' };
 const SPECS = /^\/products\/[^/]+\/specs$/;

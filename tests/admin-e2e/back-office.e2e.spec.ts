@@ -32,6 +32,11 @@ test.use({ adminSession: 'storage-state' });
 
 /** Unique per test and per repeat, so parallel workers and retries never find each other's data. */
 const unique = () => randomUUID().slice(0, 8);
+/** The stock an edit fills in, because the edit form does not load it (ADM-05), and a price any test product is created with. */
+/** A yes or no as a named outcome, so a failure reads "expected 'bars', received 'no bars'" instead of "true, false". */
+const barsOrNot = (yes: boolean) => (yes ? 'bars' : 'no bars');
+const EDITED_STOCK = '3';
+const PRICE_ON_SEARCH_PIN = '5.00';
 
 /** What marks the records no API call can remove (a guest order, a contact message) as this suite's. */
 const LEFTOVER = 'QaLab leftover';
@@ -60,7 +65,7 @@ async function repriceProduct(adminProducts: AdminListPage<AdminProductForm>, na
   // The edit form loads neither the stock (ADM-05) nor brand, category and image (ADM-09);
   // choosing waits for their options to arrive. It does load the rental flag, which keeps the product out of the catalogue.
   await expect(edit.rental).toBeChecked();
-  await edit.stock.fill('3');
+  await edit.stock.fill(EDITED_STOCK);
   await edit.chooseRelations();
   await edit.price.fill(price);
   await edit.chrome.save();
@@ -110,7 +115,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   test('a product with a short word in its name is found by its full name', { tag: ['@self-hosted', '@bug'] }, async ({ adminProducts, shop, createdProducts, apiMock }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
     const name = `Set of QaLab Pliers ${unique()}`;
-    await createProduct(adminProducts, { name, price: '5.00' });
+    await createProduct(adminProducts, { name, price: PRICE_ON_SEARCH_PIN });
     await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
     await shop.home.open();
@@ -260,6 +265,8 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     expect(months, 'one entry per month').toHaveLength(12);
     await expect(adminMonthlySales.heading).toBeVisible();
     const figured = months.some(({ average, amount }) => average > 0 || amount > 0);
-    expect((await adminMonthlySales.drawnBars()).length > 0, 'the report draws bars exactly when the answer has a figure above zero').toBe(figured);
+    const drawn = (await adminMonthlySales.drawnBars()).length > 0;
+
+    expect(barsOrNot(drawn), 'the report draws bars exactly when the answer has a figure above zero').toBe(barsOrNot(figured));
   });
 });

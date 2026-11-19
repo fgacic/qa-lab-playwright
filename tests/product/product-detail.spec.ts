@@ -138,9 +138,8 @@ test.describe('Product detail', () => {
 
   test('a related product opens its own page', async ({ productPage, product, page, api }) => {
     await expect(productPage.relatedHeading).toBeVisible();
-    const shown = await productPage.relatedIds();
     const related = await api.related(product.id);
-    expect(shown, 'the page shows the related products the API names').toEqual(related.map((p) => p.id));
+    await expect.poll(() => productPage.relatedIds(), 'the page shows the related products the API names').toEqual(related.map((p) => p.id));
     const [first] = related;
     await expect(productPage.relatedName(0)).toHaveText(first.name);
 

@@ -8,6 +8,9 @@ import { LIST_ANSWERS } from '@support/admin-payloads';
  * is shown when the record is in use (409), a failure is shown when the server fails (500). What Delete asks first is
  * delete-confirmation.spec.ts (ADM-02).
  */
+/** What the API's reason for a refused delete says, and what the page must show of it. */
+const IN_USE = 'used elsewhere';
+
 for (const { list, entity, row, path, anyRecord } of DELETABLE) {
   const [feedMethod, feedPath] = LIST_ANSWERS[list].feed;
 
@@ -28,7 +31,7 @@ for (const { list, entity, row, path, anyRecord } of DELETABLE) {
     });
 
     test.describe(`when the ${entity} is still in use`, { tag: ['@negative'] }, () => {
-      test.use(withLoggedFailure(mock.fail('DELETE', anyRecord, 409, { message: `Seems like this ${entity} is used elsewhere.` })));
+      test.use(withLoggedFailure(mock.fail('DELETE', anyRecord, 409, { message: `Seems like this ${entity} is ${IN_USE}.` })));
 
       test(`the reason is shown and the ${entity} stays`, async ({ adminList, apiMock }) => {
         // Were the page to reload the list or drop the row after the failed delete, this empty list would show it.
@@ -37,7 +40,7 @@ for (const { list, entity, row, path, anyRecord } of DELETABLE) {
 
         await adminList.table.delete(row);
 
-        await expect(adminList.alert('used elsewhere')).toBeVisible();
+        await expect(adminList.alert(IN_USE)).toBeVisible();
         await expect(adminList.alert(deletedMessage(entity))).toBeHidden();
         await expect(adminList.table.row(row)).toBeVisible();
       });
