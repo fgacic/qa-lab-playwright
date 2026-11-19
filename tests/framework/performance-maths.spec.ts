@@ -3,6 +3,7 @@
 // (fixtures/matchers.ts: the amount a text holds, the order a list is in). The budgets themselves are measured in tests/performance.
 import { expect, test } from '@playwright/test';
 import { collectionExpect, moneyExpect, parseAmount } from '@fixtures/matchers';
+import { drawnBars, readChart } from '@support/admin-chart';
 import { isNoisy, onCI, ratchetLimits, summarise } from '@fixtures/performance-baseline';
 
 test.describe('the performance baseline arithmetic', { tag: ['@framework'] }, () => {
@@ -98,5 +99,34 @@ test.describe('the matchers', { tag: ['@framework'] }, () => {
     await moneyExpect(page.locator('#total')).toShowAmount(28.3);
     await expect(moneyExpect(page.locator('#total')).toShowAmount(30, { timeout: 300 })).rejects.toThrow(/to show \$30\.00, it shows \$28\.30/);
     await expect(moneyExpect(page.locator('li')).toShowAmount(1, { timeout: 300 })).rejects.toThrow(/strict mode violation/);
+  });
+});
+
+// Self-contained block: the control of the chart reader the admin report specs trust (src/support/admin-chart.ts), the way the
+// "Ringed" button is the control of `focusRingDrawn`. A report spec that finds no bars could be reading a chart that has none or a
+// reader that sees none; here the picture is known. The canvas is 400 x 200 device pixels shown at 200 x 100 CSS pixels (a 2x
+// screen), so the rescaling of the smallest bar is exercised too.
+const canvasPage = (draw: string) => `
+  <canvas id="chart" width="400" height="200" style="width:200px;height:100px"></canvas>
+  <script>const g = document.getElementById('chart').getContext('2d'); ${draw}</script>`;
+const GRIDLINE = "g.fillStyle = '#ccc'; g.fillRect(0, 40, 400, 2);";
+const SWATCH = "g.fillStyle = '#36c'; g.fillRect(10, 10, 24, 24);";
+const BARS = "g.fillStyle = '#c33'; g.fillRect(60, 60, 60, 120); g.fillRect(200, 120, 60, 60);";
+
+test.describe('the chart reader', { tag: ['@framework'] }, () => {
+  test('reads exactly the two bars off a canvas that also has a gridline and a legend swatch', async ({ page }) => {
+    await page.setContent(canvasPage(GRIDLINE + SWATCH + BARS));
+    const chart = page.locator('#chart');
+
+    expect(await readChart(chart), 'the heights, in device pixels, left to right').toEqual({ anyInk: true, bars: [120, 60] });
+    expect(await drawnBars(chart), 'the settled read agrees').toEqual([120, 60]);
+  });
+
+  test('reads no bar off a canvas with only axes and a swatch, and no ink off a blank one', async ({ page }) => {
+    await page.setContent(canvasPage(GRIDLINE + SWATCH));
+    expect(await readChart(page.locator('#chart')), 'axes and a legend are ink but not bars').toEqual({ anyInk: true, bars: [] });
+
+    await page.setContent(canvasPage(''));
+    expect(await readChart(page.locator('#chart')), 'a canvas nothing is drawn on').toEqual({ anyInk: false, bars: [] });
   });
 });

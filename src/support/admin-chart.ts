@@ -52,6 +52,11 @@ export function measureBars(canvas: HTMLCanvasElement, cssMinBar: number): Drawn
   return { anyInk, bars };
 }
 
+/** One unsettled read of a chart <canvas> (the named helper for specs, which may not run code in the page): see `measureBars`. */
+export function readChart(chart: Locator): Promise<DrawnChart> {
+  return chart.evaluate(measureBars, MIN_BAR);
+}
+
 /**
  * The heights, in pixels and left to right, of the bars a chart <canvas> has drawn, once its animation has ended. A <canvas>
  * has nothing to read and the app colours each bar at random, so the picture is measured, not compared (`measureBars`). The
@@ -62,7 +67,7 @@ export async function drawnBars(chart: Locator): Promise<number[]> {
   let previous = '';
   let bars: number[] = [];
   await expect.poll(async () => {
-    const read = await chart.evaluate(measureBars, MIN_BAR);
+    const read = await readChart(chart);
     const key = JSON.stringify(read);
     const settled = read.anyInk && key === previous;
     previous = key;

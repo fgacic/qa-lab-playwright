@@ -1,4 +1,5 @@
 import { LANGUAGES, type Language } from '@components/LanguageSwitcher';
+import { AppShell } from '@pages/AppShell';
 import { expect, mock, test as base } from '@fixtures';
 import type { Catalog } from '@fixtures/api';
 import type { ConsoleGuard } from '@fixtures/console-guard';
@@ -118,8 +119,7 @@ async function reachVisitState(page: Page, visit: Visit, path: string, startsIn:
 
 /** Chooses `language` in the header's language menu, as a visitor does, and waits for the page to say it applied. */
 async function switchLanguage(page: Page, language: Language): Promise<void> {
-  await page.getByTestId('language-select').click();
-  await page.getByTestId(`lang-${language}`).click();
+  await new AppShell(page).header.language.switchTo(language);
   await expect(page.locator('html')).toHaveAttribute('lang', language);
 }
 
@@ -146,13 +146,13 @@ async function readPage(language: Language, visit: Visit, scene: Scene, readFor:
     };
     let english: UiText[] | undefined;
     if (startsIn !== language) {
-      await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU.en);
+      await expect(new AppShell(page).header.navItem('categories')).toHaveText(CATEGORIES_MENU.en);
       english = await sample();
       expectPageText(english, visit, 'en');
       await switchLanguage(page, language);
     }
     // Language-specific evidence that the translation file is applied, not only that the page has rendered.
-    await expect(page.getByTestId('nav-categories')).toHaveText(CATEGORIES_MENU[language]);
+    await expect(new AppShell(page).header.navItem('categories')).toHaveText(CATEGORIES_MENU[language]);
     const texts = await sample();
     expectPageText(texts, visit, language);
     return { texts, english };

@@ -1,7 +1,12 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ADM_14, withLoggedFailure } from '@pages/admin/alerts';
+import { type MessageStatus } from '@pages/admin/AdminMessagePage';
 import { contactMessage, messageReply } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+
+/** The statuses the tests move a message to. */
+const IN_PROGRESS = 'IN_PROGRESS' satisfies MessageStatus;
+const RESOLVED = 'RESOLVED' satisfies MessageStatus;
 
 test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the inbox lists who wrote, about what, and the status', async ({ adminMessages }) => {
@@ -21,9 +26,9 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(message.status).toHaveValue(contactMessage.status);
     const sent = apiMock.waitForRequest('PUT', `/messages/${contactMessage.id}/status`);
 
-    await message.setStatus('IN_PROGRESS');
+    await message.setStatus(IN_PROGRESS);
 
-    expect((await sent).postDataJSON()).toEqual({ status: 'IN_PROGRESS' });
+    expect((await sent).postDataJSON()).toEqual({ status: IN_PROGRESS });
   });
 
   test.describe('after a reply', () => {
@@ -72,7 +77,7 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
       await expect(message.text(contactMessage.message)).toBeVisible();
       const sent = apiMock.waitForRequest('PUT', `/messages/${contactMessage.id}/status`);
 
-      await message.setStatus('RESOLVED');
+      await message.setStatus(RESOLVED);
       await sent;
 
       await expect(message.failure, 'ADM-11: a failed status change tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });

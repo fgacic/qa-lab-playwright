@@ -135,6 +135,7 @@ the data-test id in brackets where the role is not unique enough.
 | Add to cart, toast, header count | button "Add to cart" | POST /carts, POST /carts/{id} | yes | n/a | yes (500, abort) | n/a | product/product-detail | bug found (BUG-10) |
 | Add to favourites (signed out: a mocked 401 / in: the request body is asserted and the confirmation shown / duplicate) | button "Add to favourites" | POST /favorites | yes (mocked session) | yes (401 mocked, 422) | n/a | n/a | product/product-detail | covered |
 | Related products (a related product is matched by id and opens its own page) | links with an h5 | GET /products/{id}/related | yes | n/a | yes (500: BUG-43) | yes | product/product-detail | bug found (BUG-43) |
+| The related products of a product never include the product itself, in plain HTTP | – | GET /products/{id}/related | yes | n/a | n/a | n/a | product/product-related (`@api`) | covered |
 | An id no product has: the product answers 404 and its related products should too (they answer 500 with an HTML error page), in plain HTTP | – | GET /products/{id}, GET /products/{id}/related | n/a | yes | n/a | n/a | product/product-related (`@api`) | bug found (BUG-62) |
 | Out-of-stock state | text "Out of stock", disabled controls | – | n/a | yes | n/a | n/a | product/product-detail | covered |
 | ECO badge | `[eco-badge]` | – | yes | n/a | n/a | n/a | product/product-detail | covered |
@@ -147,13 +148,14 @@ the data-test id in brackets where the role is not unique enough.
 | Change quantity (the new quantity and totals are checked again after a reload) | spinbutton "Quantity for …" | PUT /carts/{id}/product/quantity | yes | yes (0, -1, empty, 2.5, > 99; the corrected value survives a reload) | yes | n/a | cart/cart | bug found (BUG-14, BUG-42: 2.5 is refused by the API with a 422, but the line keeps 2.5 and its total) |
 | Quantity 99 is kept with no warning; 100 and 150 are capped at 99 with a warning, in the saved cart too | spinbutton "Quantity for …" | PUT /carts/{id}/product/quantity | yes (99) | yes (×2) | n/a | n/a | cart/cart | covered |
 | Remove a line; remove the last line (the line stays gone after a reload) | remove control (CSS, see A11Y-01) | DELETE /carts/{id}/product/{pid} | yes | n/a | yes | n/a | cart/cart | bug found (BUG-15, A11Y-01) |
-| Eco discount 5% (eco-only cart), with literal expected amounts from a mocked cart | `[cart-subtotal]`, `[cart-eco-discount]` | – | yes | n/a | n/a | n/a | cart/cart | covered |
+| Eco discount 5% (eco-only cart), with literal expected amounts from a mocked cart | `[cart-subtotal]`, `[cart-eco-discount]` | – | yes | n/a | n/a | n/a | cart/cart-discounts | covered |
 | Eco discount in a mixed eco and normal cart | – | – | – | – | – | – | – | gap: a mixed cart shows no eco discount at all; whether that is intended is unclear, so it is not pinned |
-| Combination discount 15% (rental + product), "price per hour" | `[cart-discount]` | – | yes | n/a | n/a | n/a | cart/cart | covered |
+| Combination discount 15% (rental + product), "price per hour" | `[cart-discount]` | – | yes | n/a | n/a | n/a | cart/cart-discounts | covered |
 | Continue Shopping, Proceed to checkout | buttons by name, `[proceed-1]` | – | yes | n/a | n/a | n/a | cart/cart | covered |
 | The same product added twice is one line with the summed quantity (kept after a reload, and in the header count) | `[line-price]`, cart link | POST /carts, /carts/{id} | yes | n/a | n/a | n/a | cart/cart | covered |
 | Adding to a cart through the API, in plain HTTP: a product in stock is added (200) | – | POST /carts/{id} | yes | n/a | n/a | n/a | cart/cart-api (`@api`) | covered |
 | The same call with a product that is out of stock: the shop should refuse it; it answers 200 "item added or updated", so the cart holds a line that cannot be bought (the half of BUG-44 the page cannot show) | – | POST /carts/{id} | n/a | yes | n/a | n/a | cart/cart-api (`@api`) | bug found (BUG-68) |
+| The same call refused as invalid (422): an unknown product, a quantity of 0, a negative one, a fractional one, and no product at all; and a cart nobody created is refused as missing (404) | – | POST /carts/{id} | n/a | yes | n/a | n/a | cart/cart-api (`@api`) | covered |
 | The checkout page raises no application error for a cart that does not exist yet | – | – | n/a | yes | n/a | n/a | cart/cart | bug found (BUG-38) |
 
 ## Checkout steps 2–4
@@ -357,7 +359,7 @@ results (what axe could not decide), so a rule that goes quiet for lack of evide
 
 - **Scope.** The training-aid bar ("Testing Guide", "Bug Hunting") and its guide panel are excluded,
   because they are laid over the shop for testers and are not part of it. Everything else is
-  scanned, the chat and live-activity widgets included. Each exclusion has a test (`EXCLUDED`) that the element it names is still drawn, so an exclusion cannot outlive what it excuses.
+  scanned, the chat and live-activity widgets included. Each exclusion has a test of its own (one per aid in `EXCLUDED`, named after its selector) that the element it names is still drawn, so an exclusion cannot outlive what it excuses.
 - **Baseline, a ratchet.** A scan fails on a violation outside `src/support/a11y-baseline.ts`, so it
   catches regressions. A known violation is matched by rule, element and page, and carries the
   number of elements it was recorded with and its impact: the same violation on another page, on more elements,
@@ -750,7 +752,7 @@ Found with the mocked back office, so each is UI behaviour on a given response.
 
 ### Security
 
-SEC-01..06 are the response headers of the live site; SEC-07..12 are authorisation of the API, checked on the self-hosted shop; SEC-13 is an uncaught error on the category route; SEC-14 is a token the API still accepts after its account was deleted; SEC-15 is a cart that answers anybody with its id; SEC-16 and SEC-17 are the missing limits on sign-in. The next free id is SEC-18.
+SEC-01..06 are the response headers of the live site; SEC-07..12 are authorisation of the API, checked on the self-hosted shop; SEC-13 is an uncaught error on the category route; SEC-14 is a token the API still accepts after its account was deleted; SEC-15 is a cart that answers anybody with its id; SEC-16 and SEC-17 are the missing limits on sign-in. The next free id is SEC-18. The SEC-13 pin (`xss-reflected`) waits the full `BUG_TIMEOUT` on a fixed site, because it proves that nothing is thrown, so it costs that window on every run and in verify-bugs.
 
 | ID | Finding | Pinned in |
 |---|---|---|
@@ -840,11 +842,11 @@ skip:
 
 | Project | Tests | Notes |
 |---|---|---|
-| chromium | 1469 | Everything except `@account`, `@admin`, `@visual`, `@perf`, `@framework` (own projects) and `@mobile` (phone only). |
+| chromium | 1476 | Everything except `@account`, `@admin`, `@visual`, `@perf`, `@framework` (own projects) and `@mobile` (phone only). |
 | firefox, webkit | 632 each | The same, minus the Chromium-only `@axe`, `@i18n` and `@api`. |
 | perf | 19 | `@perf` budgets (five pages and two phone loads), the page weights of home and a product, the layout-shift pins and their ratchets, the cart observation and the three collector controls (a long task, a slow click, a known document), alone: one worker, no parallelism, no retries. |
 | mobile | 18 | `@smoke` and `@mobile` on a Pixel 7. |
-| framework | 203 | `@framework`: the mock layer, the target configuration (`tests/framework/target-config.spec.ts`), the write guard and its teardown check, the answer gate (`holdAnswers`: a double click reaches a guarded handler once and an unguarded one twice, on each engine), the console guard (its own spec, the failed-request log in both its shapes included), the run guard, the lint configuration, the preflight and the health check, the Toolshop API helpers, the a11y ratchet's decision (`diffFindings`), the refusal to record the a11y baseline on CI, the custom matchers (`toBeSorted`, `toShowAmount` and the amount parser), the performance baseline arithmetic (`ratchetLimits`, noisy metrics, the margin cap, what counts as CI), the `test-all` runner, the security header matchers (`security/header-matchers`, offline), the pin verdicts and the orchestration of verify-bugs (it runs with `--max-failures=0`, so CI's stop after 30 failures cannot cut it short; a pin that passes once and reproduces on the rerun, a pin verified in each engine that schedules it, and the `--project` and `--skip-project` shards), and the defect-id check. No site is needed (the API-helper test uses the self-hosted shop; the `test-all` and `a11y-record` tests start a nested run and are `@self-hosted`). |
+| framework | 205 | `@framework`: the mock layer, the target configuration (`tests/framework/target-config.spec.ts`), the write guard and its teardown check, the answer gate (`holdAnswers`: a double click reaches a guarded handler once and an unguarded one twice, on each engine), the console guard (its own spec, the failed-request log in both its shapes included), the run guard, the lint configuration, the preflight and the health check, the Toolshop API helpers, the a11y ratchet's decision (`diffFindings`), the refusal to record the a11y baseline on CI, the custom matchers (`toBeSorted`, `toShowAmount` and the amount parser), the chart reader of the admin reports (`measureBars`, with a known canvas as its control), the performance baseline arithmetic (`ratchetLimits`, noisy metrics, the margin cap, what counts as CI), the `test-all` runner, the security header matchers (`security/header-matchers`, offline), the pin verdicts and the orchestration of verify-bugs (it runs with `--max-failures=0`, so CI's stop after 30 failures cannot cut it short; a pin that passes once and reproduces on the rerun, a pin verified in each engine that schedules it, and the `--project` and `--skip-project` shards), and the defect-id check. No site is needed (the API-helper test uses the self-hosted shop; the `test-all` and `a11y-record` tests start a nested run and are `@self-hosted`). |
 | account / admin | 7 / 20, plus one setup test each (8 / 21 listed) | Only exist when real sign-ins may run (always on the self-hosted shop). |
 | visual | 31 (30 baselines and the orphan check) | Only inside the Playwright image. |
 

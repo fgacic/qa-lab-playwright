@@ -47,6 +47,7 @@ test.describe('Category pages', () => {
 
       expect(found.data, 'the list should hold products').not.toHaveLength(0);
       await expect(categoryPage.grid.cards).toHaveCount(found.data.length);
+      // One assertion per card on purpose: `toHaveAccessibleName` takes no list, and the product's name in the message says which card failed.
       for (const [index, product] of found.data.entries()) {
         await expect(categoryPage.grid.nth(index).image, `the picture of "${product.name}"`).toHaveAccessibleName(product.name);
       }
@@ -115,6 +116,7 @@ test.describe('Category pages', () => {
 
     test('the page shows the empty state', async ({ categoryPage }) => {
       // Whichever category is opened gets the empty answer; the seed's one empty subcategory is the natural one to open.
+      // The mock keeps the test about the empty state: a reseed that fills that subcategory cannot turn it into a test about data.
       await categoryPage.open(SPECIAL_TOOLS.slug);
 
       await expect(categoryPage.title).toHaveText(SPECIAL_TOOLS.title);

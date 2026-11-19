@@ -49,7 +49,7 @@ test.describe('the target configuration', { tag: ['@framework'] }, () => {
     }
   });
 
-  test('TARGET=live accepts the public addresses, and its write guard default is on', () => {
+  test('TARGET=live accepts the public addresses', () => {
     const run = loadConfig({ TARGET: 'live' });
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
   });
@@ -61,7 +61,30 @@ test.describe('the target configuration', { tag: ['@framework'] }, () => {
   });
 
   test('a trailing slash on API_URL is dropped, so the API prefix still matches', () => {
-    const run = loadConfig({ TARGET: 'local', BASE_URL: httpUrl('localhost'), API_URL: httpUrl('localhost', '/api/') });
-    expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+    // With the `.replace(/\/+$/, '')` of env.ts removed, API_URL keeps its slash and `apiPath` matches nothing.
+    const env = loadEnvModule({ TARGET: 'local', BASE_URL: httpUrl('localhost'), API_URL: httpUrl('localhost', '/api/') });
+    expect(env.API_URL).toBe(httpUrl('localhost', '/api'));
+    expect(env.isApiUrl(httpUrl('localhost', '/api/products'))).toBe(true);
+    expect(env.apiPath(httpUrl('localhost', '/api/products'))).toBe('/products');
   });
 });
+
+type EnvModule = typeof import('../../src/support/env');
+/**
+ * env.ts as it evaluates under `environment`: it reads process.env as it loads, so it is loaded fresh (in this process, not spawned: the
+ * result needed is a value, not an exit code) and both the module cache and the environment are put back afterwards.
+ */
+function loadEnvModule(environment: Record<string, string>): EnvModule {
+  const path = require.resolve('../../src/support/env');
+  const saved = { ...process.env };
+  try {
+    Object.assign(process.env, environment);
+    delete require.cache[path];
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- a fresh evaluation is the point; `import()` would hand back the cached module
+    return require(path) as EnvModule;
+  } finally {
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, saved);
+    delete require.cache[path];
+  }
+}

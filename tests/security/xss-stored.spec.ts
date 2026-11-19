@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test as base } from '@fixtures';
+import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { ProfilePage } from '@pages/account/ProfilePage';
 import { ATTRIBUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { API_URL } from '@support/env';
@@ -26,6 +27,9 @@ const payload = XSS_PAYLOADS['img onerror'];
 const breakout = XSS_PAYLOADS['svg onload, breaking out of an attribute'];
 
 const scriptTag = XSS_PAYLOADS['script tag'];
+
+/** The shop's confirmation after a profile is saved: the one thing the profile test waits for before it reloads the page to read the stored values back. */
+const PROFILE_SAVED = 'Your profile is successfully updated!';
 
 /** The subject both contact tests send: the form picks it by its label, the API takes its slug (the same subject, named twice). */
 const SUBJECT = CONTACT_SUBJECTS[1];
@@ -140,7 +144,7 @@ test.describe('Injection, stored (self-hosted only)', { tag: ['@security', '@adm
     const form = await adminBrands.add();
     await form.fillIn({ name, slug: `qa-lab-xss-${uniqueKey()}` });
     await form.chrome.save();
-    await expect(form.chrome.alert('Brand saved!')).toBeVisible();
+    await expect(form.chrome.alert(ADMIN_MESSAGES.brandSaved)).toBeVisible();
 
     // 1. The admin's brand list.
     await adminBrands.open();
@@ -246,7 +250,7 @@ test.describe('Injection, stored by a customer (self-hosted only)', { tag: ['@se
     await profilePage.lastName.input.fill(lastName);
     await profilePage.street.input.fill(street);
     await profilePage.update();
-    await expect(profilePage.alert('Your profile is successfully updated!')).toBeVisible();
+    await expect(profilePage.alert(PROFILE_SAVED)).toBeVisible();
     // Read back from the server: a fresh load of the page, not the form the payload was typed into.
     await profilePage.open();
 

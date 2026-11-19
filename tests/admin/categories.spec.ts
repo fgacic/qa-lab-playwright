@@ -3,6 +3,8 @@ import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@page
 import { REFUSED_STATUSES, SEARCH_HIT, SEARCH_TERM, category, subcategory } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
+/** The slug of the category the search answers with. */
+const SEARCH_HIT_SLUG = 'qa-lab-search-hit';
 /** The subcategory the add form creates under the listed category. */
 const NEW_SUBCATEGORY = { name: 'Qa Lab Sub', slug: 'qa-lab-sub' };
 /** The name given to a category whose save is refused. */
@@ -17,7 +19,7 @@ test.describe('Admin categories (mocked back office)', { tag: ['@mocked'] }, () 
   });
 
   test('searching sends the term and lists the matches', async ({ adminCategories, apiMock }) => {
-    const match = { ...category, id: '01QALABCATEGORYHIT00000000', name: SEARCH_HIT, slug: 'qa-lab-search-hit' };
+    const match = { ...category, id: '01QALABCATEGORYHIT00000000', name: SEARCH_HIT, slug: SEARCH_HIT_SLUG };
     await apiMock.use(mock.respond('QUERY', '/categories/search', [match]));
     const sent = apiMock.waitForRequest('QUERY', '/categories/search');
 

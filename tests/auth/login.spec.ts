@@ -11,6 +11,10 @@ const WRONG_TOTP_CODE = '000000';
 /** What the shop's refusals say, typed once for the mock and the assertion. */
 const REFUSED = 'Invalid email or password';
 const LOCKED = 'Account locked, too many failed attempts. Please contact the administrator.';
+/** The other messages the page shows: for a password that is too short, for a TOTP step left empty, and for any failure that is not a refusal. */
+const PASSWORD_LENGTH = 'Password length is invalid';
+const TOTP_REQUIRED = 'TOTP code is required';
+const LOGIN_FAILED = 'Login failed';
 /** The error body of the API's 401: the word the page shows as it is when a TOTP code is refused. */
 const UNAUTHORIZED = 'Unauthorized';
 
@@ -37,7 +41,7 @@ test.describe('Login', () => {
     await loginPage.login('not-an-email', 'x');
 
     await expect(loginPage.email.error).toHaveText(FIELD_ERRORS.emailInvalid);
-    await expect(loginPage.password.error).toHaveText('Password length is invalid');
+    await expect(loginPage.password.error).toHaveText(PASSWORD_LENGTH);
     await apiMock.expectNoRequest('POST', '/users/login');
   });
 
@@ -147,7 +151,7 @@ test.describe('Login', () => {
 
       await loginPage.verifyTotp('');
 
-      await expect(loginPage.error).toHaveText('TOTP code is required');
+      await expect(loginPage.error).toHaveText(TOTP_REQUIRED);
       // The mocked sequence would answer a second request with a full login: none may leave for an empty code.
       await apiMock.expectNoRequest('POST', '/users/login', { since: before });
     });
@@ -204,7 +208,7 @@ test.describe('Login', () => {
       test('a generic "Login failed" is shown', async ({ loginPage, page }) => {
         await loginPage.login(fakeUser.email, MOCKED_PASSWORD);
 
-        await expect(loginPage.error).toHaveText('Login failed');
+        await expect(loginPage.error).toHaveText(LOGIN_FAILED);
         await expect(page).toHaveURL('/auth/login');
       });
     });

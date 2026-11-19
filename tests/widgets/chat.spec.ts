@@ -6,6 +6,13 @@ import { CONTACT_MESSAGE, fakeGuest } from '@support/test-data';
 
 /** What the visitor asks for. */
 const SEARCH_TERM = 'hammer';
+/** The menu's four choices, as the buttons are labelled: one place for the wording, like ASSISTANT below for what the assistant says. */
+const MENU = {
+  find: 'Find a product',
+  order: 'Order a product',
+  checkout: 'Checkout',
+  ticket: 'Create support ticket',
+} as const;
 /** The quantity the order dialogue is answered with. */
 const QUANTITY = 2;
 /**
@@ -50,7 +57,7 @@ test.describe('Chat assistant', () => {
 
     await chat.open();
     await expect(chat.greeting).toBeVisible();
-    for (const action of ['Find a product', 'Order a product', 'Checkout', 'Create support ticket'] as const) {
+    for (const action of Object.values(MENU)) {
       await expect.soft(chat.action(action), action).toBeVisible();
     }
     await expect(chat.openButton).toBeHidden();
@@ -76,7 +83,7 @@ test.describe('Chat assistant', () => {
     const { chat } = homePage.shell;
     await chat.open();
 
-    await chat.choose('Order a product');
+    await chat.choose(MENU.order);
 
     await expect(chat.reply(ASSISTANT.orderWhat)).toBeVisible();
   });
@@ -93,15 +100,13 @@ test.describe('Chat assistant', () => {
       const { chat } = homePage.shell;
       const product = await catalog.inStock();
       await chat.open();
-      await chat.choose('Order a product');
-      await chat.send(product.name);
-      await expect(chat.reply(ASSISTANT.orderResults)).toBeVisible();
 
-      await chat.productResult(product.name).click();
+      await chat.orderProduct(product.name, QUANTITY);
+
+      // The transcript keeps every line, so the dialogue's earlier steps are still there to read, in the order it asked them.
+      await expect(chat.reply(ASSISTANT.orderResults)).toBeVisible();
       await expect(chat.reply(ASSISTANT.orderChosen)).toBeVisible();
       await expect(chat.reply(ASSISTANT.orderQuantity)).toBeVisible();
-      await chat.pick(String(QUANTITY));
-
       await expect(chat.reply(ASSISTANT.orderSummary)).toBeVisible();
       await expect(chat.reply(`$${(product.price * QUANTITY).toFixed(2)}`)).toBeVisible();
       await expect(chat.reply(ASSISTANT.orderConfirm)).toBeVisible();
@@ -113,17 +118,14 @@ test.describe('Chat assistant', () => {
       const { chat, header } = homePage.shell;
       const product = await catalog.inStock();
       await chat.open();
-      await chat.choose('Order a product');
-      await chat.send(product.name);
-      await chat.productResult(product.name).click();
-      await chat.pick(String(QUANTITY));
+      await chat.orderProduct(product.name, QUANTITY);
       await expect(chat.reply(ASSISTANT.orderConfirm)).toBeVisible();
 
       await chat.pick(ADD_TO_CART);
 
       await expect(chat.reply(ASSISTANT.orderAdded)).toBeVisible();
       await expect(header.cartLink).toHaveText(String(QUANTITY));
-      await chat.choose('Checkout');
+      await chat.choose(MENU.checkout);
       await expect(chat.reply(ASSISTANT.cartTotal)).toBeVisible();
       await expect(chat.reply(`$${(product.price * QUANTITY).toFixed(2)}`)).toBeVisible();
       await expect(chat.reply(ASSISTANT.emptyCart)).toHaveCount(0);
@@ -134,7 +136,7 @@ test.describe('Chat assistant', () => {
     const { chat } = homePage.shell;
     await chat.open();
 
-    await chat.choose('Checkout');
+    await chat.choose(MENU.checkout);
 
     await expect(chat.reply(ASSISTANT.emptyCart)).toBeVisible();
   });
@@ -142,13 +144,13 @@ test.describe('Chat assistant', () => {
   test('"Back to menu" returns to the choices', async ({ homePage }) => {
     const { chat } = homePage.shell;
     await chat.open();
-    await chat.choose('Order a product');
+    await chat.choose(MENU.order);
 
     await chat.backToMenu();
 
     // The assistant answers with the greeting and the menu again, below the first ones.
     await expect(chat.greeting).toHaveCount(2);
-    await expect(chat.action('Find a product')).toBeVisible();
+    await expect(chat.action(MENU.find)).toBeVisible();
   });
 
   test.describe('Enter in the message box', { tag: ['@mocked'] }, () => {
@@ -162,7 +164,7 @@ test.describe('Chat assistant', () => {
     test('sends the message as the button does and the assistant answers', async ({ homePage, apiMock }) => {
       const { chat } = homePage.shell;
       await chat.open();
-      await chat.choose('Find a product');
+      await chat.choose(MENU.find);
       const searched = apiMock.waitForRequest('QUERY', '/products/search');
 
       await chat.sendWithEnter(SEARCH_TERM);
@@ -178,7 +180,7 @@ test.describe('Chat assistant', () => {
     const { chat } = homePage.shell;
     await chat.open();
     // With the message box in use, where a visitor's hands are: it only exists once an action has been picked.
-    await chat.choose('Find a product');
+    await chat.choose(MENU.find);
     await expect(chat.input).toBeVisible();
 
     await chat.closeWithEscape();
@@ -193,7 +195,7 @@ test.describe('Chat assistant', () => {
       const { chat } = homePage.shell;
       const guest = fakeGuest();
       await chat.open();
-      await chat.choose('Create support ticket');
+      await chat.choose(MENU.ticket);
       await expect(chat.reply(ASSISTANT.ticketStart)).toBeVisible();
 
       await chat.send(guest.firstName);
@@ -283,7 +285,7 @@ test.describe('Chat assistant', () => {
     test.beforeEach(async ({ homePage, apiMock }) => {
       await apiMock.blockUnmockedWrites();
       await homePage.shell.chat.open();
-      await homePage.shell.chat.choose('Create support ticket');
+      await homePage.shell.chat.choose(MENU.ticket);
     });
 
     test('a malformed email is asked for again', async ({ homePage, apiMock }) => {

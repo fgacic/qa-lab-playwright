@@ -12,6 +12,9 @@ import type { ProductPage } from '@support/toolshop-api';
 // so they call `apiMock.serialize('QUERY', '/products')`: the answers reach the page in the order
 // they were asked for. The race itself is pinned on its own, with `apiMock.delay`.
 
+/** The slider's own ends: the handles start there and `between` carries them until a test moves one. */
+const SLIDER_MIN = 1;
+const SLIDER_MAX = 100;
 /** The upper and lower price limits the slider tests set. */
 const MAX_PRICE = 80;
 const MIN_PRICE = 15;
@@ -29,8 +32,9 @@ const SEED = {
   brand: BRANDS.mightyCraft,
   /** A brand that sells in `otherCategory`. */
   hammerBrand: BRANDS.forgeFlex,
-  /** The shop's two brands, and a category of a different parent than `otherCategory`. */
+  /** The shop's two brands. */
   brands: [BRANDS.forgeFlex, BRANDS.mightyCraft] as const,
+  /** A category of a different parent than `otherCategory`. */
   powerCategory: DRILL.category,
 } as const;
 /** The slider test lowers the max to `CROSSED_MAX`, then presses the min up to `CROSSED_MIN`, past it. */
@@ -157,7 +161,7 @@ test.describe('Product filters', () => {
     // The handle starts at $100 and moves one dollar per key press, each press its own request, so a
     // far target costs a long run of requests (80 for $20). $80 keeps it to 20 and still leaves the
     // dearest products (up to about $90) above the limit.
-    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,1,${MAX_PRICE}`);
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${SLIDER_MIN},${MAX_PRICE}`);
 
     await homePage.filters.setMaxPrice(MAX_PRICE);
 
@@ -172,7 +176,7 @@ test.describe('Product filters', () => {
   test('the price slider hides products below the minimum', async ({ homePage, apiMock, api }) => {
     await apiMock.serialize('QUERY', '/products');
     const { total: unfiltered } = await api.listProducts();
-    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},100`);
+    const results = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},${SLIDER_MAX}`);
 
     await homePage.filters.setMinPrice(MIN_PRICE);
 
@@ -227,9 +231,9 @@ test.describe('Product filters', () => {
     knownBug('BUG-30', 'each slider step sends its own request and the grid shows whichever answer arrives last, so a slow answer for an earlier step replaces the final filter.');
     await expect(homePage.grid.cards.first(), 'the grid shows products before the slider moves').toBeVisible();
     // The answer for the step below the last is held back until after the last one's, as a slow network can do.
-    await apiMock.delay('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`, LATE_ANSWER_MS);
-    const late = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},100`);
-    const final = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},100`);
+    await apiMock.delay('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},${SLIDER_MAX}`, LATE_ANSWER_MS);
+    const late = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE - 1},${SLIDER_MAX}`);
+    const final = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.between === `price,${MIN_PRICE},${SLIDER_MAX}`);
 
     // Every product request must have finished and gone quiet (the held-back one included) before the grid is judged:
     // only then has the page drawn the late answer, so the pin cannot pass by looking before it replaces the grid.

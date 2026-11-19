@@ -97,6 +97,7 @@ test.describe('Checkout: payment step', () => {
     test(`${PAYMENT_METHODS[method]} asks for ${labels.join(', ')}`, async ({ checkout }) => {
       await checkout.payment.choose(method);
 
+      // One assertion per field: the test title names them all, and the failing one is named in the error.
       for (const label of labels) await expect(checkout.payment.field(label)).toBeVisible();
     });
   }

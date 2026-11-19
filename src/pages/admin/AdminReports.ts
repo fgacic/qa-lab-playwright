@@ -117,6 +117,7 @@ export class AdminSalesReportPage {
 
   /** The year of the page's own clock (not the test runner's, and so still the one the picker reads if the suite ever installs `page.clock`): the year the picker has to reach. */
   async currentYear(): Promise<string> {
+    // In-page on purpose (anti-pattern 11): no locator reads a clock, and the page's own year is what the picker is built from.
     return String(await this.page.evaluate(() => new Date().getFullYear()));
   }
 

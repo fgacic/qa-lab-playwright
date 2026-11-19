@@ -370,6 +370,8 @@ export const test = cleanupTest.extend<SecurityFixtures>({
     const contexts: BrowserContext[] = [];
     try {
       await use(async () => {
+        // Only `baseURL` is carried over from the project's options, on purpose: a visitor is a bare second browser (no stored session,
+        // locale or motion preference), so nothing from the test's own context leaks into what a stranger sees.
         const visitor = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
         contexts.push(visitor);
         // No console guard here, on purpose: the guard is built on the test's own `context` fixture and its allowances, annotations and

@@ -72,7 +72,7 @@ export const test = base.extend<A11yFixtures>({
       scan: async (name, { ready, only, within }) => {
         for (const content of ready) await expect(content.first(), `${name}: the state to be rendered before it is scanned`).toBeVisible();
         // Set on the context by the spec, before the page loaded, so the page's own scripts saw it too; a spec that forgot it would scan mid-fade.
-        expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), `${name}: the spec must run with reducedMotion: 'reduce'`).toBe(true);
+        await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), { message: `${name}: the spec must run with reducedMotion: 'reduce'` }).toBe(true);
         // A web font that swaps in after the scan would change the contrast and the sizes axe measured.
         await page.evaluate(() => document.fonts.ready);
         // Either the named rules or the whole WCAG set, never one narrowing the other.

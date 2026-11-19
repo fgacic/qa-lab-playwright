@@ -34,12 +34,12 @@ test.describe('Translation files agree with English', { tag: ['@i18n'] }, () => 
         return [language, new Map(entriesOf((await response.json()) as Json))] as const;
       }),
     );
-    const files = new Map<Language, Map<string, string>>(loaded);
+    const files: ReadonlyMap<Language, ReadonlyMap<string, string>> = new Map<Language, ReadonlyMap<string, string>>(loaded);
     expect(files.get('en')!.size, 'the English file holds keys at all').toBeGreaterThan(100);
     return files;
   };
   // The files are static for the run, and each of the five tests below reads them: fetched once per worker (a plain map, no request
-  // context kept), and dropped again if the fetch failed so the next test tries afresh.
+  // context kept, typed `ReadonlyMap` so a test that wrote to it would not compile: the five tests share it), and dropped again if the fetch failed so the next test tries afresh.
   let loadedFiles: ReturnType<typeof loadFiles> | undefined;
   const filesOf = (request: APIRequestContext) => (loadedFiles ??= loadFiles(request).catch((error) => ((loadedFiles = undefined), Promise.reject(error))));
   const others = LANGUAGES.filter((language) => language !== 'en');

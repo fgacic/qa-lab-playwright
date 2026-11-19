@@ -48,6 +48,7 @@ export class InvoiceDetailsPage {
   /**
    * The quantity cell of a product's line, found by the "Quantity" column header rather than by position: the first cell
    * is the quantity today, and a reordered table must not make a spec read the price instead. Resolves once the header is drawn.
+   * It is `async` on purpose: the column index comes from reading the header texts, which no locator expresses, so it cannot be a plain locator getter.
    */
   async quantityOf(productName: string): Promise<Locator> {
     const quantityHeader = this.table.getByRole('columnheader', { name: 'Quantity', exact: true });

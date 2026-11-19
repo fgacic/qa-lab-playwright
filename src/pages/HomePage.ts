@@ -55,6 +55,7 @@ export class HomePage {
   @step('Open the first product that is in stock')
   async openFirstInStockProduct(): Promise<{ id: string; name: string; productPage: ProductPage }> {
     const card = this.grid.firstInStock();
+    // A one-shot read of a name that is needed as a value (it is typed into the cart assertions later): `innerText` waits for the card to exist, and a card renders with its stock label.
     const name = await card.name.innerText();
     await card.root.click();
     await this.page.waitForURL(/\/product\/[^/]+$/);

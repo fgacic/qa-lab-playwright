@@ -7,6 +7,7 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { emptyProductPage } from '@support/payloads';
 import type { ProductPage } from '@support/toolshop-api';
 
+/** The shop marks the current page with a class on its <li>, not with `aria-current`: the class is the only handle there is, so the specs read it. */
 const CURRENT_PAGE = /\bactive\b/;
 /** The deepest page any test here visits (Next from page 3 reaches 4): the catalogue must have at least this many. */
 const PAGES_NEEDED = 4;
@@ -16,6 +17,13 @@ const END_BUTTONS_ONLY_STYLED = 'the end buttons are only styled as disabled (cl
 
 /** The answer for one page of the product list (page numbers are 1-based in the request). */
 const pageAnswer = (apiMock: ApiMock, n: number) => apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.page === String(n));
+
+/** Clicks page `n` in the pager and waits for the page's products, so the next step starts from a settled list. */
+const goToPage = async (homePage: HomePage, apiMock: ApiMock, n: number) => {
+  const answer = pageAnswer(apiMock, n);
+  await homePage.pagination.goTo(n);
+  await answer;
+};
 
 test.describe('Pagination', () => {
   test.describe('over the real catalogue', () => {
@@ -41,9 +49,7 @@ test.describe('Pagination', () => {
     });
 
     test('Previous goes back to the page before', async ({ homePage, apiMock }) => {
-      const pageThree = pageAnswer(apiMock, 3);
-      await homePage.pagination.goTo(3);
-      await pageThree;
+      await goToPage(homePage, apiMock, 3);
       const pageTwo = pageAnswer(apiMock, 2);
 
       await homePage.pagination.goPrevious();
@@ -70,9 +76,7 @@ test.describe('Pagination', () => {
     });
 
     test('reloading on a later page starts again at page 1', async ({ homePage, api, apiMock }) => {
-      const pageThree = pageAnswer(apiMock, 3);
-      await homePage.pagination.goTo(3);
-      await pageThree;
+      await goToPage(homePage, apiMock, 3);
       const { data: firstPage } = await api.listProducts();
 
       await homePage.page.reload({ waitUntil: 'domcontentloaded' });
@@ -83,9 +87,7 @@ test.describe('Pagination', () => {
     });
 
     test('Next from a middle page goes on to the page after', async ({ homePage, apiMock }) => {
-      const pageThree = pageAnswer(apiMock, 3);
-      await homePage.pagination.goTo(3);
-      await pageThree;
+      await goToPage(homePage, apiMock, 3);
       const pageFour = pageAnswer(apiMock, 4);
 
       await homePage.pagination.goNext();
@@ -121,9 +123,7 @@ test.describe('Pagination', () => {
     });
 
     test('changing a filter on a later page shows the first page of the new result', async ({ homePage, apiMock }) => {
-      const pageThree = pageAnswer(apiMock, 3);
-      await homePage.pagination.goTo(3);
-      await pageThree;
+      await goToPage(homePage, apiMock, 3);
       // The eco-friendly list is shorter than the catalogue but still runs to more than one page.
       const filtered = apiMock.waitForResponse<ProductPage>('QUERY', '/products', (body) => body.eco_friendly === 'true');
 
@@ -152,9 +152,7 @@ test.describe('Pagination', () => {
     ]) {
       test(`changing ${change} on a later page marks page 1 as the current one`, { tag: ['@bug'] }, async ({ homePage, apiMock }) => {
         knownBug('BUG-33', 'after a sort or filter change from a later page the list restarts at page 1 but the pager still marks the old page (or none) as current.');
-        const laterPage = pageAnswer(apiMock, from);
-        await homePage.pagination.goTo(from);
-        await laterPage;
+        await goToPage(homePage, apiMock, from);
         const changed = apiMock.waitForResponse<ProductPage>('QUERY', '/products', answer);
 
         await apply(homePage);
@@ -178,9 +176,7 @@ test.describe('Pagination', () => {
     test('Next is disabled on the last page for assistive tech too', { tag: ['@a11y', '@bug'] }, async ({ homePage, apiMock }) => {
       knownBug('A11Y-03', END_BUTTONS_ONLY_STYLED);
       const lastPage = await homePage.pagination.pageCount();
-      const last = pageAnswer(apiMock, lastPage);
-      await homePage.pagination.goTo(lastPage);
-      await last;
+      await goToPage(homePage, apiMock, lastPage);
       await expect(homePage.pagination.item(lastPage)).toHaveClass(CURRENT_PAGE);
 
       await expect(homePage.pagination.next, 'A11Y-03: Next is disabled on the last page').toBeDisabled({ timeout: BUG_TIMEOUT });

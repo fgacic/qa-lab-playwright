@@ -32,10 +32,11 @@ test.use({ adminSession: 'storage-state' });
 
 /** Unique per test and per repeat, so parallel workers and retries never find each other's data. */
 const unique = () => randomUUID().slice(0, 8);
-/** The stock an edit fills in, because the edit form does not load it (ADM-05), and a price any test product is created with. */
 /** A yes or no as a named outcome, so a failure reads "expected 'bars', received 'no bars'" instead of "true, false". */
 const barsOrNot = (yes: boolean) => (yes ? 'bars' : 'no bars');
+/** The stock an edit fills in, because the edit form does not load it (ADM-05). */
 const EDITED_STOCK = '3';
+/** The price the product of the search pin is created with: any valid price will do, the pin is about the search. */
 const PRICE_ON_SEARCH_PIN = '5.00';
 
 /** What marks the records no API call can remove (a guest order, a contact message) as this suite's. */
@@ -214,6 +215,8 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(order.status).toHaveValue('SHIPPED');
   });
 
+  // One test on purpose: arrival, status and reply are successive states of one message, and the arrange step (a real send) leaves a
+  // record no API call can remove (see the header), so splitting it would leave two. Each step asserts its own named result.
   test('a contact message arrives in the inbox, is taken in progress and is answered', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, adminToken }) => {
     const sender = `${LEFTOVER} sender ${unique()}`;
     const text = `Sent by the qa-lab suite (${unique()}) and safe to delete, long enough to be a real message.`;
@@ -249,6 +252,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await adminStatistics.open();
     const { json: purchased } = await answered;
 
+    // Holds on the public shop too: its seeded orders are the same data. (Read-only, so this test needs no @self-hosted tag.)
     expect(purchased.length, 'the seeded shop has sales to report').toBeGreaterThan(0);
     await expect(adminStatistics.heading).toBeVisible();
     await expect(adminStatistics.report('Top 10 Most Purchased Products')).toHaveCount(purchased.length);

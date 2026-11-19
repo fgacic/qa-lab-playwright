@@ -25,6 +25,13 @@ export class ProductPage {
   readonly relatedProducts: Locator;
   readonly unavailableMessage: Locator;
 
+  /** The page opened on `productId`, for a spec that needs an id the `product` fixture does not hold (an unknown one). */
+  static async openedOn(page: Page, productId: string): Promise<ProductPage> {
+    const productPage = new ProductPage(page);
+    await productPage.open(productId);
+    return productPage;
+  }
+
   constructor(readonly page: Page) {
     this.shell = new AppShell(page);
     this.comparison = new ComparisonPage(page);

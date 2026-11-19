@@ -2,32 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { mergeTests, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
 import { worldTest } from '@fixtures/security';
-import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, removeFavouritesLater, WHO, OWN_NAME, INTRUDER_NAME, expectVerdict, tokenFor, contactMessage, type Caller, type World, type Account } from '@support/authz';
+import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, favouriteOf, hasFavourite, WHO, OWN_NAME, INTRUDER_NAME, expectVerdict, tokenFor, contactMessage, type Caller, type World, type Account } from '@support/authz';
 import { knownBug } from '@support/known-bug';
 import { fromBase64Url } from '@support/payloads';
 import { fakeGuest } from '@support/test-data';
 import type { Product, ToolshopApi } from '@support/toolshop-api';
 
 /**
- * Authorisation of the API itself, below the UI: who may call what. This file: Writes to records other people own: a profile's role field, other customers' profiles and favourites, order and message statuses. (The authorization-*.spec.ts files are one suite, split by concern.) A page only hides a button, the API is what enforces,
- * so these are plain HTTP calls with no token, with a customer's token and with the admin's. They write to our own
- * database and try to read other people's data, so they only ever run against the self-hosted Toolshop (@self-hosted).
- * No browser is involved, so the file is tagged @api and scheduled once (in Chromium) instead of once per browser.
- *
- * A call is refused by 401 (no valid token) or 403 (a token that may not), and a record that belongs to somebody else is
- * hidden by a 403 or a 404: all of those count as "refused". A success (2xx) is "accepted". Any other answer (a 404 on a
- * route that should exist, a 405, a 500) is neither: it says nothing about authorisation, so it fails the test without
- * naming a defect id. Every "refused" check that tolerates a 404 comes after a control in which the admin gets a 200 from the
- * same path, so a typo in a path cannot pass as a refusal.
- *
- * What each test makes, it removes again, pass or fail, in reverse order: the records the admin API can delete (brands,
- * categories, products, the customers a test registers, the favourites that would block deleting them). Two kinds are left
- * behind on purpose, all uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
- * for every CI run: guest orders (DELETE /invoices/{id} answers 405) and contact messages (DELETE /messages/{id} answers 405).
- * No seeded record is ever changed: a first draft of the catalogue pins edited a seeded product to prove a point, which
- * is why every write is aimed at a record the test made.
- *
- * The file runs on `apiOnlyTest`: no browser context is opened, since every check is a plain HTTP call.
+ * Authorisation of the API itself, below the UI: who may call what. This file: Writes to records other people own: a profile's role field, other customers' profiles and favourites, order and message statuses.
+ * (The authorization-*.spec.ts files are one suite, split by concern; the conventions they share, which statuses count as a refusal,
+ * what is cleaned up and what is left behind, are stated once in `@support/authz`.)
  */
 const test = mergeTests(apiOnlyTest, worldTest);
 
@@ -111,17 +95,6 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
     expect(REFUSED, `a customer deleting another customer's account got ${response.status()}`).toContain(response.status());
     expect((await call(request, 'GET', `/users/${owner.id}`, { token: await adminToken() })).status(), 'the account is still there').toBe(200);
   });
-
-  /** A customer's favourite, made through the API, and its id. The owner's own cleanup removes it before the account goes. */
-  async function favouriteOf(world: World, owner: Account, catalogProduct: Product): Promise<string> {
-    await world.api.addFavorite(owner.token, catalogProduct.id);
-    const [favourite] = (await (await call(world.request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[];
-    expect(favourite, 'the owner has the favourite just added').toBeDefined();
-    removeFavouritesLater(world, owner);
-    return favourite.id;
-  }
-  const hasFavourite = async (request: APIRequestContext, owner: Account, id: string) =>
-    ((await (await call(request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[]).some((favourite) => favourite.id === id);
 
   test('a customer can remove their own favourite', async ({ request, catalog, world }) => {
     const owner = await newCustomer(world);

@@ -71,6 +71,7 @@ test.describe('Checkout: sign-in step', () => {
       await expect(checkout.billing.heading).toBeHidden();
     });
 
+    // Lives here because the 401 mock only supplies a terminal answer, so the request is observed without a real login.
     test('spaces around the email are trimmed before it is sent', async ({ checkout, apiMock }) => {
       const asked = apiMock.waitForRequest('POST', '/users/login');
 

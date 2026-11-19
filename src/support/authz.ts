@@ -2,13 +2,32 @@ import { expect, type APIRequestContext, type APIResponse } from '@playwright/te
 import type { Cleanups } from '@fixtures/cleanups';
 import { API_URL } from '@support/env';
 import { fakeCustomer, uniqueEmail, type Customer } from '@support/test-data';
-import type { ToolshopApi } from '@support/toolshop-api';
+import type { Product, ToolshopApi } from '@support/toolshop-api';
 
 /**
  * What the API-level security specs (tests/security/authorization-*, cart-access, login-lockout) share: one authenticated-or-not call,
  * the statuses that count as a refusal, and the accounts and removals a test arranges. Every helper here writes to the shop's database,
  * so the specs that use them are `@self-hosted`.
+ *
+ * The conventions of the whole authorisation suite (authorization-catalogue, -reads, -records, -tokens), stated once here:
+ *
+ * A page only hides a button, the API is what enforces, so these are plain HTTP calls with no token, with a customer's token and with the admin's.
+ * They write to our own database and try to read other people's data, so they only ever run against the self-hosted Toolshop (@self-hosted).
+ * No browser is involved (`apiOnlyTest`), so each file is tagged @api and scheduled once (in Chromium) instead of once per browser.
+ *
+ * Verdicts: a call is refused by 401 (no valid token) or 403 (a token that may not), and a record that belongs to somebody else is
+ * hidden by a 403 or a 404: all of those count as "refused". A success (2xx) is "accepted". Any other answer (a 404 on a
+ * route that should exist, a 405, a 500) is neither: it says nothing about authorisation, so it fails the test without
+ * naming a defect id. Every "refused" check that tolerates a 404 comes after a control in which the admin gets a 200 from the
+ * same path, so a typo in a path cannot pass as a refusal.
+ *
+ * Cleanup: what each test makes, it removes again, pass or fail, in reverse order: the records the admin API can delete (brands,
+ * categories, products, the customers a test registers, the favourites that would block deleting them). Two kinds are left
+ * behind on purpose, all uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
+ * for every CI run: guest orders (DELETE /invoices/{id} answers 405) and contact messages (DELETE /messages/{id} answers 405).
+ * No seeded record is ever changed: every write is aimed at a record the test made.
  */
+
 
 /** A call is refused by 401 (no valid token) or 403 (a token that may not). */
 export const REFUSED = [401, 403];
@@ -119,3 +138,14 @@ export async function contactMessage(world: World, name: string): Promise<string
   }
   throw new Error(`the message from "${name}" is not in the admin's inbox (${lastPage} page(s) read)`);
 }
+
+/** A customer's favourite, made through the API, and its id. The owner's own cleanup removes it before the account goes. */
+export async function favouriteOf(world: World, owner: Account, catalogProduct: Product): Promise<string> {
+  await world.api.addFavorite(owner.token, catalogProduct.id);
+  const [favourite] = (await (await call(world.request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[];
+  expect(favourite, 'the owner has the favourite just added').toBeDefined();
+  removeFavouritesLater(world, owner);
+  return favourite.id;
+}
+export const hasFavourite = async (request: APIRequestContext, owner: Account, id: string) =>
+  ((await (await call(request, 'GET', '/favorites', { token: owner.token })).json()) as { id: string }[]).some((favourite) => favourite.id === id);

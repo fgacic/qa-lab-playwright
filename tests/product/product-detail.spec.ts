@@ -47,7 +47,7 @@ const SERVER_MESSAGE = 'qa-lab: the cart service is down for maintenance';
 test.describe('Product detail', () => {
   test('shows the product as the API describes it', { tag: ['@smoke'] }, async ({ productPage, product }) => {
     await expect(productPage.name).toHaveText(product.name);
-    await expect(productPage.price).toHaveText(product.price.toFixed(2));
+    await expect(productPage.price).toShowAmount(product.price);
     await expect(productPage.description).toHaveText(product.description);
     await expect(productPage.addToCartButton).toBeEnabled();
   });
@@ -246,11 +246,7 @@ test.describe('Product detail', () => {
   test.describe('an id no product has', { tag: ['@negative', '@bug'] }, () => {
     // The page opens on the id, not on a product of the catalogue: the page fixture is replaced by one that opens the unknown id.
     test.use({
-      productPage: async ({ page }, use) => {
-        const productPage = new ProductPage(page);
-        await productPage.open(UNKNOWN_PRODUCT_ID);
-        await use(productPage);
-      },
+      productPage: async ({ page }, use) => use(await ProductPage.openedOn(page, UNKNOWN_PRODUCT_ID)),
     });
 
     test('the page says the product is unavailable', async ({ productPage, consoleGuard }) => {

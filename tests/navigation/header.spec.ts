@@ -2,6 +2,8 @@ import { CATEGORY_MENU, type CategoryMenuItem } from '@components/Header';
 import { expect, test } from '@fixtures';
 
 test.describe('Header navigation', () => {
+  // Starts on the contact page (not the home page, which the logo points to, so the click must navigate); the home page is read
+  // through `shop`, whose page objects are not opened yet: the `homePage` fixture would open it before the click.
   test('the logo takes the shopper back to the home page', { tag: ['@smoke'] }, async ({ contactPage, shop, page }) => {
     await contactPage.shell.header.goHomeViaLogo();
 

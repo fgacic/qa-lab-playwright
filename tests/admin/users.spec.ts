@@ -14,9 +14,9 @@ const EMAIL_TAKEN = 'A customer with this email address already exists.';
 const ADD_USER = 'Add User';
 /** The fields the add form cannot be saved without (Postal code, State, Phone and Password are optional). */
 const REQUIRED_FIELDS = ['First Name', 'Last Name', 'Date of birth', 'Street', 'City', 'Country', 'Email'];
-/** What a user who has never failed to sign in shows in the form. */
 /** An email the form must refuse: no at sign, no domain. */
 const MALFORMED_EMAIL = 'not-an-email';
+/** What a user who has never failed to sign in shows in the form. */
 const NO_FAILED_ATTEMPTS = '0';
 /** The first name an edit gives the user. */
 const RENAMED = 'Renamed';

@@ -6,25 +6,9 @@ import { call, newCustomer, REFUSED_OR_HIDDEN, removeFavouritesLater, contactMes
 import { fakeGuest } from '@support/test-data';
 
 /**
- * Authorisation of the API itself, below the UI: who may call what. This file: Who may read what: the reads that need a token, and the lists that hold only the caller's own rows. (The authorization-*.spec.ts files are one suite, split by concern.) A page only hides a button, the API is what enforces,
- * so these are plain HTTP calls with no token, with a customer's token and with the admin's. They write to our own
- * database and try to read other people's data, so they only ever run against the self-hosted Toolshop (@self-hosted).
- * No browser is involved, so the file is tagged @api and scheduled once (in Chromium) instead of once per browser.
- *
- * A call is refused by 401 (no valid token) or 403 (a token that may not), and a record that belongs to somebody else is
- * hidden by a 403 or a 404: all of those count as "refused". A success (2xx) is "accepted". Any other answer (a 404 on a
- * route that should exist, a 405, a 500) is neither: it says nothing about authorisation, so it fails the test without
- * naming a defect id. Every "refused" check that tolerates a 404 comes after a control in which the admin gets a 200 from the
- * same path, so a typo in a path cannot pass as a refusal.
- *
- * What each test makes, it removes again, pass or fail, in reverse order: the records the admin API can delete (brands,
- * categories, products, the customers a test registers, the favourites that would block deleting them). Two kinds are left
- * behind on purpose, all uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
- * for every CI run: guest orders (DELETE /invoices/{id} answers 405) and contact messages (DELETE /messages/{id} answers 405).
- * No seeded record is ever changed: a first draft of the catalogue pins edited a seeded product to prove a point, which
- * is why every write is aimed at a record the test made.
- *
- * The file runs on `apiOnlyTest`: no browser context is opened, since every check is a plain HTTP call.
+ * Authorisation of the API itself, below the UI: who may call what. This file: Who may read what: the reads that need a token, and the lists that hold only the caller's own rows.
+ * (The authorization-*.spec.ts files are one suite, split by concern; the conventions they share, which statuses count as a refusal,
+ * what is cleaned up and what is left behind, are stated once in `@support/authz`.)
  */
 const test = mergeTests(apiOnlyTest, worldTest);
 
@@ -54,11 +38,10 @@ test.describe('API authorisation, read access (self-hosted only)', { tag: ['@sec
     });
   }
 
-  test("a customer cannot read somebody else's invoice", async ({ request, api, adminToken, cleanups }) => {
+  test("a customer cannot read somebody else's invoice", async ({ request, api, adminToken, cleanups, catalog }) => {
     const admin = await adminToken();
-    const invoices = await (await call(request, 'GET', '/invoices', { token: admin })).json();
-    expect(invoices.data.length, 'the admin sees at least one invoice (the shop is seeded with some)').toBeGreaterThan(0);
-    const [{ id: invoiceId }] = invoices.data as { id: string }[];
+    // An order the test places itself (a guest's, who has no account), so the invoice does not depend on what the shop was seeded with.
+    const { id: invoiceId } = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], fakeGuest());
     const control = await call(request, 'GET', `/invoices/${invoiceId}`, { token: admin });
     expect(control.status(), 'the admin can read that invoice, so a 404 for the customer is a hiding and not a wrong path').toBe(200);
     const { token } = await newCustomer({ request, api, adminToken, cleanups });

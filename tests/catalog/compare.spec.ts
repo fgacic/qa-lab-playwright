@@ -6,6 +6,8 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /** The most products the shop lets a shopper compare at once. */
 const MAX_COMPARED = 4;
+/** One more than the limit: the last click is the one the shop must refuse. */
+const ATTEMPTED = MAX_COMPARED + 1;
 
 test.describe('Product comparison', () => {
   /** Puts the first two products of the grid in the comparison and returns their names. */
@@ -51,7 +53,7 @@ test.describe('Product comparison', () => {
 
   test('at most four products can be compared', { tag: ['@negative'] }, async ({ homePage }) => {
     await homePage.grid.waitForLoaded();
-    for (let i = 0; i <= MAX_COMPARED; i++) await homePage.grid.nth(i).compareButton.click();
+    for (let i = 0; i < ATTEMPTED; i++) await homePage.grid.nth(i).compareButton.click();
 
     // The shop says nothing about the refused fifth click (no toast, no message): the only sign is that it stays out.
     await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(MAX_COMPARED));

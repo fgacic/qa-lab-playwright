@@ -15,6 +15,11 @@ const HOUSE_NUMBER = '1';
 const LOOKUP = { street: 'Mockstraat', city: 'Mockstad', state: 'Mockland' };
 /** The minimum length the page's password rules list (BUG-31 is about the validation message disagreeing with it). */
 const LISTED_MINIMUM = 8;
+/** The shop's one message for a date that is not YYYY-MM-DD, typed once for the table and the "required" variant that prefixes it. */
+const DATE_FORMAT_ERROR = 'Please enter a valid date in YYYY-MM-DD format.';
+/** The two sentences the shop shows for a refused password: the length one (it says 6, see BUG-31) and the one for a missing rule. */
+const TOO_SHORT_ERROR = 'Password must be minimal 6 characters long.';
+const INVALID_PASSWORD_ERROR = 'Password can not include invalid characters.';
 /** What the postcode-lookup failure test types by hand, and expects to find still there. */
 const TYPED = { street: 'Typed Street', city: 'Typed City' };
 
@@ -26,7 +31,7 @@ test.describe('Registration form', () => {
   const required = {
     'First name': FIELD_ERRORS.required('First name'),
     'Last name': FIELD_ERRORS.required('Last name'),
-    'Date of birth': 'Please enter a valid date in YYYY-MM-DD format. Date of Birth is required',
+    'Date of birth': `${DATE_FORMAT_ERROR} Date of Birth is required`,
     Country: FIELD_ERRORS.required('Country'),
     'Postal code': FIELD_ERRORS.required('Postcode'),
     'House number': FIELD_ERRORS.required('House number'),
@@ -54,8 +59,8 @@ test.describe('Registration form', () => {
   });
 
   const invalid = [
-    { field: 'dateOfBirth', label: 'date of birth', value: '01/01/1990', message: 'Please enter a valid date in YYYY-MM-DD format.' },
-    { field: 'dateOfBirth', label: 'date of birth', value: '2020-13-45', message: 'Please enter a valid date in YYYY-MM-DD format.' },
+    { field: 'dateOfBirth', label: 'date of birth', value: '01/01/1990', message: DATE_FORMAT_ERROR },
+    { field: 'dateOfBirth', label: 'date of birth', value: '2020-13-45', message: DATE_FORMAT_ERROR },
     { field: 'phone', label: 'phone number', value: 'abc', message: 'Only numbers are allowed.' },
     { field: 'email', label: 'email', value: 'not-an-email', message: FIELD_ERRORS.emailInvalid },
     { field: 'password', label: 'password', value: 'a', message: FIELD_ERRORS.passwordRules },
@@ -130,8 +135,9 @@ test.describe('Registration form', () => {
 
       await registerPage.submit();
 
-      // Whatever number the message names (BUG-31), it says the password is too short and nothing is sent.
-      await expect(registerPage.password.error).toContainText(/\d+ characters/);
+      // The password carries every other rule (`Ab1!` plus filler), so the form refuses it for its length alone. The exact sentence is
+      // pinned (it names 6, BUG-31 above) so a refusal for another reason, or a reworded message, is a deliberate edit here.
+      await expect(registerPage.password.error).toHaveText(TOO_SHORT_ERROR);
       await apiMock.expectNoRequest('POST', '/users/register');
     });
   }
@@ -149,7 +155,8 @@ test.describe('Registration form', () => {
 
       await registerPage.submit();
 
-      await expect(registerPage.password.error).toBeVisible();
+      // The password is long enough, so the length sentence must be absent and the "invalid characters" one (the shop's wording for a missing rule) shown.
+      await expect(registerPage.password.error).toHaveText(INVALID_PASSWORD_ERROR);
       await apiMock.expectNoRequest('POST', '/users/register');
     });
   }

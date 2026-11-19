@@ -73,20 +73,19 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   });
 
   // The training aids are left out of every scan (EXCLUDED); an exclusion for something the shop no longer renders is a hole left open for nothing.
-  test('every excluded training aid that is drawn at first is still on the page', async ({ homePage }) => {
-    for (const { selector, reason } of EXCLUDED.filter((excluded) => !excluded.shownBy)) {
+  // One test per aid, so the report names the exclusion that has gone stale. The selectors are CSS because these elements have no role or name to ask for.
+  for (const { selector, reason } of EXCLUDED.filter((excluded) => !excluded.shownBy)) {
+    test(`the excluded training aid ${selector} is still rendered`, async ({ homePage }) => {
       await expect(homePage.page.locator(selector).first(), `${selector} (${reason}) is still rendered`).toBeAttached();
-    }
-  });
+    });
+  }
 
-  test('every excluded training aid that a control opens is still drawn by it', async ({ homePage }) => {
-    // Each aid is opened on a fresh page: the panel one control opens could cover the next control.
-    for (const { selector, reason, shownBy } of EXCLUDED.flatMap((excluded) => (excluded.shownBy ? [{ ...excluded, shownBy: excluded.shownBy }] : []))) {
-      await homePage.page.reload();
+  for (const { selector, reason, shownBy } of EXCLUDED.flatMap((excluded) => (excluded.shownBy ? [{ ...excluded, shownBy: excluded.shownBy }] : []))) {
+    test(`the excluded training aid ${selector} is still drawn once ${shownBy} is clicked`, async ({ homePage }) => {
       await homePage.page.locator(shownBy).click();
       await expect(homePage.page.locator(selector).first(), `${selector} (${reason}) is drawn once ${shownBy} is clicked`).toBeAttached();
-    }
-  });
+    });
+  }
 
   test('no new violations on search results', async ({ homePage, product, a11y }) => {
     await homePage.search.searchFor(product.name);

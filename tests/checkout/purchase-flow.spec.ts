@@ -15,6 +15,15 @@ const KEPT_QUANTITY = 3;
 /** How many of the product the browse-and-buy journeys put in the cart. */
 const ORDERED_QUANTITY = 2;
 
+/** The parts of the guest invoice answer these flows read (the shop's full answer holds more). */
+interface GuestInvoice {
+  invoice_number: string;
+  total: number;
+  billing_city: string;
+}
+/** What every invoice number looks like. */
+const INVOICE_NUMBER = /^INV-\d{10}$/;
+
 /** The cart's discount for an eco-friendly product: 5% off the subtotal (the cart specs hold the rule itself to literal figures). */
 const ECO_DISCOUNT = 0.05;
 
@@ -28,12 +37,6 @@ const addFirstInStockAndOpenCart = async (homePage: HomePage) => {
   await expect(checkout.cart.table.row(name).quantity).toHaveValue(String(ORDERED_QUANTITY));
   return checkout;
 };
-
-interface GuestInvoice {
-  invoice_number: string;
-  total: number;
-  billing_city: string;
-}
 
 /**
  * End-to-end purchases as a guest, through the real shop and API. Orders are placed with
@@ -66,10 +69,11 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
 
     expect(response.status(), JSON.stringify(invoice)).toBe(201);
     await expect(checkout.wizard.confirmationFor(invoice.invoice_number)).toBeVisible();
-    expect(invoice.invoice_number).toMatch(/^INV-\d{10}$/);
+    expect(invoice.invoice_number).toMatch(INVOICE_NUMBER);
     await expect(checkout.header.cartLink).toHaveCount(0);
   });
 
+  // One journey on purpose (@flow): that search, add, edit and remove work *together* on one cart is the claim; each step alone is held by the cart specs.
   test('search, fill a cart with three products, then change a quantity and remove a line', async ({ homePage, catalog, api }) => {
     // Three distinct products, chosen by the catalogue and not by what a search happens to list first.
     const kept = await catalog.inStock();

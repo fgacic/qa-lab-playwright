@@ -44,6 +44,7 @@ test.describe('Checkout: billing address step', () => {
     await expect(billing.proceedButton).toBeEnabled();
 
     for (const field of [billing.street, billing.city, billing.state]) {
+      await expect(field.input, 'the lookup has filled the field before it is read').not.toBeEmpty();
       const filled = await field.input.inputValue();
       await field.input.clear();
       await expect(billing.proceedButton).toBeDisabled();
@@ -130,7 +131,8 @@ test.describe('Checkout: billing address step', () => {
     knownBug('BUG-41', 'each change of the house number sends its own lookup and the page applies whichever answer arrives last, so a slow answer for an earlier number overwrites the address of the final one.');
     const { billing } = checkout;
     // The answer for the first house number is held back until the one for the second has been
-    // served, as a slow network can do; nothing here waits for a fixed time.
+    // served, as a slow network can do; nothing here waits for a fixed time. `answerOutOfOrder` and not
+    // `apiMock`: the two requests differ by a query parameter, which a mock cannot tell apart (see answer-gate).
     await answerOutOfOrder(page, /\/postcode-lookup/, {
       param: 'house_number',
       late: { value: RACE.first.houseNumber, json: RACE.first.answer },

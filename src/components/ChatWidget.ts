@@ -83,6 +83,18 @@ export class ChatWidget {
     await this.send(description);
   }
 
+  /**
+   * The "Order a product" dialogue up to its summary: the menu choice, the search term, the product's card and the quantity.
+   * No assertion here; what the assistant says at each stage is the caller's to read.
+   */
+  @step('Order {0} x{1} through the chat')
+  async orderProduct(productName: string, quantity: number): Promise<void> {
+    await this.choose('Order a product');
+    await this.send(productName);
+    await this.productResult(productName).click();
+    await this.pick(String(quantity));
+  }
+
   @step('Ask the chat for "{0}"')
   async findProduct(term: string): Promise<void> {
     await this.choose('Find a product');

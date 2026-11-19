@@ -11,7 +11,7 @@ test.describe('Rentals', () => {
     const rentals = await api.listProducts({ is_rental: 'true' });
     // The page shows one page of rentals and no pager: if the list outgrows a page, fail here rather than compare a partial list.
     expect(rentals.last_page, 'the rentals should fit on one page').toBe(1);
-    // Only the seeded rentals are compared. The back-office and stored-XSS specs make rentals of their own (the one list the
+    // Only the seeded rentals are compared. The back-office (tests/admin/product-form, tests/admin-e2e/back-office) and stored-XSS (tests/security/xss-stored) specs make rentals of their own (the one list the
     // default catalogue leaves them out of is this one) and delete them again, and a spec on another worker may have one up now.
     const seeded = rentals.data.filter((p) => !SUITE_OWNED_NAME.test(p.name));
     expect(seeded, 'the shop is seeded with rentals').not.toHaveLength(0);

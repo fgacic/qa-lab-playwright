@@ -3,6 +3,7 @@ import { step } from '@support/step';
 import { reportedFailure } from './alerts';
 
 export const MESSAGE_STATUSES = ['NEW', 'IN_PROGRESS', 'RESOLVED'] as const;
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 
 /** /admin/messages/{id}: the message, a status picker (saved on change) and a reply box. */
 export class AdminMessagePage {
@@ -29,7 +30,7 @@ export class AdminMessagePage {
   }
 
   @step('Set the message status to {0}')
-  async setStatus(status: (typeof MESSAGE_STATUSES)[number]): Promise<void> {
+  async setStatus(status: MessageStatus): Promise<void> {
     await this.status.selectOption(status);
   }
 

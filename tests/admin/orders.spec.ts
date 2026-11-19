@@ -1,9 +1,11 @@
 import { expect, mock, test } from '@fixtures';
 import { ADMIN_MESSAGES, appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
-import { ORDER_STATUSES } from '@pages/admin/AdminOrderPage';
+import { ORDER_STATUSES, type OrderStatus } from '@pages/admin/AdminOrderPage';
 import { ORDER_STATUS, dollars, orderLine, orderPayment, orderTotalField, paginated } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
+/** The status the refusal tests try to give the order. */
+const SHIPPED = 'SHIPPED' satisfies OrderStatus;
 /** What a status update is refused with: a conflict (the order changed meanwhile), invalid, and a server failure. */
 const STATUS_REFUSALS = [409, 422, 500] as const;
 
@@ -81,7 +83,7 @@ test.describe('Admin orders (mocked back office)', { tag: ['@mocked'] }, () => {
         const order = await adminOrders.edit(backOffice.order.invoice_number);
         await expect(order.status).toHaveValue(backOffice.order.status);
 
-        await order.updateStatus('SHIPPED');
+        await order.updateStatus(SHIPPED);
 
         // The page shows the raw HTTP error today; any alert would do, as long as the update is not confirmed.
         await expect(order.failure).toBeVisible();

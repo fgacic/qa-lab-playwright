@@ -6,6 +6,11 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
 /** The name an edit gives the brand. */
 const RENAMED = 'Qa Lab Renamed';
+/** The slug of the brand the search answers with. */
+const SEARCH_HIT_SLUG = 'qa-lab-search-hit';
+/** What the form says under an empty name and an empty slug. */
+const NAME_REQUIRED = 'Name is required';
+const SLUG_REQUIRED = 'Slug is required';
 const BRAND = /^\/brands\/[^/]+$/;
 
 test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
@@ -14,7 +19,7 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   });
 
   test('searching sends the term and lists the matches', async ({ adminBrands, apiMock }) => {
-    const match = { id: '01QALABBRANDHIT0000000000', name: SEARCH_HIT, slug: 'qa-lab-search-hit' };
+    const match = { id: '01QALABBRANDHIT0000000000', name: SEARCH_HIT, slug: SEARCH_HIT_SLUG };
     await apiMock.use(mock.respond('QUERY', '/brands/search', [match]));
     const sent = apiMock.waitForRequest('QUERY', '/brands/search');
 
@@ -41,8 +46,8 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
 
     await form.chrome.save();
 
-    await expect(form.name.error).toHaveText('Name is required');
-    await expect(form.slug.error).toHaveText('Slug is required');
+    await expect(form.name.error).toHaveText(NAME_REQUIRED);
+    await expect(form.slug.error).toHaveText(SLUG_REQUIRED);
   });
 
   test('editing loads the brand and saves the change', async ({ adminBrands, apiMock }) => {

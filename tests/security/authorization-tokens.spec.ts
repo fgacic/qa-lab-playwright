@@ -6,25 +6,9 @@ import { knownBug } from '@support/known-bug';
 import { base64Url, fakeJwt, fromBase64Url } from '@support/payloads';
 
 /**
- * Authorisation of the API itself, below the UI: who may call what. This file: Tokens: forgeries the API did not sign, and tokens that outlived their session. (The authorization-*.spec.ts files are one suite, split by concern.) A page only hides a button, the API is what enforces,
- * so these are plain HTTP calls with no token, with a customer's token and with the admin's. They write to our own
- * database and try to read other people's data, so they only ever run against the self-hosted Toolshop (@self-hosted).
- * No browser is involved, so the file is tagged @api and scheduled once (in Chromium) instead of once per browser.
- *
- * A call is refused by 401 (no valid token) or 403 (a token that may not), and a record that belongs to somebody else is
- * hidden by a 403 or a 404: all of those count as "refused". A success (2xx) is "accepted". Any other answer (a 404 on a
- * route that should exist, a 405, a 500) is neither: it says nothing about authorisation, so it fails the test without
- * naming a defect id. Every "refused" check that tolerates a 404 comes after a control in which the admin gets a 200 from the
- * same path, so a typo in a path cannot pass as a refusal.
- *
- * What each test makes, it removes again, pass or fail, in reverse order: the records the admin API can delete (brands,
- * categories, products, the customers a test registers, the favourites that would block deleting them). Two kinds are left
- * behind on purpose, all uniquely named and harmless on the throwaway database of the self-hosted target, which is rebuilt
- * for every CI run: guest orders (DELETE /invoices/{id} answers 405) and contact messages (DELETE /messages/{id} answers 405).
- * No seeded record is ever changed: a first draft of the catalogue pins edited a seeded product to prove a point, which
- * is why every write is aimed at a record the test made.
- *
- * The file runs on `apiOnlyTest`: no browser context is opened, since every check is a plain HTTP call.
+ * Authorisation of the API itself, below the UI: who may call what. This file: Tokens: forgeries the API did not sign, and tokens that outlived their session.
+ * (The authorization-*.spec.ts files are one suite, split by concern; the conventions they share, which statuses count as a refusal,
+ * what is cleaned up and what is left behind, are stated once in `@support/authz`.)
  */
 const test = mergeTests(apiOnlyTest, worldTest);
 
