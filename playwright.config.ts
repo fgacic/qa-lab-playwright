@@ -73,7 +73,7 @@ const config = defineConfig({
     baseURL: BASE_URL,
     testIdAttribute: 'data-test',
     // Kept for every failure (retries included), not for green tests: a trace of each passing test is most of the report's size.
-    trace: 'on',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     navigationTimeout: IS_SELF_HOSTED ? 30_000 : 90_000,
     actionTimeout: 15_000,
