@@ -1,4 +1,4 @@
-import { INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS, type PaymentMethod } from '@components/checkout/PaymentStep';
+import { CASH_ON_DELIVERY, INSTALMENT_PLANS, INSTALMENT_PROMPT, instalmentOptionText, PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES, PAYMENT_METHOD_PROMPT, PAYMENT_METHODS, type PaymentMethod } from '@components/checkout/PaymentStep';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/mocks';
 import { holdAnswers } from '@support/answer-gate';
@@ -30,9 +30,8 @@ const withRefusedWrites = (...mocks: Parameters<typeof withMocks>) => ({ ...with
 /** The mock of the payment check passing. */
 const paymentPasses = mock.respond('POST', '/payment/check', PAYMENT_PASSED);
 
-/** Two methods the specs choose by id, typed against the page object's list so a renamed method fails to compile. */
+/** A method the specs choose by id, typed against the page object's list so a renamed method fails to compile. */
 const BUY_NOW_PAY_LATER = 'buy-now-pay-later' satisfies PaymentMethod;
-const CASH_ON_DELIVERY = 'cash-on-delivery' satisfies PaymentMethod;
 
 /** The fields each payment method asks for, by the label the shopper reads. */
 const fields = {

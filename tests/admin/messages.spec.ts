@@ -7,6 +7,9 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 /** The statuses the tests move a message to. */
 const IN_PROGRESS = 'IN_PROGRESS' satisfies MessageStatus;
 const RESOLVED = 'RESOLVED' satisfies MessageStatus;
+/** The reply a test types where the API accepts it, and the one it types where the API refuses it. */
+const MOCKED_REPLY = 'A mocked admin reply.';
+const FAILING_REPLY = 'A reply that fails.';
 
 test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the inbox lists who wrote, about what, and the status', async ({ adminMessages }) => {
@@ -34,7 +37,6 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
   test.describe('after a reply', () => {
     // The page asks for the message again once the reply is saved. The second answer carries a reply
     // worded differently from what is typed, so a reply that shows can only have come from that refetch.
-    const typed = 'A mocked admin reply.';
     const stored = 'The reply as the API stored it.';
     test.use(withMocks(mock.sequence('GET', /^\/messages\/[^/]+$/, { status: 200, json: contactMessage }, { status: 200, json: { ...contactMessage, replies: [messageReply(stored)] } })));
 
@@ -44,9 +46,9 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
       await expect(message.text(stored)).toHaveCount(0);
       const sent = apiMock.waitForRequest('POST', `/messages/${contactMessage.id}/reply`);
 
-      await message.reply(typed);
+      await message.reply(MOCKED_REPLY);
 
-      expect((await sent).postDataJSON()).toEqual({ message: typed });
+      expect((await sent).postDataJSON()).toEqual({ message: MOCKED_REPLY });
       await expect(message.text(stored)).toBeVisible();
       await expect(message.replyBox).toHaveValue('');
     });
@@ -61,7 +63,7 @@ test.describe('Admin messages (mocked back office)', { tag: ['@mocked'] }, () =>
       await expect(message.text(contactMessage.message)).toBeVisible();
       const sent = apiMock.waitForRequest('POST', `/messages/${contactMessage.id}/reply`);
 
-      await message.reply('A reply that fails.');
+      await message.reply(FAILING_REPLY);
       await sent;
 
       await expect(message.failure, 'ADM-10: a failed reply tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });

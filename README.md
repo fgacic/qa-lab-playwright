@@ -4,9 +4,10 @@ End-to-end UI tests for the Toolshop demo shop (practicesoftwaretesting.com), ru
 
 **Live report: [fgacic.github.io/qa-lab-playwright](https://fgacic.github.io/qa-lab-playwright/)**, with Allure trends across runs. The Playwright HTML report is under [/playwright](https://fgacic.github.io/qa-lab-playwright/playwright/).
 
-The suite runs **1,476 tests in Chromium and 632 each in Firefox and WebKit** (the axe, keyboard, translation and API suites are Chromium-only), in 73 spec files (and 18 more for the framework). On top of that come:
+The suite runs **1,479 tests in Chromium and 636 each in Firefox and WebKit** (the axe, keyboard, translation and API suites are Chromium-only), in 76 spec files (and 18 more for the framework). On top of that come:
 
-- 19 performance tests, measured alone in a project of their own, with no retries: 16 measurements (five pages, two phone loads, the page weight of two pages, and the layout shifts) and the three controls that prove the collector sees a long task, a slow click and a known document;
+- 19 performance tests (in `budgets`, `page-weight`, `layout-shift` and `collector-controls`), measured alone in a project of their own, with no retries: 16 measurements (five pages, two phone loads, the page weight of two pages, and the layout shifts) and the three controls that prove the collector sees a long task, a slow click and a known document;
+- the sign-in burst (SEC-17: 30 failed logins from one address), alone in a `lockout` project of its own, with no retries, so no other test's sign-in can share its address while it runs;
 - an 18-test smoke set on a Pixel 7;
 - 30 visual baselines (31 tests: one more checks that no baseline on disk is orphaned);
 - 29 tests in the real-account and real-admin projects: 27 journeys and the 2 sign-ins they start from;
@@ -40,10 +41,10 @@ BUG-39, BUG-66 and BUG-67 were never assigned.
 | Security | `tests/security` | Script and HTML payloads through search, chat, contact, registration, admin forms and route segments (`/category/<payload>`, `/product/<payload>`) are shown as text, never run, watched by a sentinel that is itself tested (popups and other tabs included, with a control for every payload), which watches a 1 s window, so a pass says "nothing ran inside the window", not "nothing can ever run"; a product name carrying an attribute payload (a focus handler, a `srcdoc`, a `javascript:` URL, an entity-encoded quote) is shown as text in the picture's attribute too; live response headers by value, cookie flags, CORS with credentials and Permissions-Policy; **API authorisation** on the self-hosted shop, once, in Chromium (401 without a token, 403 for a customer on admin endpoints, another customer's invoice, account and profile refused, a customer's cart (answered to anybody with its id, SEC-15) and the ids of carts (unissued ids are 404, ids are random), a customer account that locks after 3 wrong passwords, an admin account that never locks and no rate limit on sign-in (SEC-16, SEC-17), the token of a deleted account on all five calls a customer makes (SEC-14), their favourites kept, catalogue writes and deletes refused, forged tokens refused (a changed signature, `alg: none`, a customer's token promoted to admin), a customer's lists holding only their own rows, a customer unable to make themselves an admin through the profile, every write read back as the admin, with controls that the admin may do the same) |
 | Performance | `tests/performance` | LCP, TBT (long tasks before the first input) and an INP proxy per key page against Core Web Vitals limits and against a baseline recorded per environment (`ci`, or `local` keyed by CPU model and cores), the median of 5 throttled cold loads, on the desktop and, for home and a product, on a Pixel 7 screen; the page weight of home and a product (bytes, requests, script bytes) against fixed ceilings (home 1.8 MB, 50 requests, 1.15 MB of scripts; product 1.7 MB, 44, 1.15 MB); a control proves the long-task observer counts a known 150 ms task, a second that the INP proxy reports a known slow click, and a check that the page received an input at all; CLS on a slow API (the cart held to a fixed 0.13 ceiling as well as its baseline; the PERF-01 pages also ratcheted by tests of their own wherever their shift is steady enough to record) |
 
-Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@axe`, `@visual`, `@i18n`, `@security`, `@perf`, `@mobile`, `@account`, `@admin`.
+Tags pick subsets: `@smoke`, `@negative`, `@mocked`, `@flow`, `@bug`, `@a11y`, `@axe`, `@visual`, `@i18n`, `@security`, `@perf`, `@lockout`, `@mobile`, `@account`, `@admin`.
 
 Tags also decide where a spec is scheduled, in `playwright.config.ts`, so nothing is skipped at run time:
-- `@axe`, `@i18n` and `@api` run on Chromium only, `@perf` in its own one-worker `perf` project, and `@framework` (the suite's own self-tests) in the `framework` project;
+- `@axe`, `@i18n` and `@api` run on Chromium only, `@perf` in its own one-worker `perf` project, `@lockout` (the SEC-17 sign-in burst) in its own one-worker `lockout` project, and `@framework` (the suite's own self-tests) in the `framework` project;
 - `@mobile` runs only on the phone project;
 - `@self-hosted` never runs on live, and `@live-only` runs only there.
 
@@ -89,8 +90,8 @@ npx playwright install --with-deps chromium firefox webkit
 npm run toolshop:up                  # build, start, seed and health-check the shop
 
 npm run lint                         # ESLint, 0 warnings
-npm test                             # everything against the self-hosted shop, in four passes (scripts/test-all.mjs, a separate report for each), as in CI:
-                                     # the browsers; the framework self-tests; perf alone, so nothing competes for the CPU it measures;
+npm test                             # everything against the self-hosted shop, in five passes (scripts/test-all.mjs, a separate report for each), as in CI:
+                                     # the browsers; the framework self-tests; perf alone, so nothing competes for the CPU it measures; lockout alone, so its sign-in burst shares an address with no other sign-in;
                                      # then the real sessions, because a Toolshop token lives 300 s and cannot be renewed
 npm run test:parallel                # the browsers pass only, with more workers; self-hosted shop only (TARGET=local)
 npx playwright test --project=webkit # one browser
@@ -123,12 +124,12 @@ npm run report                       # Allure 3 report from allure-results/
 
 1. **static.** `tsc --noEmit`, `npm run lint`, and the check that the visual image matches `@playwright/test`. Dependencies are installed with `npm ci --ignore-scripts` (no package in the lockfile has an install script).
 2. **e2e.** An 11-job matrix:
-   - Chromium in 3 shards, Firefox in 2, WebKit in 2, and the `perf` project alone;
+   - Chromium in 3 shards, Firefox in 2, WebKit in 2, and the `perf` project alone, and the `lockout` project alone;
    - the `sessions` job for the real account and admin projects, a `mobile` job for the Pixel 7 smoke set, and a `framework` job for the suite's own self-tests.
 
    Each job restores npm and the Playwright browsers from cache, then builds Toolshop with `docker/bake-action` and a GitHub Actions layer cache. The cache means the PHP extensions and the Angular build only rebuild when the pinned commit changes. The job then starts the stack (`scripts/toolshop.sh`), runs its shard, and uploads a blob report and its Allure results.
 3. **visual.** Same stack. The screenshots are compared inside `mcr.microsoft.com/playwright:v1.64.1-noble`, the image the baselines were recorded in, so fonts and rendering match.
-4. **verify-bugs.** Runs every `@bug` test, in every project that schedules it, as a plain test, in four shards (Chromium, Firefox, WebKit and the other projects, by `--project` and `--skip-project`), so no single job carries all 636 runs (24 minutes on a laptop; a shared runner is slower, and the single job it replaces had 20). Each must fail for its own reason: the first error names the pin's id, is an assertion, and comes from the spec file. A pin that passes means a defect was fixed; one that fails otherwise broke for another reason (a locator, a timeout, a precondition, a teardown). Either fails the job, and a pin that passes is rerun before it is called fixed. The perf pins run in a pass of their own, and the `@live-only` pins are listed as not verifiable on this target.
+4. **verify-bugs.** Runs every `@bug` test, in every project that schedules it, as a plain test, in four shards (Chromium, Firefox, WebKit and the other projects, by `--project` and `--skip-project`), so no single job carries all 636 runs (24 minutes on a laptop; a shared runner is slower, and the single job it replaces had 20). Each must fail for its own reason: the first error names the pin's id, is an assertion, and comes from the spec file. A pin that passes means a defect was fixed; one that fails otherwise broke for another reason (a locator, a timeout, a precondition, a teardown). Either fails the job, and a pin that passes is rerun before it is called fixed. The perf pins and then the lockout pin each run in a pass of their own, and the `@live-only` pins are listed as not verifiable on this target.
 5. **record-perf-baseline.** Manual only (workflow_dispatch input), not part of the gate. See Performance baselines above.
 6. **merge reports.** Downloads every blob and merges them into one HTML report. It then fetches the published Allure `history/history.jsonl`, generates the Allure 3 report (which appends this run to the history), and assembles the site.
 7. **gate.** The single required check for branch protection: red when static, e2e, visual or any verify-bugs shard is red, skipped or cancelled.
@@ -151,7 +152,7 @@ docker/, docker-compose.yml, .env.toolshop   the self-hosted Toolshop, pinned
 src/components/   Header, FilterPanel, ProductGrid, CartTable, checkout steps, admin table and search, FormField…
 src/pages/        thin pages composing components; actions return the next page
 src/support/      env (targets), @step, ApiMock, ToolshopApi, payloads, test data, seeded accounts (JSON), knownBug, the answer gate (`holdAnswers`), the console guard, i18n and its baseline, a11y baseline, the seeded catalogue's terms, the security-header matchers, the authorisation helpers (`authz`), the page-weight counter, a frozen clock, a failing asset (`failAsset`), admin payloads and `admin-deletable`
-fixtures/         api · mocks · pages · auth · admin (and `admin-cleanup`, the fixtures that delete what a back-office test made) · a11y · security · performance · matchers → index.ts (mergeTests, mergeExpects)
+fixtures/         api · mocks · pages · auth · admin (and `admin-cleanup`, the fixtures that delete what a back-office test made) · a11y · security (re-exporting `xss-payloads` and `xss-sentinel`, which hold the payloads and the sentinel) · performance · matchers → index.ts (mergeTests, mergeExpects)
 tests/            specs by area; tests/setup/* sign in and write storageState
 docs/COVERAGE.md  every control, its test, the bug list, and run results
 ```

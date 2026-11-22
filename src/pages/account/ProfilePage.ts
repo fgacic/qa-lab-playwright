@@ -3,6 +3,9 @@ import { FormField } from '@components/FormField';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 
+/** What the profile says when it is saved with a field wrong (the wording is the shop's). */
+export const PROFILE_FORM_INVALID = 'Please correct the highlighted fields before saving.';
+
 export class ProfilePage {
   readonly shell: AppShell;
   readonly title: Locator;

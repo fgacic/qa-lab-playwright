@@ -1,4 +1,5 @@
 import { test, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { CASH_ON_DELIVERY } from '@components/checkout/PaymentStep';
 import { SUITE_OWNED_NAME } from './catalog-terms';
 import { API_URL, IS_SELF_HOSTED } from './env';
 import { step } from './step';
@@ -289,7 +290,7 @@ export class ToolshopApi {
       this.request.post(`${API_URL}/invoices/guest`, {
         data: {
           billing_street: lookup.street, billing_house_number: address.houseNumber, billing_city: lookup.city, billing_state: lookup.state,
-          billing_country: address.country, billing_postal_code: address.postalCode, payment_method: 'cash-on-delivery', payment_details: {},
+          billing_country: address.country, billing_postal_code: address.postalCode, payment_method: CASH_ON_DELIVERY, payment_details: {},
           cart_id: cartId, guest_email: guest.email, guest_first_name: guest.firstName, guest_last_name: guest.lastName,
         },
       }),

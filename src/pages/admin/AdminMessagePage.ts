@@ -25,13 +25,19 @@ export class AdminMessagePage {
     this.backLink = page.getByRole('link', { name: 'Back' });
   }
 
+  /** The element that shows exactly `content`: exact, so a text that is part of another one on the page cannot trip strict mode. */
   text(content: string): Locator {
-    return this.page.getByText(content);
+    return this.page.getByText(content, { exact: true });
   }
 
   @step('Set the message status to {0}')
   async setStatus(status: MessageStatus): Promise<void> {
     await this.status.selectOption(status);
+  }
+
+  @step('Reload the message')
+  async reload(): Promise<void> {
+    await this.page.reload();
   }
 
   @step('Reply "{0}"')

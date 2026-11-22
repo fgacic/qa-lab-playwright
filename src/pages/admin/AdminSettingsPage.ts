@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
+import { storedToken } from '@support/session';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 import { ADMIN_SECTION_PATHS } from './admin-sections';
@@ -51,6 +52,11 @@ export class AdminSettingsPage {
   @step('Clear the stored settings')
   async clearStorage(): Promise<void> {
     await this.clearStorageButton.click();
+  }
+
+  /** Whether the admin's session token is still in the browser (Clear storage must not sign the admin out); callers read it through `expect.poll`. */
+  async isSignedIn(): Promise<boolean> {
+    return (await storedToken(this.page)) !== null;
   }
 
   /** The settings live in localStorage; reading them back is how a save is verified (callers read it through `expect.poll`). */

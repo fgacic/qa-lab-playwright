@@ -20,6 +20,17 @@ const DATE_FORMAT_ERROR = 'Please enter a valid date in YYYY-MM-DD format.';
 /** The two sentences the shop shows for a refused password: the length one (it says 6, see BUG-31) and the one for a missing rule. */
 const TOO_SHORT_ERROR = 'Password must be minimal 6 characters long.';
 const INVALID_PASSWORD_ERROR = 'Password can not include invalid characters.';
+/** The shop's messages for the phone field, and the sentence its 422 gives for a first name over 40 characters (profile.spec.ts types the same text). */
+const PHONE_REQUIRED = 'Phone is required.';
+const PHONE_NOT_NUMERIC = 'Only numbers are allowed.';
+const FIRST_NAME_TOO_LONG = 'The first name field must not be greater than 40 characters.';
+/** The four rules the page lists for a password, in the order it lists them. */
+const PASSWORD_RULES = [
+  `Be at least ${LISTED_MINIMUM} characters long`,
+  'Contain both uppercase and lowercase letters',
+  'Include at least one number',
+  'Have at least one special symbol (e.g., @, #, $, etc.)',
+];
 /** What the postcode-lookup failure test types by hand, and expects to find still there. */
 const TYPED = { street: 'Typed Street', city: 'Typed City' };
 
@@ -38,7 +49,7 @@ test.describe('Registration form', () => {
     Street: FIELD_ERRORS.required('Street'),
     City: FIELD_ERRORS.required('City'),
     State: FIELD_ERRORS.required('State'),
-    Phone: 'Phone is required.',
+    Phone: PHONE_REQUIRED,
     Email: FIELD_ERRORS.required('Email'),
     Password: `${FIELD_ERRORS.required('Password')} ${FIELD_ERRORS.passwordRules}`,
   } as const;
@@ -61,7 +72,7 @@ test.describe('Registration form', () => {
   const invalid = [
     { field: 'dateOfBirth', label: 'date of birth', value: '01/01/1990', message: DATE_FORMAT_ERROR },
     { field: 'dateOfBirth', label: 'date of birth', value: '2020-13-45', message: DATE_FORMAT_ERROR },
-    { field: 'phone', label: 'phone number', value: 'abc', message: 'Only numbers are allowed.' },
+    { field: 'phone', label: 'phone number', value: 'abc', message: PHONE_NOT_NUMERIC },
     { field: 'email', label: 'email', value: 'not-an-email', message: FIELD_ERRORS.emailInvalid },
     { field: 'password', label: 'password', value: 'a', message: FIELD_ERRORS.passwordRules },
   ] as const;
@@ -90,12 +101,7 @@ test.describe('Registration form', () => {
   });
 
   test('the form lists the password rules', async ({ registerPage }) => {
-    await expect(registerPage.passwordRules).toHaveText([
-      `Be at least ${LISTED_MINIMUM} characters long`,
-      'Contain both uppercase and lowercase letters',
-      'Include at least one number',
-      'Have at least one special symbol (e.g., @, #, $, etc.)',
-    ]);
+    await expect(registerPage.passwordRules).toHaveText(PASSWORD_RULES);
   });
 
   test('the eye button shows and hides the password', async ({ registerPage }) => {
@@ -260,12 +266,12 @@ test.describe('Registration form', () => {
   });
 
   test.describe('when the API rejects a field other than the email', { tag: ['@mocked', '@negative'] }, () => {
-    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.fail('POST', '/users/register', 422, { first_name: ['The first name field must not be greater than 40 characters.'] })));
+    test.use(withMocks(mock.fail('GET', '/postcode-lookup', 404), mock.fail('POST', '/users/register', 422, { first_name: [FIRST_NAME_TOO_LONG] })));
 
     test('the API reason is shown', async ({ registerPage, page }) => {
       await registerPage.register(fakeCustomer());
 
-      await expect(registerPage.error).toHaveText('The first name field must not be greater than 40 characters.');
+      await expect(registerPage.error).toHaveText(FIRST_NAME_TOO_LONG);
       await expect(page).toHaveURL('/auth/register');
     });
   });

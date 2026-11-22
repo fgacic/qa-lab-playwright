@@ -1,5 +1,11 @@
 import { expect, type Locator } from '@playwright/test';
 
+/** Each height as a share of the tallest one: what a chart of any scale shows, so bars and totals can be compared with each other. */
+export function sharesOfTallest(heights: readonly number[]): number[] {
+  const tallest = Math.max(...heights);
+  return heights.map((height) => height / tallest);
+}
+
 /** The smallest side, in pixels, of a bar of a sales chart: gridlines are thinner, lettering is shorter. */
 export const MIN_BAR = 20;
 

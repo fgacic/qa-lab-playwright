@@ -10,6 +10,9 @@ export const PAYMENT_METHODS = {
 } as const;
 export type PaymentMethod = keyof typeof PAYMENT_METHODS;
 
+/** The method the order specs pay with: it asks for nothing more, so no card or account number is typed. */
+export const CASH_ON_DELIVERY = 'cash-on-delivery' satisfies PaymentMethod;
+
 /** The first option of the method menu, which is no method but the prompt to choose one. */
 export const PAYMENT_METHOD_PROMPT = 'Choose your payment method';
 

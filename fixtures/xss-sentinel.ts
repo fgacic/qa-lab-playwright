@@ -1,0 +1,243 @@
+import { expect, type BrowserContext, type Page } from '@playwright/test';
+import type { AttributePayload } from './xss-payloads';
+
+/**
+ * How long a negative result is observed before it is believed. "Nothing ran" cannot be polled
+ * for like a visible element: it is true the instant the page is quiet, and also true a moment
+ * before a handler fires. So `expectNotExecuted` first waits for what a payload hangs on to
+ * settle (every image has loaded or failed, two timer turns have passed) and then watches
+ * for this long, racing the window against the sentinel's hit signal. It is only ever paid on a
+ * passing test; a hit ends the wait at once and fails it. The settle step covers every page of every watched context
+ * (the test's own, a visitor's, a popup, a second tab); the DOM snapshots (`injectedCount`) read the page the test drives.
+ * The window is 1 s because what a payload can still do after the page settled is a timer or a handler on a load
+ * that has already finished, which fire within a task or two; a handler that waits longer than the window is not covered. That is the
+ * blind spot of every "nothing ran" check here: a payload that fires its script after more than a second (a long timer, a slow
+ * network call it starts itself) is not seen, so a pass says "nothing ran inside the window", not "nothing can ever run".
+ */
+export const OBSERVATION_WINDOW_MS = 1_000;
+
+/** How many times `settle` starts over on a page that was navigated away from while it waited. */
+const SETTLE_ATTEMPTS = 3;
+/**
+ * What Chromium says when a page is navigated while a script runs in it (the only engine this runs in: the sentinel is Chromium-only).
+ * Matched by text, as Playwright gives no error class for it. A reworded message does not let a failure pass: the error is thrown on
+ * instead of retried, so an upgrade that changes it shows up as a failing check, never a green one.
+ */
+const CONTEXT_DESTROYED = /execution context was destroyed/i;
+
+declare global {
+  interface Window {
+    __qaLabXssHit: (kind: string) => void;
+  }
+}
+
+/**
+ * Records every sign that page script ran: a call to `__qaLabXssHit` (what the payloads do) and
+ * any alert, confirm or prompt (what a payload written by hand would reach for). Installed on
+ * the whole browser context before the first navigation, so it covers every frame, popup and tab
+ * the page opens, and kept on the Node side, so a hit survives the page navigating away.
+ * `executions()` reports what ran anywhere in the context; the DOM checks look at the page the
+ * test drives.
+ */
+export class XssSentinel {
+  private readonly hits: string[] = [];
+  /** Resolves on the first recorded sign that script ran, so a negative check can stop watching the moment one arrives. */
+  private signalHit!: () => void;
+  private readonly firstHit = new Promise<'hit'>((resolve) => (this.signalHit = () => resolve('hit')));
+
+  constructor(private readonly page: Page, private readonly watching: boolean) {}
+
+  private readonly watched = new Set<BrowserContext>();
+
+  /** Watches the page's own context. */
+  async install(): Promise<void> {
+    await this.watch(this.page.context());
+  }
+
+  /**
+   * Puts the sentinel on a browser context, once. Every context a test opens (somebody else's, say) must be watched
+   * too: a payload that runs for another visitor is a hit all the same, recorded here.
+   */
+  async watch(context: BrowserContext): Promise<void> {
+    if (this.watched.has(context)) return;
+    this.watched.add(context);
+    await context.exposeFunction('__qaLabXssHit', (kind: string) => this.record(String(kind)));
+    await context.addInitScript(() => {
+      for (const name of ['alert', 'confirm', 'prompt'] as const) {
+        window[name] = ((message?: unknown) => {
+          window.__qaLabXssHit(`${name}: ${String(message)}`);
+          return name === 'confirm' ? false : name === 'prompt' ? null : undefined;
+        }) as never;
+      }
+    });
+    // A dialog the wrapper missed (opened by a frame created before it, say) must not hang the page.
+    context.on('dialog', async (dialog) => {
+      this.record(`${dialog.type()}: ${dialog.message()}`);
+      await dialog.dismiss();
+    });
+  }
+
+  private record(kind: string): void {
+    this.hits.push(kind);
+    this.signalHit();
+  }
+
+  /** Puts the HTML into a frame's `srcdoc`, which the browser parses as a document: what makes `<script>` and `<svg onload>` run. */
+  async parseInFrame(html: string): Promise<void> {
+    await this.page.evaluate((markup) => {
+      const frame = document.createElement('iframe');
+      frame.srcdoc = markup;
+      document.body.append(frame);
+    }, html);
+  }
+
+  /** Inserts the HTML into the page's body the way a vulnerable sink (`innerHTML`) would. */
+  async insertHtml(html: string): Promise<void> {
+    await this.page.evaluate((markup) => document.body.insertAdjacentHTML('beforeend', markup), html);
+  }
+
+  /**
+   * Builds the markup a vulnerable sink would make from an attribute payload (`ATTRIBUTE_XSS_PAYLOADS`) and puts it in the page.
+   * An element with `autofocus` is focused here, explicitly: whether a browser autofocuses an element inserted after load differs by
+   * engine, and the control is about the sentinel seeing a handler run, not about the browser's focus rules. A link that needs following is clicked.
+   */
+  async insertInAttributeSink({ payload, sink, activate, neutralise }: AttributePayload, { safe = false }: { safe?: boolean } = {}): Promise<void> {
+    // The control: the value is neutralised the way a safe page would, so the same sink must leave nothing to run or to count.
+    const value = safe ? neutralise(payload) : payload;
+    await this.page.evaluate(
+      ([markup, follow]) => {
+        const holder = document.createElement('div');
+        holder.innerHTML = markup;
+        document.body.append(holder);
+        holder.querySelector<HTMLElement>('[autofocus]')?.focus();
+        if (follow) holder.querySelector<HTMLElement>('a')?.click();
+      },
+      [sink(value), activate === 'click'] as const,
+    );
+  }
+
+  /** Leaves one payload in an iframe's document and another in an open shadow root, the two places a plain query does not look. */
+  async insertInFrameAndShadowRoot(framed: string, shadowed: string): Promise<void> {
+    await this.page.evaluate(
+      ([inFrame, inShadow]) => {
+        const frame = document.createElement('iframe');
+        document.body.append(frame);
+        frame.contentDocument!.body.insertAdjacentHTML('beforeend', inFrame);
+        const host = document.createElement('div');
+        document.body.append(host);
+        host.attachShadow({ mode: 'open' }).innerHTML = inShadow;
+      },
+      [framed, shadowed],
+    );
+  }
+
+  /** Calls `window.alert` as page script would, on this page or on another one of the context (a popup, a tab). */
+  async raiseAlert(message: string, page: Page = this.page): Promise<void> {
+    await page.evaluate((text) => window.alert(text), message);
+  }
+
+  /** Has the page open a popup to `path` (as page script would) and returns it once it has loaded. */
+  async openPopup(path: string): Promise<Page> {
+    const opened = this.page.waitForEvent('popup');
+    await this.page.evaluate((target) => window.open(target, '_blank'), path);
+    const popup = await opened;
+    await popup.waitForLoadState('domcontentloaded');
+    return popup;
+  }
+
+  /** What ran so far, in order. */
+  executions(): readonly string[] {
+    return this.hits;
+  }
+
+  /**
+   * Waits until nothing a payload could still be waiting on is pending, then returns. A hit already recorded ends it
+   * at once, and a navigation that destroys the page mid-wait is not an error: the wait starts over on the new document
+   * (a few times at most), since a payload's handler may be what redirected it.
+   */
+  private async settleAll(): Promise<void> {
+    const pages = [...this.watched].flatMap((context) => context.pages());
+    await Promise.all((pages.includes(this.page) ? pages : [this.page, ...pages]).map((page) => this.settle(page)));
+  }
+
+  private async settle(page: Page): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      if (this.hits.length || page.isClosed()) return;
+      try {
+        await page.evaluate(async () => {
+          // Lazy images below the fold may never load, so they are not waited for. The listeners are added, not assigned:
+          // an `onerror` property is what an `<img onerror=...>` payload runs through, and replacing it would stop the very
+          // handler this check exists to wait for.
+          const pending = [...document.images].filter((image) => !image.complete && image.loading !== 'lazy');
+          await Promise.all(
+            pending.map((image) => new Promise((done) => (['load', 'error'] as const).forEach((type) => image.addEventListener(type, done, { once: true })))),
+          );
+          // Timers, not animation frames: a page in a background tab (parallel Firefox) never gets a frame.
+          await new Promise((tick) => setTimeout(tick, 0));
+          await new Promise((tick) => setTimeout(tick, 0));
+        });
+        return;
+      } catch (error) {
+        if (this.hits.length || page.isClosed()) return; // the page went away because something ran (or the test closed it): the expectation reports what
+        if (!CONTEXT_DESTROYED.test(String(error)) || attempt >= SETTLE_ATTEMPTS - 1) throw error;
+      }
+    }
+  }
+
+  /**
+   * The negative check: nothing a payload could do has been seen, after the observation window.
+   * A negative cannot be proven by looking once, so the window is watched for real: it is raced
+   * against the first hit, and a hit fails the check at once, naming what ran. This is the one that
+   * waits; `expectNoInjectedElements` is a snapshot, so call it first and this last.
+   */
+  async expectNotExecuted(): Promise<void> {
+    expect(this.watching, 'the sentinel is not installed: add test.use({ xssWatch: true }) to the spec').toBe(true);
+    await this.settleAll();
+    let timer: NodeJS.Timeout | undefined;
+    // The window is a plain timer on purpose: this is the one place where the point is to let time pass, and the hit
+    // signal ends it early. It never waits for a state to appear.
+    const elapsed = new Promise<'quiet'>((resolve) => (timer = setTimeout(() => resolve('quiet'), OBSERVATION_WINDOW_MS)));
+    try {
+      await Promise.race([elapsed, this.firstHit]);
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(this.hits, 'script ran on the page (the sentinel recorded these calls)').toEqual([]);
+  }
+
+  /**
+   * How many elements a payload would have created had it been parsed as HTML, in the document, in every same-origin
+   * iframe and in every open shadow root (a sink inside a component or a frame is a sink too). Read from the DOM
+   * rather than by locator: Playwright's text matching ignores the body of a <script>. It recognises an
+   * `<img>` payload by `src="x"`: see the caveat on XSS_PAYLOADS. A closed shadow root cannot be read from outside, and a
+   * cross-origin frame cannot be entered: the sentinel's hit record is what covers those.
+   */
+  async injectedCount(page: Page = this.page): Promise<number> {
+    return page.evaluate(() => {
+      // Elements, not matches, so an `<img src=x onerror=hook>` that two of the rules recognise is one payload.
+      const count = (root: Document | ShadowRoot): number => {
+        const found = new Set<Element>(root.querySelectorAll('img[src="x"]'));
+        for (const script of root.querySelectorAll('script')) if (script.textContent?.includes('__qaLabXssHit')) found.add(script);
+        let nested = 0;
+        for (const element of root.querySelectorAll('*')) {
+          // Any attribute that runs the hook: an event handler (`onload` of an svg, `onfocus` of an element a quote was broken out of),
+          // a `srcdoc` that carries it, or a `javascript:` URL.
+          const runsHook = (attribute: Attr) =>
+            attribute.value.includes('__qaLabXssHit') && (/^on/i.test(attribute.name) || attribute.name === 'srcdoc' || /^\s*javascript:/i.test(attribute.value));
+          const framesHook = element instanceof HTMLIFrameElement && element.srcdoc.includes('__qaLabXssHit');
+          if ([...element.attributes].some(runsHook)) found.add(element);
+          if (element.shadowRoot) nested += count(element.shadowRoot);
+          // A srcdoc frame is counted by its attribute: its document is the same payload, parsed, and would count twice.
+          if (element instanceof HTMLIFrameElement && element.contentDocument && !framesHook) nested += count(element.contentDocument);
+        }
+        return found.size + nested;
+      };
+      return count(document);
+    });
+  }
+
+  /** A snapshot: it passes the instant the DOM holds no parsed payload and says nothing about what is still to run. */
+  async expectNoInjectedElements(page: Page = this.page): Promise<void> {
+    await expect.poll(() => this.injectedCount(page), { message: 'a payload was parsed into elements' }).toBe(0);
+  }
+}

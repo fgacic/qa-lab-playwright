@@ -8,7 +8,15 @@ import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 /** The headings of the form that adds a product and of the one that edits it. */
 const ADD_PRODUCT = 'Add Product';
 const EDIT_PRODUCT = 'Edit Product';
-const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: 'B - Low environmental impact' };
+/** The CO₂ options of the form: the label it shows, and the letter it sends. */
+const CO2_RATINGS = {
+  A: 'A - Most environmentally friendly',
+  B: 'B - Low environmental impact',
+  E: 'E - High environmental impact',
+} as const;
+/** Prices the form should refuse (ADM-03): text, and a negative number. */
+const INVALID_PRICES = ['abc', '-5'] as const;
+const newProduct = { name: 'Qa Lab Mock Product', description: 'Created against a mocked back office.', stock: '5', price: '9.99', co2Rating: CO2_RATINGS.B };
 
 /** What an edit changes (the price) and fills in because the edit form does not load it (the stock: ADM-05). */
 const EDITED = { price: '19.99', stock: '7' };
@@ -52,7 +60,8 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   });
 
   // The CO₂ rating is sent as its letter, whatever the option's longer label says.
-  for (const [label, letter] of [['A - Most environmentally friendly', 'A'], ['E - High environmental impact', 'E']] as const) {
+  for (const letter of ['A', 'E'] as const) {
+    const label = CO2_RATINGS[letter];
     test(`the CO₂ rating "${letter}" is sent as its letter`, async ({ adminProducts, apiMock }) => {
       const form = await openAddForm(adminProducts);
       const created = apiMock.waitForRequest('POST', '/products');
@@ -74,7 +83,7 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     }
   });
 
-  for (const price of ['abc', '-5']) {
+  for (const price of INVALID_PRICES) {
     test(`a price of "${price}" is rejected by the form`, { tag: ['@negative', '@bug'] }, async ({ adminProducts, apiMock }) => {
       knownBug('ADM-03', 'the product form sends any price (text, negative) to the API without validating it.', { absence: true });
       const form = await openAddForm(adminProducts);
@@ -127,7 +136,8 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
   });
 
   test('an edited product can be saved without retyping its stock', { tag: ['@bug'] }, async ({ adminProducts, backOffice }) => {
-    knownBug('ADM-05', 'the edit form does not load the stock, so saving an existing product is blocked by "Quantity is required".');
+    // An absence pin: while the bug stands the save is never confirmed, so the confirmation's locator matches nothing (the bug itself).
+    knownBug('ADM-05', 'the edit form does not load the stock, so saving an existing product is blocked by "Quantity is required".', { absence: true });
     const form = await adminProducts.edit(backOffice.product.id);
     await expect(form.name).toHaveValue(backOffice.product.name);
     // Brand, category and image are empty too (ADM-09, pinned below); choose them so only the stock can block the save.
@@ -136,11 +146,10 @@ test.describe('Admin product form (mocked back office)', { tag: ['@mocked'] }, (
     await form.price.fill(EDITED.price);
     await form.chrome.save();
 
-    // Either way the save is answered on screen: by the confirmation, or by the validation message that stopped it.
-    // (.first(): with ADM-04 both may be on screen.)
-    await expect(form.chrome.alert(new RegExp(`${ADMIN_MESSAGES.productSaved}|${ADMIN_MESSAGES.quantityRequired}`)).first()).toBeVisible();
-    await expect(form.chrome.alert(ADMIN_MESSAGES.quantityRequired), 'ADM-05: no "Quantity is required" after saving without retyping the stock').toBeHidden({ timeout: BUG_TIMEOUT });
-    await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved), 'ADM-05: the product is saved without retyping its stock').toBeVisible();
+    // The confirmation is asserted first, so the "no validation message" check below runs only once the save has been answered
+    // (an absence read before the form has answered would pass for the wrong reason). While the bug stands, it is this one that fails.
+    await expect(form.chrome.alert(ADMIN_MESSAGES.productSaved), 'ADM-05: the product is saved without retyping its stock').toBeVisible({ timeout: BUG_TIMEOUT });
+    await expect(form.chrome.alert(ADMIN_MESSAGES.quantityRequired), 'ADM-05: no "Quantity is required" after saving without retyping the stock').toBeHidden();
   });
 
   test('editing preselects the product\'s brand and category', { tag: ['@bug'] }, async ({ adminProducts, backOffice }) => {

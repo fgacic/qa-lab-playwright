@@ -1,4 +1,5 @@
 import { expect, mock, test, withMocks } from '@fixtures';
+import { PROFILE_FORM_INVALID } from '@pages/account/ProfilePage';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { fakeUser, serverError } from '@support/payloads';
 
@@ -8,7 +9,6 @@ const [OLD_PASSWORD, NEW_PASSWORD, WRONG_PASSWORD] = ['Qa-lab-old-pass-1!', 'Qa-
 const SAVED_NOTICE = 'successfully updated';
 const PROFILE_SAVED = 'Your profile is successfully updated!';
 const PASSWORD_SAVED = 'Your password is successfully updated!';
-const FORM_INVALID = 'Please correct the highlighted fields before saving.';
 const SERVER_ERROR = serverError.message;
 const INVALID_PHONE = 'Please enter a valid phone number (digits, spaces and ( ) + - only).';
 /** What the page shows when the request never gets an answer. */
@@ -79,7 +79,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alert(FORM_INVALID)).toBeVisible();
+    await expect(profilePage.alert(PROFILE_FORM_INVALID)).toBeVisible();
     await apiMock.expectNoRequest('PUT', PROFILE_PATH);
   });
 
@@ -142,7 +142,7 @@ test.describe('Account profile (mocked session)', { tag: ['@mocked'] }, () => {
 
     await profilePage.update();
 
-    await expect(profilePage.alert(FORM_INVALID)).toBeVisible();
+    await expect(profilePage.alert(PROFILE_FORM_INVALID)).toBeVisible();
     await apiMock.expectNoRequest('PUT', PROFILE_PATH);
   });
 

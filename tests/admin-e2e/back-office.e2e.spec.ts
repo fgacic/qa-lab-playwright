@@ -211,7 +211,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await order.updateStatus('SHIPPED');
     await expect(order.feedback.filter({ hasText: ADMIN_MESSAGES.statusUpdated })).toBeVisible();
 
-    await order.page.reload();
+    await order.reload();
     await expect(order.status).toHaveValue('SHIPPED');
   });
 
@@ -234,7 +234,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await message.setStatus('IN_PROGRESS');
     expect((await saved).response.ok(), 'the status change was saved').toBe(true);
 
-    await message.page.reload();
+    await message.reload();
     await expect(message.status).toHaveValue('IN_PROGRESS');
 
     // The answer: the real API stores it and the page lists it under the message once it asks again.

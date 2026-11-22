@@ -94,6 +94,11 @@ test.describe('Security header matchers', { tag: ['@security', '@framework'] }, 
     expect.soft(restrictsFraming({ frameOptions: 'ALLOW-FROM https://partner.example', policy: '' }), 'a value browsers no longer honour').toBe(false);
     expect.soft(restrictsFraming({ frameOptions: '', policy: 'frame-ancestors *' }), 'a wildcard frame-ancestors').toBe(false);
     expect.soft(restrictsFraming({ frameOptions: '', policy: "frame-ancestors 'self' *" }), 'a wildcard among the sources').toBe(false);
+    expect.soft(restrictsFraming({ frameOptions: '', policy: 'frame-ancestors https:' }), 'a bare https: scheme lets every https site frame the page').toBe(false);
+    expect.soft(restrictsFraming({ frameOptions: '', policy: "frame-ancestors 'self' http: data:" }), 'bare http: and data: schemes among the sources').toBe(false);
+    expect.soft(restrictsFraming({ frameOptions: '', policy: 'frame-ancestors HTTPS:' }), 'a scheme in any case').toBe(false);
+    expect.soft(restrictsFraming({ frameOptions: 'DENY', policy: 'frame-ancestors https:' }), 'X-Frame-Options still counts on its own').toBe(true);
+    expect.soft(restrictsFraming({ frameOptions: '', policy: 'frame-ancestors https://partner.example' }), 'a scheme with a host is a named source').toBe(true);
     expect.soft(restrictsFraming({ frameOptions: '', policy: 'frame-ancestors' }), 'a directive with no source names nobody').toBe(false);
     expect.soft(restrictsFraming({ frameOptions: '', policy: "script-src 'none'" }), 'a CSP without frame-ancestors does not restrict framing').toBe(false);
     expect.soft(restrictsFraming({ frameOptions: "frame-ancestors 'none'", policy: '' }), 'a CSP value in the X-Frame-Options header is not an X-Frame-Options').toBe(false);

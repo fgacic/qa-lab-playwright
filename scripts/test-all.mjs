@@ -19,6 +19,7 @@ const PASSES = [
   { name: 'browsers', projects: ['chromium', 'firefox', 'webkit', 'mobile'] },
   { name: 'framework', projects: ['framework'] },
   { name: 'perf', projects: ['perf'] },
+  { name: 'lockout', projects: ['lockout'] }, // the sign-in burst (SEC-17): no other sign-in may share its address while it runs
   { name: 'sessions', projects: ['account', 'admin'] },
 ];
 const extra = process.argv.slice(2);

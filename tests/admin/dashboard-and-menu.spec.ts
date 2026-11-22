@@ -3,6 +3,7 @@ import { expect, mock, test, withMocks } from '@fixtures';
 import { ADMIN_SECTION_PATHS } from '@pages/admin/admin-sections';
 import { appearsWithin, withLoggedFailure } from '@pages/admin/alerts';
 import { ORDER_STATUS, paginated, reports } from '@support/admin-payloads';
+import { sharesOfTallest } from '@support/admin-chart';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 
 /**
@@ -28,10 +29,9 @@ test.describe('Admin dashboard and menu (mocked back office)', { tag: ['@mocked'
         const bars = await adminDashboard.drawnBars();
 
         expect(bars, 'one bar per year of the report').toHaveLength(report.length);
-        const tallest = Math.max(...bars);
-        const highest = Math.max(...report.map(({ total }) => total));
+        const expected = sharesOfTallest(report.map(({ total }) => total));
         // The axis starts a little above zero, so the heights are proportional to the totals only approximately (to within 0.05 of the tallest bar).
-        bars.forEach((height, index) => expect(height / tallest, `the bar of ${report[index].year} against the tallest`).toBeCloseTo(report[index].total / highest, 1));
+        sharesOfTallest(bars).forEach((share, index) => expect(share, `the bar of ${report[index].year} against the tallest`).toBeCloseTo(expected[index], 1));
       });
     });
   }

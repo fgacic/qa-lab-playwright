@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test as base } from '@playwright/test';
 import type { Locator } from '@playwright/test';
@@ -50,6 +51,13 @@ export interface A11yScan {
   results: AxeResults;
   violations: Result[];
   findings: Finding[];
+  /** True when `A11Y_RECORD` is set: the findings were written to that file and the test was failed, so a spec must not judge them against the baseline. */
+  recorded: boolean;
+}
+
+/** Per worker: whether the loud "this is a recording" warning was printed yet (once per worker, not once per scan). */
+interface A11yWorkerFixtures {
+  a11yRecordingState: { warned: boolean };
 }
 
 export interface A11yFixtures {
@@ -63,13 +71,23 @@ export interface A11yFixtures {
    * The scan expects the page to be at rest: the specs run with `reducedMotion: 'reduce'` set on the
    * context before any navigation, so no transition or fade is ever caught half way (read as low contrast).
    */
+  /**
+   * Opt-in for the spec that owns the baseline (pages.a11y): with `A11Y_RECORD=<file>` set, its scans append their findings to the file and
+   * assert nothing. Other specs that scan (the pins, reflow, keyboard) never record, whatever the environment says.
+   */
+  a11yRecords: boolean;
   a11y: { scan: (name: ScanName, options: { ready: [Locator, ...Locator[]]; only?: string[]; within?: string }) => Promise<A11yScan> };
 }
 
-export const test = base.extend<A11yFixtures>({
-  a11y: async ({ page }, use, testInfo) => {
+export const test = base.extend<A11yFixtures, A11yWorkerFixtures>({
+  a11yRecordingState: [async ({}, use) => use({ warned: false }), { scope: 'worker' }],
+  a11yRecords: [false, { option: true }],
+  a11y: async ({ page, a11yRecords, a11yRecordingState }, use, testInfo) => {
+    const a11yRecordFile = a11yRecords ? process.env.A11Y_RECORD || undefined : undefined;
     await use({
       scan: async (name, { ready, only, within }) => {
+        // A11Y_RECORD=<file> appends every finding as JSON lines: how the baseline is (re)built. On CI it would turn every violation into "known".
+        if (a11yRecordFile && process.env.CI) throw new Error('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
         for (const content of ready) await expect(content.first(), `${name}: the state to be rendered before it is scanned`).toBeVisible();
         // Set on the context by the spec, before the page loaded, so the page's own scripts saw it too; a spec that forgot it would scan mid-fade.
         await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), { message: `${name}: the spec must run with reducedMotion: 'reduce'` }).toBe(true);
@@ -99,7 +117,19 @@ export const test = base.extend<A11yFixtures>({
           }
         }
         const findings = [...byTarget.values()];
-        return { results, violations: results.violations, findings };
+        if (a11yRecordFile) {
+          // A recording asserts nothing about the shop, so it must never read as a pass: the test is failed (soft, so every state still records)
+          // and annotated, and the file is the output. Rebuilding the baseline is not a test run.
+          if (!a11yRecordingState.warned) {
+            a11yRecordingState.warned = true;
+            console.warn(`\n!! A11Y_RECORD is set: the accessibility scans RECORD to ${a11yRecordFile} and assert nothing. Do not read this run as a pass.\n`);
+          }
+          const note = `recording ${findings.length} finding(s) on "${name}" to ${a11yRecordFile}: NOTHING WAS ASSERTED, this is not a test run`;
+          testInfo.annotations.push({ type: 'A11Y_RECORD', description: note });
+          expect.soft(false, `A11Y_RECORD is set: ${note}`).toBe(true);
+          for (const finding of findings) fs.appendFileSync(a11yRecordFile, JSON.stringify({ page: name, ...finding }) + '\n');
+        }
+        return { results, violations: results.violations, findings, recorded: Boolean(a11yRecordFile) };
       },
     });
   },

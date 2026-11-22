@@ -1,4 +1,5 @@
 import { CART_MESSAGES as MESSAGES } from '@components/CartTable';
+import { CASH_ON_DELIVERY } from '@components/checkout/PaymentStep';
 import { searchedFor } from '@components/SearchBar';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { postcodeLookupMock } from '@fixtures/mocks';
@@ -148,7 +149,7 @@ test.describe('Purchase flows', { tag: ['@flow'] }, () => {
       // Held until both clicks have landed: answered at once, the page may replace Confirm before the second click (it does on WebKit) and one order is sent whatever the page does.
       const order = await holdAnswers(page, /\/invoices\/guest$/, acceptedGuestInvoice);
       await checkout.proceedToPayment(fakeGuest(), fakeAddress());
-      await checkout.payment.choose('cash-on-delivery');
+      await checkout.payment.choose(CASH_ON_DELIVERY);
       await checkout.payment.checkPayment();
       await expect(checkout.payment.confirmButton).toBeEnabled();
 

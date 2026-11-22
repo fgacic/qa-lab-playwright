@@ -1,12 +1,16 @@
 import { expect, mock, test } from '@fixtures';
+import type { SortOption } from '@components/FilterPanel';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { category, paginated, product } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-import { storedToken } from '@support/session';
 import { httpsUrl } from '@support/urls';
 
 /** A payment endpoint the settings accept: made up, on example.com. */
 const PAYMENT_ENDPOINT = httpsUrl('payments.example.com', '/check');
+/** Text that is not a URL (ADM-16). */
+const NOT_A_URL = 'not a url';
+/** The shop's first sort option, typed against its menu: a relabel stops compiling here. */
+const NAME_ASCENDING: SortOption = 'Name (A - Z)';
 
 test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () => {
   test('saving stores the settings in the browser and confirms', async ({ adminSettings }) => {
@@ -35,7 +39,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
 
   test('a payment endpoint that is not a URL is refused', { tag: ['@negative', '@bug'] }, async ({ adminSettings }) => {
     knownBug('ADM-16', 'the settings accept any text as the payment endpoint and report "Settings saved!".', { absence: true });
-    await adminSettings.paymentEndpoint.fill('not a url');
+    await adminSettings.paymentEndpoint.fill(NOT_A_URL);
 
     await adminSettings.save();
 
@@ -51,7 +55,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await adminSettings.clearStorage();
 
     await expect.poll(() => adminSettings.storedSetting('PAYMENT_ENDPOINT')).toBeNull();
-    await expect.poll(() => storedToken(adminSettings.page)).not.toBeNull();
+    await expect.poll(() => adminSettings.isSignedIn(), 'the admin is still signed in').toBe(true);
   });
 
   test('settings reach the shop: switching the CO₂ features off hides the CO₂ sorting in the shop', async ({ adminSettings, shop, apiMock }) => {
@@ -71,7 +75,7 @@ test.describe('Admin settings (mocked back office)', { tag: ['@mocked'] }, () =>
     await expect(adminSettings.feedback.filter({ hasText: ADMIN_MESSAGES.settingsSaved })).toBeVisible();
     await shop.home.open();
 
-    await expect(sort.getByRole('option', { name: 'Name (A - Z)' })).toBeAttached();
+    await expect(sort.getByRole('option', { name: NAME_ASCENDING })).toBeAttached();
     await expect(sort.getByRole('option', { name: /CO₂/ })).toHaveCount(0);
   });
 

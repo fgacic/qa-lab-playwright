@@ -49,4 +49,9 @@ export class AdminOrderPage {
     await this.status.selectOption(status);
     await this.updateStatusButton.click();
   }
+
+  @step('Reload the order')
+  async reload(): Promise<void> {
+    await this.page.reload();
+  }
 }

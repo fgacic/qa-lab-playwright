@@ -40,7 +40,7 @@ const cartOf = (items: { name: string; price: number; quantity: number; eco?: bo
   });
 
 /** The discount rules of the cart page, on a cart with fixed prices (the shop's own carts hold whatever the seed sells). */
-test.describe('Cart', () => {
+test.describe('Cart discounts', () => {
   test.describe('with only an eco-friendly product', { tag: ['@mocked'] }, () => {
     test.use(withMocks(cartOf([{ name: ECO_SAW, price: 80, quantity: 1, eco: true }])));
 
@@ -65,4 +65,57 @@ test.describe('Cart', () => {
       await expect(table.total).toShowAmount(68);
     });
   });
+
+  /**
+   * The cases around the two rules, as figures written out by hand: what stands alone, what stacks, and what is absent. A cart with no
+   * discount shows its total row only (the subtotal row appears only beside a discount), which is why `subtotal` is absent there. A cart that
+   * mixes an eco-friendly product with another kind gets no eco discount on this page; whether that is intended is unclear (docs/COVERAGE.md
+   * lists it as a gap), so no case here asserts the eco figure of a mixed cart, only that the combination discount the API did not send is absent.
+   */
+  type Row = 'subtotal' | 'discount' | 'ecoDiscount' | 'total';
+  const CASES: { title: string; items: Parameters<typeof cartOf>[0]; percentage: number | null; amounts: Partial<Record<Row, number>>; absent: Row[] }[] = [
+    {
+      title: 'a rental on its own gets no discount',
+      items: [{ name: RENTAL_DRILL, price: 50, quantity: 1, rental: true }],
+      percentage: null,
+      amounts: { total: 50 },
+      absent: ['subtotal', 'ecoDiscount', 'discount'],
+    },
+    {
+      title: 'an eco-friendly discount applies to every unit of a multi-quantity line',
+      items: [{ name: ECO_SAW, price: 80, quantity: 3, eco: true }],
+      percentage: null,
+      amounts: { subtotal: 240, ecoDiscount: -12, total: 228 },
+      absent: ['discount'],
+    },
+    {
+      title: 'an eco-friendly product and a rental get no combination discount unless the API sends one',
+      items: [{ name: ECO_SAW, price: 80, quantity: 1, eco: true }, { name: RENTAL_DRILL, price: 50, quantity: 1, rental: true }],
+      percentage: null,
+      amounts: {},
+      absent: ['discount'],
+    },
+    {
+      title: 'a cart with nothing eligible shows no discount row at all',
+      items: [{ name: HAMMER, price: 30, quantity: 1 }],
+      percentage: 0,
+      amounts: { total: 30 },
+      absent: ['subtotal', 'ecoDiscount', 'discount'],
+    },
+  ];
+
+  for (const { title, items, percentage, amounts, absent } of CASES) {
+    test.describe(title, { tag: ['@mocked'] }, () => {
+      test.use(withMocks(cartOf(items, percentage)));
+
+      test('the cart totals follow the rules', async ({ checkout }) => {
+        const { table } = checkout.cart;
+
+        // The cart must have drawn before an absent row means anything.
+        for (const { name } of items) await expect(table.row(name).root, `the line of ${name}`).toBeVisible();
+        for (const [row, amount] of (Object.entries(amounts) as [Row, number][])) await expect(table[row], `the ${row} row`).toShowAmount(amount);
+        for (const row of absent) await expect(table[row], `no ${row} row`).toHaveCount(0);
+      });
+    });
+  }
 });

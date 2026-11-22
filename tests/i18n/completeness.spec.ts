@@ -212,6 +212,10 @@ const leakedKeys = (texts: UiText[], visit: Visit, language: Language): string[]
 const strayEnglish = (texts: UiText[], english: Set<string>, visit: Visit, language: Language): string[] =>
   texts.filter((t) => english.has(sameKey(t)) && !isShared(t, visit, language) && !isKnown(t, visit, language)).map(describeUiText);
 
+// About 29 visits x 7 languages x 1 or 2 checks is a few hundred browser tests from one loop: kept as separate tests on purpose, so a report row names one
+// defect in one language. The cost was measured (Chromium, 2 workers, the machine busy with other suites, load about 16): the slowest, the checkout payment
+// step in French (two renderings, the five-step wizard driven once in English), took 7.7 s against the 45 s timeout. A test that nears it is the signal to trim
+// the arrangement (`driveInEnglish` already halves the checkout visits); nothing needs trimming while the slowest is a fraction of the limit.
 test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
   for (const visit of VISITS) {
     for (const language of LANGUAGES) {
@@ -241,6 +245,8 @@ test.describe('Translations are complete', { tag: ['@i18n'] }, () => {
 test.describe('The translation checks see a spoiled file', { tag: ['@i18n'] }, () => {
   const spoiled = { removed: 'header.menu.home', english: 'header.menu.contact', label: 'pages.comparison.add' };
 
+  // Coupled to the shape of the German file on purpose (header.menu, pages.comparison): a restructured file makes this control fail by name, which is the
+  // right outcome, since a control that silently stopped spoiling anything would let the two checks above go blind.
   test('a key missing from the German file is a leak, and a value left in English is stray English', async ({ arrangement, request }) => {
     const home = visitNamed('home');
     const english = (await (await request.get('/assets/i18n/en.json')).json()) as Record<string, unknown>;

@@ -12,7 +12,7 @@ const IN_PLAYWRIGHT_IMAGE = process.env.PLAYWRIGHT_DOCKER === '1';
 // Playwright greps "title + tags", so a tag must end at a word edge: a title that merely contains
 // "@perf" or "@admin-panel" must not be rescheduled. Tags are declared in `{ tag }`, never typed into a title.
 const tagged = (...names: string[]) => new RegExp(`@(?:${names.join('|')})(?![\\w-])`);
-const ownProject = tagged('account', 'admin', 'visual', 'perf', 'framework'); // these have projects of their own
+const ownProject = tagged('account', 'admin', 'visual', 'perf', 'framework', 'lockout'); // these have projects of their own
 const phoneOnly = tagged('mobile');
 // @api: no browser is involved (those specs use `apiOnlyTest`, which opens no context), so running it once per browser would only repeat the same requests.
 const chromiumOnly = tagged('axe', 'i18n', 'api');
@@ -104,6 +104,11 @@ const config = defineConfig({
           },
         ]
       : []),
+    // The sign-in burst (SEC-17, tagged @lockout) sends 30 failed logins from one address. If the shop ever limits sign-ins per client, those would
+    // answer 429 to every other worker's sign-in from the same address, so it is a project of its own that nothing depends on and no other project
+    // runs: one worker, and a pass of its own (`npm test`'s `lockout` pass, its own CI job, its own verify-bugs pass), as perf has. Retries stay off:
+    // a retried burst would send the guesses twice.
+    { name: 'lockout', use: { ...devices['Desktop Chrome'] }, grep: tagged('lockout'), grepInvert: notOnThisTarget, fullyParallel: false, workers: 1, retries: 0 },
     { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: [ownProject, phoneOnly, notOnThisTarget] },
     // axe, translations and the browserless @api specs are scoped to Chromium (reasons in their specs' headers).
     { name: 'firefox', use: { ...devices['Desktop Firefox'] }, grepInvert: [ownProject, phoneOnly, chromiumOnly, notOnThisTarget] },

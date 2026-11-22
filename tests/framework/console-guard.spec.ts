@@ -57,12 +57,15 @@ test.describe('the console guard', { tag: ['@framework'] }, () => {
     const me401 = failedResource(401, '/users/me');
     const chromium = logged('ERROR {message: Unauthorized}');
     const unknownProduct = { ...logged('ERROR yi'), route: '/product/0000', args: `ERROR {"status":404,"statusText":"Not Found","url":"${API('/products/0000')}","name":"HttpErrorResponse"}` };
-    const cancelled = logged('ERROR XMLHttpRequestProgressEvent');
+    const cancelled = { ...logged('ERROR XMLHttpRequestProgressEvent'), route: '/account/orders' };
     const answers = [answer('GET', '/users/me', 401), answer('GET', '/products/0000', 404)];
     const notCancelled = [me401, failedResource(401, '/users/me'), unauthorizedLog, chromium, unknownProduct];
     expect(unexpectedErrors([...notCancelled, cancelled], allowancesFor('webkit'), [], answers)).toEqual([]);
     expect(unexpectedErrors([...notCancelled, cancelled], allowancesFor('chromium'), [], answers), 'the cancelled XHR is allowed in WebKit only').toEqual([cancelled]);
     expect(unexpectedErrors([...notCancelled, cancelled], allowancesFor('firefox'), [], answers)).toEqual([cancelled]);
+    const elsewhere = { ...cancelled, route: '/category/hand-tools' };
+    expect(unexpectedErrors([elsewhere], allowancesFor('webkit'), [], answers), 'a cancelled XHR away from the sign-in flow is still unexpected, even in WebKit').toEqual([elsewhere]);
+    expect(unexpectedErrors([{ ...cancelled, route: undefined }], allowancesFor('webkit'), [], answers), 'no route read').toHaveLength(1);
   });
 
   test('an "Unauthorized" log needs a 401 of GET /users/me the browser received, in any engine, and as many logs as subscribers echo it', () => {

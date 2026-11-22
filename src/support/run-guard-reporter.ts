@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { FullConfig, FullResult, Reporter, Suite, TestCase } from '@playwright/test/reporter';
 import { BOT_CHALLENGE_REASON } from './bot-challenge';
 import { perfAloneViolation, skipRatioViolation } from './run-guard';
@@ -21,15 +23,17 @@ export default class RunGuardReporter implements Reporter {
     return false;
   }
 
-  onBegin(_config: FullConfig, suite: Suite): void {
+  onBegin(config: FullConfig, suite: Suite): void {
     this.suite = suite;
     if (process.argv.includes('--list')) return;
     const violation = perfAloneViolation(suite.allTests().map((t) => t.parent.project()?.name));
     if (violation) {
       // An error thrown from a reporter is only logged and the run goes on, so this one stops the process itself,
       // before the first test starts: nothing has been measured next to anything else. The process ends here,
-      // so the other reporters (HTML, blob, Allure) write nothing for this run: its output is partial by design.
+      // so the other reporters (HTML, blob, Allure) write nothing for this run. The refusal is therefore also written to the
+      // output directory, which a CI job uploads, so a wrongly scheduled run leaves a named artefact and not only a console line.
       console.error(`\n${violation}`);
+      recordRefusal(config.projects[0]?.outputDir, violation);
       process.exit(1);
     }
   }
@@ -54,4 +58,15 @@ export default class RunGuardReporter implements Reporter {
 /** A test of a setup project (`account-setup`, `admin-setup`): the sign-in other projects depend on, not a test of the shop. */
 function isSetup(test: TestCase): boolean {
   return test.parent.project()?.name.endsWith('-setup') ?? false;
+}
+
+/** Leaves the refusal in `<outputDir>/run-guard-refused.txt`; a failure to write it must not hide the refusal itself. */
+function recordRefusal(outputDir: string | undefined, violation: string): void {
+  if (!outputDir) return;
+  try {
+    mkdirSync(outputDir, { recursive: true });
+    writeFileSync(join(outputDir, 'run-guard-refused.txt'), `${violation}\n`);
+  } catch {
+    // The console line above already says why the run was refused.
+  }
 }

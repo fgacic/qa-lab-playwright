@@ -12,14 +12,16 @@
  * and engines differ in edge cases (Firefox does not report AX-01), so the baseline is kept for one.
  */
 
-import fs from 'node:fs';
 import type { Page } from '@playwright/test';
 import { PAYMENT_FIELDS } from '@components/checkout/PaymentStep';
 import { CART_MESSAGES } from '@components/CartTable';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { EXCLUDED, NO_SUCH_PRODUCT, type A11yScan } from '@fixtures/a11y';
 import { emptyCartMock, postcodeLookupMock } from '@fixtures/mocks';
+import type { AccountSection } from '@pages/account/AccountPage';
+import { PROFILE_FORM_INVALID } from '@pages/account/ProfilePage';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import type { ReportTitle } from '@pages/admin/AdminReports';
 import { brand, customer } from '@support/admin-payloads';
 import { holdTimer } from '@support/clock';
 import { UNKNOWN_ROUTE_LOG } from '@support/console-guard';
@@ -33,23 +35,17 @@ import { fakeAddress, fakeGuest } from '@support/test-data';
 /** How long the shop's alerts stay before they fade (its own 3 s timer): what `holdTimer` keeps from firing during a scan. */
 const ALERT_FADE_MS = 3_000;
 
+/** The four tiles the account page draws last, and the report and comparison row the scans wait for, named once (typed, so a rename is a compile error). */
+const ACCOUNT_TILES: readonly AccountSection[] = ['Favorites', 'Profile', 'Invoices', 'Messages'];
+const PRICE_ROW = 'Price';
+const COUNTRY_REPORT: ReportTitle = 'Customers By Country';
+
 /**
  * Fails the test on what a scan found that the baseline does not know, and on a known violation that changed
- * (spread, shrank, escalated or is gone from a page it was recorded on). `A11Y_RECORD` rebuilds the baseline instead.
+ * (spread, shrank, escalated or is gone from a page it was recorded on). Under `A11Y_RECORD` the `a11y` fixture records instead, and there is nothing to judge.
  */
 async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<void> {
-  // A11Y_RECORD=<file> appends every finding as JSON lines: how the baseline is (re)built.
-  if (process.env.A11Y_RECORD) {
-    // A recording is a deliberate local act: on CI it would turn every violation into "known".
-    if (process.env.CI) throw new Error('A11Y_RECORD is for rebuilding the baseline locally; it refuses to run when CI is set.');
-    // A recording asserts nothing about the shop, so it must never read as a pass: the test is failed (soft, so every state still records)
-    // and annotated, and the file is the output. Rebuilding the baseline is not a test run.
-    const note = `recording ${scan.findings.length} finding(s) on "${page}" to ${process.env.A11Y_RECORD}: NOTHING WAS ASSERTED, this is not a test run`;
-    test.info().annotations.push({ type: 'A11Y_RECORD', description: note });
-    expect.soft(false, `A11Y_RECORD is set: ${note}`).toBe(true);
-    for (const finding of scan.findings) fs.appendFileSync(process.env.A11Y_RECORD, JSON.stringify({ page, ...finding }) + '\n');
-    return;
-  }
+  if (scan.recorded) return;
   // The decision (new, spread, shrank, impact, fixed) is `diffFindings`, table-tested in tests/framework/a11y-ratchet.spec.ts.
   const { problems, fixed: fixedHere } = diffFindings(KNOWN_VIOLATIONS, scan.findings, page, { selfHosted: IS_SELF_HOSTED });
   // Soft, so a test that scans several states reports every state's violations, not just the first.
@@ -57,13 +53,8 @@ async function expectNoNewViolations(scan: A11yScan, page: ScanName): Promise<vo
   expect.soft(fixedHere, `accessibility violations fixed on ${page}`).toEqual([]);
 }
 
-// Once per worker, not once per scan and not from state kept in the module: a recording is not a run to be read as a pass.
-test.beforeAll(() => {
-  if (process.env.A11Y_RECORD) console.warn(`\n!! A11Y_RECORD is set: the accessibility scans RECORD to ${process.env.A11Y_RECORD} and assert nothing. Do not read this run as a pass.\n`);
-});
-
 // Before any navigation, on the context, so the page's own scripts and transitions see it from the first paint (the scan fixture checks it).
-test.use({ reducedMotion: 'reduce' });
+test.use({ reducedMotion: 'reduce', a11yRecords: true });
 
 test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   test('no new violations on the home page', async ({ homePage, a11y }) => {
@@ -123,7 +114,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
 
     test('no new violations on the comparison', async ({ comparisonPage, a11y }) => {
       await expect(comparisonPage.productColumns).toHaveCount(2);
-      await expectNoNewViolations(await a11y.scan('comparison', { ready: [comparisonPage.table, comparisonPage.row('Price')] }), 'comparison');
+      await expectNoNewViolations(await a11y.scan('comparison', { ready: [comparisonPage.table, comparisonPage.row(PRICE_ROW)] }), 'comparison');
     });
   });
 
@@ -217,7 +208,7 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
 
   test('no new violations on the compare bar', async ({ homePage, a11y }) => {
     await homePage.grid.nth(0).compareButton.click();
-    await expect(homePage.compareBar.selection).toHaveText('1 product(s) selected');
+    await expect(homePage.compareBar.selection).toHaveText(homePage.compareBar.selectedText(1));
     await expectNoNewViolations(await a11y.scan('compare bar', { ready: [homePage.compareBar.root, homePage.compareBar.selection, homePage.compareBar.clearAllButton] }), 'compare bar');
   });
 
@@ -227,9 +218,9 @@ test.describe('Accessibility scan: shop', { tag: ['@a11y', '@axe'] }, () => {
   });
 
   test('no new violations on the privacy policy', async ({ homePage, a11y, page }) => {
-    await homePage.shell.footer.openPrivacyPolicy();
+    const privacy = await homePage.shell.openPrivacyPolicy();
     await expect(page).toHaveURL('/privacy');
-    await expectNoNewViolations(await a11y.scan('privacy policy', { ready: [page.getByRole('heading', { level: 1 })] }), 'privacy policy');
+    await expectNoNewViolations(await a11y.scan('privacy policy', { ready: [privacy.heading] }), 'privacy policy');
   });
 
   test('no new violations on an unknown route', async ({ page, homePage, a11y, consoleGuard }) => {
@@ -310,7 +301,7 @@ test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '
 
   test('no new violations on the account page', async ({ accountPage, a11y }) => {
     // The signed-in header and the four tiles come with the user's data: the tiles are what the page draws last.
-    const tiles = (['Favorites', 'Profile', 'Invoices', 'Messages'] as const).map((section) => accountPage.sectionLink(section));
+    const tiles = ACCOUNT_TILES.map((section) => accountPage.sectionLink(section));
     await expectNoNewViolations(await a11y.scan('account', { ready: [accountPage.title, accountPage.header.userMenu, ...tiles] }), 'account');
   });
 
@@ -330,7 +321,7 @@ test.describe('Accessibility scan: account (mocked session)', { tag: ['@a11y', '
     await expect(profilePage.firstName.input).not.toHaveValue('');
     await profilePage.firstName.input.fill('');
     await profilePage.update();
-    const notice = profilePage.alert('Please correct the highlighted fields before saving.');
+    const notice = profilePage.alert(PROFILE_FORM_INVALID);
     await expectNoNewViolations(await a11y.scan('account profile with errors', { ready: [notice, profilePage.firstName.input] }), 'account profile with errors');
   });
 
@@ -396,7 +387,7 @@ test.describe('Accessibility scan: back office (mocked admin)', { tag: ['@a11y',
   });
 
   test('no new violations on statistics', async ({ adminStatistics, a11y }) => {
-    await expectNoNewViolations(await a11y.scan('admin statistics', { ready: [adminStatistics.heading, adminStatistics.report('Customers By Country').first()] }), 'admin statistics');
+    await expectNoNewViolations(await a11y.scan('admin statistics', { ready: [adminStatistics.heading, adminStatistics.report(COUNTRY_REPORT).first()] }), 'admin statistics');
   });
 
   test('no new violations on the average sales report', async ({ adminMonthlySales, a11y }) => {

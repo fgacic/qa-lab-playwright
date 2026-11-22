@@ -104,12 +104,11 @@ test.describe('Chat assistant', () => {
       await chat.orderProduct(product.name, QUANTITY);
 
       // The transcript keeps every line, so the dialogue's earlier steps are still there to read, in the order it asked them.
-      await expect(chat.reply(ASSISTANT.orderResults)).toBeVisible();
-      await expect(chat.reply(ASSISTANT.orderChosen)).toBeVisible();
-      await expect(chat.reply(ASSISTANT.orderQuantity)).toBeVisible();
-      await expect(chat.reply(ASSISTANT.orderSummary)).toBeVisible();
-      await expect(chat.reply(`$${(product.price * QUANTITY).toFixed(2)}`)).toBeVisible();
-      await expect(chat.reply(ASSISTANT.orderConfirm)).toBeVisible();
+      // One pattern over the whole transcript, its lines joined in that order: a reordered dialogue, or a missing line, no longer matches
+      // (a "newest reply with this text" check per line would pass for any order).
+      const inOrder = [ASSISTANT.orderResults, ASSISTANT.orderChosen, ASSISTANT.orderQuantity, ASSISTANT.orderSummary, `$${(product.price * QUANTITY).toFixed(2)}`, ASSISTANT.orderConfirm];
+      const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      await expect(chat.window).toHaveText(new RegExp(inOrder.map(escape).join('[\\s\\S]*')));
     });
 
     // The rest of the dialogue, which the test above stops short of: the answer to its last question puts the order in the cart

@@ -64,10 +64,9 @@ test.describe('Login, repeated wrong passwords (self-hosted only)', { tag: ['@se
       expect(answers.some((status) => LOCKED.includes(status)), `SEC-16: ${WRONG_PASSWORDS} wrong passwords for an admin account were answered ${answers.join(', ')}, none with a lock`).toBe(true);
     });
 
-    // Latent risk, accepted on purpose: if the shop is fixed to a limit per client, these 30 sign-ins would be answered 429 for every other worker's
-    // sign-in from the same address while they run. That day this pin turns green (a 429 appears), which is the signal to move this file into a
-    // project of its own, run alone as `perf` is (a change to playwright.config.ts, not to the test). Until then the shop has no limit, so nothing is shared.
-    test('guessing at addresses that have no account is limited per client', async ({ request }) => {
+    // The burst is tagged @lockout: playwright.config.ts runs it in a project of its own, before the browser projects and with nothing beside it,
+    // so a per-client limit (which would answer 429 to anyone else signing in from this address) can never reach another test.
+    test('guessing at addresses that have no account is limited per client', { tag: ['@lockout'] }, async ({ request }) => {
       knownBug('SEC-17', `${GUESSES_AT_UNKNOWN} sign-in attempts in a row from one client are all answered 401: there is no limit on the rate of guesses, only a lock on one existing customer account.`);
       const answers: number[] = [];
 

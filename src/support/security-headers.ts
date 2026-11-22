@@ -50,14 +50,18 @@ export function keepsReferrerPrivate(value: string): boolean {
   return SAFE_REFERRER_POLICIES.includes(value.split(',').pop()!.trim().toLowerCase());
 }
 
+/** A bare scheme as a CSP source: it matches every host on that scheme. */
+const SCHEME_SOURCE = /^(?:https?|data):$/i;
+
 /**
  * Whether the headers stop the page being framed by another site: `X-Frame-Options` of deny or sameorigin, or a CSP `frame-ancestors`
- * that names something other than `*`. Either is enough, and each is judged on its own value: a "deny" inside a CSP is not an X-Frame-Options.
+ * that names something other than `*` or a bare scheme. Either is enough, and each is judged on its own value: a "deny" inside a CSP is not an X-Frame-Options.
  */
 export function restrictsFraming(headers: { frameOptions: string; policy: string }): boolean {
   const byFrameOptions = /^(deny|sameorigin)$/i.test(headers.frameOptions.trim());
   const ancestors = directivesOf(headers.policy).get('frame-ancestors') ?? [];
-  const byPolicy = ancestors.length > 0 && !ancestors.includes('*');
+  // A scheme source (`https:`, `http:`, `data:`) lets every site on that scheme frame the page, like `*`: the same sources limitsScripts refuses.
+  const byPolicy = ancestors.length > 0 && !ancestors.some((source) => source === '*' || SCHEME_SOURCE.test(source));
   return byFrameOptions || byPolicy;
 }
 

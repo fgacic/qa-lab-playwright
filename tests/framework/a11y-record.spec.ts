@@ -1,5 +1,5 @@
 // A11Y_RECORD rebuilds the accessibility baseline from what a scan finds, asserting nothing: on CI that would turn every violation into
-// "known". tests/a11y/pages.a11y.spec.ts refuses it there, in the body of its scan, so nothing but a real run of that spec can reach the refusal: this runs one real scan (the home page's, by its title; the phone-width one matches too and refuses alike) under CI=1 and A11Y_RECORD set and reads the refusal.
+// "known". the `a11y` fixture (fixtures/a11y.ts) refuses it there, in the body of its `scan`, and only a spec that opts in (`a11yRecords`, as tests/a11y/pages.a11y.spec.ts does) records at all, so nothing but a real run of that spec can reach the refusal: this runs one real scan (the home page's, by its title; the phone-width one matches too and refuses alike) under CI=1 and A11Y_RECORD set and reads the refusal.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

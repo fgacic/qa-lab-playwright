@@ -1,17 +1,16 @@
 import { expect, mock, test } from '@fixtures';
-import { ADM_12, ADM_14, ADM_23, ADMIN_MESSAGES, withLoggedFailure } from '@pages/admin/alerts';
-import { REFUSED_STATUSES, SEARCH_HIT, SEARCH_TERM, brand } from '@support/admin-payloads';
-import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
+import { ADMIN_MESSAGES } from '@pages/admin/alerts';
+import { SEARCH_HIT, SEARCH_TERM, brand } from '@support/admin-payloads';
+import { SAVEABLE, saveRefusalPins } from './save-refusals';
 
 const NEW_BRAND = { name: 'Qa Lab New Brand', slug: 'qa-lab-new-brand' };
 /** The name an edit gives the brand. */
-const RENAMED = 'Qa Lab Renamed';
+const RENAMED = SAVEABLE.brand.edited.value;
 /** The slug of the brand the search answers with. */
 const SEARCH_HIT_SLUG = 'qa-lab-search-hit';
 /** What the form says under an empty name and an empty slug. */
 const NAME_REQUIRED = 'Name is required';
 const SLUG_REQUIRED = 'Slug is required';
-const BRAND = /^\/brands\/[^/]+$/;
 
 test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
   test('the list shows each brand with its slug', async ({ adminBrands }) => {
@@ -62,57 +61,5 @@ test.describe('Admin brands (mocked back office)', { tag: ['@mocked'] }, () => {
     await expect(form.chrome.alert(ADMIN_MESSAGES.brandSaved)).toBeVisible();
   });
 
-  test.describe('when the brand cannot be loaded', { tag: ['@negative', '@bug'] }, () => {
-    test.use(withLoggedFailure(mock.fail('GET', BRAND, 500)));
-
-    test('the admin is told the brand could not be loaded', async ({ adminBrands, apiMock }) => {
-      knownBug('ADM-14', ADM_14, { absence: true });
-      const failed = apiMock.waitForResponse('GET', BRAND);
-
-      const form = await adminBrands.edit(brand.name);
-      await failed;
-      await expect(form.chrome.heading).toBeVisible();
-
-      // Any alert, or plain error text, will do: the pin does not prescribe the form or the wording.
-      await expect(form.chrome.failure, 'ADM-14: a failed brand load tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
-    });
-  });
-
-  test.describe('when saving a brand is refused', { tag: ['@negative', '@bug'] }, () => {
-    // The real API answers a taken slug with 409 and the reason keyed by field (POST /brands, probed on the self-hosted shop;
-    // back-office.e2e.spec.ts asks the real backend the same).
-    test.use(withLoggedFailure(mock.fail('POST', '/brands', 409, { slug: ['A brand already exists with this slug.'] })));
-
-    test('the reason is shown', async ({ adminBrands, apiMock }) => {
-      knownBug('ADM-12', ADM_12, { absence: true });
-      const form = await adminBrands.add();
-      const sent = apiMock.waitForRequest('POST', '/brands');
-
-      await form.fillIn({ name: NEW_BRAND.name, slug: brand.slug });
-      await form.chrome.save();
-      await sent;
-
-      await expect(form.chrome.failure, 'ADM-12: the form says the brand was refused').toBeVisible({ timeout: BUG_TIMEOUT });
-    });
-  });
-
-  // The refusal of an edit: 409 when the slug is taken, 500 when the server fails.
-  for (const status of REFUSED_STATUSES) {
-    test.describe(`when saving an edit is refused (${status})`, { tag: ['@negative', '@bug'] }, () => {
-      test.use(withLoggedFailure(mock.fail('PUT', BRAND, status, { message: 'The brand could not be saved.' })));
-
-      test('the admin is told the edited brand was not saved', async ({ adminBrands, apiMock }) => {
-        knownBug('ADM-23', ADM_23, { absence: true });
-        const form = await adminBrands.edit(brand.name);
-        await expect(form.name.input).toHaveValue(brand.name);
-        const refused = apiMock.waitForResponse('PUT', `/brands/${brand.id}`);
-
-        await form.name.input.fill(RENAMED);
-        await form.chrome.save();
-        expect((await refused).response.status(), 'the mocked refusal was sent').toBe(status);
-
-        await expect(form.chrome.failure, 'ADM-23: a refused brand edit tells the admin').toBeVisible({ timeout: BUG_TIMEOUT });
-      });
-    });
-  }
+  saveRefusalPins(SAVEABLE.brand);
 });

@@ -2,7 +2,7 @@
 // code. The two are written by hand, so without this a pin can be added with no row, or a row left behind
 // after its pin was deleted. No browser: this reads files.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { sourcesUnder } from './source-files';
 import { KNOWN } from '@support/i18n-baseline';
@@ -15,7 +15,10 @@ const ROOT = join(__dirname, '..', '..');
 function pinnedInCode(): Set<string> {
   const declaration = new RegExp(`(?:knownBug\\(\\s*|\\bid:\\s*|\\bpin:\\s*)['"\`](${ID.source})['"\`]`, 'g');
   const ids = new Set<string>();
-  for (const file of [...sourcesUnder('tests'), ...sourcesUnder('src'), ...sourcesUnder('fixtures')]) {
+  // The framework specs hold sample ids (BUG-12, AX-01) as data for the code under test. They are not pins: left in, a sample would
+  // keep a real id "pinned" after its pin was deleted, and would demand a COVERAGE.md row for an id that is only a sample.
+  const notFrameworkSamples = (file: string) => !file.startsWith(join('tests', 'framework') + sep);
+  for (const file of [...sourcesUnder('tests').filter(notFrameworkSamples), ...sourcesUnder('src'), ...sourcesUnder('fixtures')]) {
     for (const [, id] of readFileSync(join(ROOT, file), 'utf8').matchAll(declaration)) ids.add(id);
   }
   return ids;

@@ -105,6 +105,8 @@ export const EXPECTED_ANSWER_LOGS: readonly Allowance[] = [
   {
     pattern: /^ERROR XMLHttpRequestProgressEvent$/,
     browser: 'webkit',
+    // Only where the sign-in flow ends (the login page while it still leaves, then the account area): a cancelled request anywhere else is a real one.
+    route: /^\/(?:account(?:\/|$)|auth\/login$)/,
     reason: 'a request still in flight when the SPA moves on (signing in, then landing on the account area) is cancelled, and the SPA logs the cancelled XHR (a bare progress event, no status) as an error; nothing of the shop fails, and the page the test judges is the one it landed on',
   },
 ];

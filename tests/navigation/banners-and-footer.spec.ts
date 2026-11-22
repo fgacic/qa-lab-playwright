@@ -19,6 +19,7 @@ test.describe('Banners and footer', () => {
   test('the notification bar links to the documentation in a new tab', async ({ homePage }) => {
     const link = homePage.shell.banners.documentationLink;
 
+    await expect(link).toBeVisible();
     await expect(link).toHaveAttribute('href', EXTERNAL_LINKS.documentation);
     await expect(link).toHaveAttribute('target', '_blank');
   });
@@ -26,21 +27,23 @@ test.describe('Banners and footer', () => {
   test('the course promo links to the courses with campaign tracking, without an opener', async ({ homePage }) => {
     const link = homePage.shell.banners.coursePromoLink;
 
+    await expect(link).toBeVisible();
     await expect(link).toHaveAttribute('href', EXTERNAL_LINKS.coursePromo);
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', /noopener/);
   });
 
   const footerLinks = [
-    { link: 'coursesLink', href: EXTERNAL_LINKS.courses },
-    { link: 'apiSpectorLink', href: EXTERNAL_LINKS.apiSpector },
-    { link: 'githubLink', href: EXTERNAL_LINKS.github },
+    { name: 'online courses', link: 'coursesLink', href: EXTERNAL_LINKS.courses },
+    { name: 'API Spector', link: 'apiSpectorLink', href: EXTERNAL_LINKS.apiSpector },
+    { name: 'GitHub repository', link: 'githubLink', href: EXTERNAL_LINKS.github },
   ] as const;
 
-  for (const { link, href } of footerLinks) {
-    test(`the footer links to ${href} in a new tab without an opener`, async ({ homePage }) => {
+  for (const { name, link, href } of footerLinks) {
+    test(`the footer links to ${name} in a new tab without an opener`, async ({ homePage }) => {
       const locator = homePage.shell.footer[link];
 
+      await expect(locator).toBeVisible();
       await expect(locator).toHaveAttribute('href', href);
       await expect(locator).toHaveAttribute('target', '_blank');
       await expect(locator).toHaveAttribute('rel', /noopener/);

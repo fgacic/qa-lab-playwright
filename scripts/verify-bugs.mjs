@@ -136,7 +136,7 @@ const liveOnly = new Set();
   for (const spec of pins(live)) if (!scheduled.has(specId(spec))) liveOnly.add(`${spec.file} › ${spec.title}`);
 }
 
-// 3. Run them: everything but perf together, perf alone.
+// 3. Run them: everything but perf and lockout together, perf alone, then lockout alone (its sign-in burst must not share an address with other sign-ins).
 /** The result of each scheduled pin in `report` that is verified in the project it ran in. */
 function collect(report) {
   const found = [];
@@ -159,8 +159,9 @@ function collect(report) {
 
 const results = [];
 const passes = [
-  { projects: projectsToRun.filter((p) => p !== 'perf'), out: 'run.json' },
+  { projects: projectsToRun.filter((p) => p !== 'perf' && p !== 'lockout'), out: 'run.json' },
   { projects: projectsToRun.filter((p) => p === 'perf'), out: 'perf.json' },
+  { projects: projectsToRun.filter((p) => p === 'lockout'), out: 'lockout.json' },
 ].filter((pass) => pass.projects.length);
 for (const { projects, out } of passes) {
   const report = playwright([...projects.map((p) => `--project=${p}`), '--grep', '@bug', '--retries=0'], out, { VERIFY_BUGS: '1' });

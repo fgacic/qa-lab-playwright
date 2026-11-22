@@ -75,6 +75,8 @@ jobs:
           - { id: webkit-2, browsers: webkit, projects: --project=webkit, shard: 2/2 }
           # Performance budgets: one worker on a runner of their own, so no other test competes for the CPU.
           - { id: perf, browsers: chromium, projects: --project=perf, shard: 1/1 }
+          # The sign-in burst (SEC-17): 30 failed logins from one address, alone, so a per-client limit could never answer another test's sign-in with 429.
+          - { id: lockout, browsers: chromium, projects: --project=lockout, shard: 1/1 }
           # Real sign-ins against our own Toolshop, in a pass of their own: the saved session lives 300 s, so
           # nothing else may run between the setup and the specs that use it (fixtures/auth.ts, `storage-state`).
           - { id: sessions, browsers: chromium, projects: --project=account --project=admin, shard: 1/1 }
@@ -159,7 +161,7 @@ jobs:
       fail-fast: false
       matrix:
         # Every pin is verified in every project that schedules it, which is 636 runs (24 minutes on a laptop, more on a runner): one job for
-        # the lot would not fit its former 20 minutes. One shard per engine, and one for the other projects (mobile, account, admin, perf: all Chromium), so each fits.
+        # the lot would not fit its former 20 minutes. One shard per engine, and one for the other projects (mobile, account, admin, perf, lockout: all Chromium), so each fits.
         # `args` is the project filter of scripts/verify-bugs.mjs. The browser cache is written by the e2e jobs, which share these keys.
         include:
           - { id: chromium, browsers: chromium, args: --project=chromium }
@@ -175,7 +177,7 @@ jobs:
           browsers: ${{ matrix.browsers }}
       - uses: ./.github/actions/toolshop
       # Every knownBug() spec runs as a plain test in each engine that schedules it and must fail as pinned; one that passes is a fix to
-      # record. The script runs the perf pins in a pass of their own (the perf project is measured alone).
+      # record. The script runs the perf pins, and then the lockout pin, each in a pass of its own (both are measured alone).
       - run: npm run test:verify-bugs -- ${{ matrix.args }}
       - name: Upload the result
         if: ${{ !cancelled() }}

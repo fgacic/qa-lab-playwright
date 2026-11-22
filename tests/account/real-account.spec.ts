@@ -1,5 +1,7 @@
 import { expect, test } from '@fixtures';
 import { ACCOUNT_TITLE } from '@pages/account/AccountPage';
+import { FavoritesPage } from '@pages/account/FavoritesPage';
+import { installToken } from '@support/session';
 import { fakeAddress, fakeCustomer } from '@support/test-data';
 
 /**
@@ -47,13 +49,15 @@ test.describe('Real account', { tag: ['@account'] }, () => {
     });
   });
 
-  test.describe("this worker's own customer", () => {
-    // Each worker registers its own customer, so tests that change account data never collide.
-    test.use({ session: 'worker-account' });
-
-    test('a saved favourite is listed and can be removed', async ({ api, workerAccount, catalog, favoritesPage }) => {
+  test.describe('a throwaway customer', () => {
+    // Favourites are what the next test on the worker's shared account would see, so this one takes its own customer (`newAccount`, fixtures/auth.ts):
+    // a failure between adding and removing leaves nothing behind for anybody else. It signs the browser in by hand, because the `signedIn`
+    // fixture behind `favoritesPage` only knows the mocked, saved and worker sessions.
+    test('a saved favourite is listed and can be removed', async ({ api, newAccount, catalog, page }) => {
       const product = await catalog.inStock();
-      const { token } = await workerAccount.get();
+      const { token } = await newAccount();
+      await installToken(page, token);
+      const favoritesPage = new FavoritesPage(page);
       await api.addFavorite(token, product.id);
       await favoritesPage.open();
 
@@ -64,6 +68,11 @@ test.describe('Real account', { tag: ['@account'] }, () => {
       // Read back from the API: the UI could hide a favourite the account still holds.
       await expect.poll(() => api.favoriteProductIds(token), { message: 'the favourite is gone from the account' }).not.toContain(product.id);
     });
+  });
+
+  test.describe("this worker's own customer", () => {
+    // Each worker registers one customer that its tests share: they only read it or add what they find again by a unique key (an invoice number).
+    test.use({ session: 'worker-account' });
 
     test('a signed-in purchase skips the guest step and is saved to the account', { tag: ['@flow'] }, async ({ api, workerAccount, checkout }) => {
       // The `checkout` fixture seeded the cart with its default: one in-stock product (`cartItems`, fixtures/pages.ts).
