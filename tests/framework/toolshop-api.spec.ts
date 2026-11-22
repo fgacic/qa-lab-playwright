@@ -27,6 +27,11 @@ test.describe('the Toolshop API helpers', { tag: ['@framework', '@self-hosted'] 
     }
   };
 
+  /** Removes a customer the lookup found; when it found nothing there is nothing to remove, and the failing assertion is the one reported. */
+  const removeUser = async (api: ToolshopApi, token: string, user?: { id: string }) => {
+    if (user) await api.deleteUser(token, user.id).catch(() => undefined);
+  };
+
   test('a created product is found by its name, and a customer by its exact email', async ({ api, adminToken }) => {
     const token = await adminToken();
     const customer = fakeCustomer();
@@ -39,7 +44,7 @@ test.describe('the Toolshop API helpers', { tag: ['@framework', '@self-hosted'] 
       expect(found?.email.toLowerCase(), 'the customer is found by its exact email').toBe(customer.email.toLowerCase());
       expect(await api.findUserByEmail(token, `nobody-${uniqueSuffix()}@example.test`), 'an email nobody has is no user').toBeUndefined();
     } finally {
-      await api.deleteUser(token, found!.id).catch(() => undefined);
+      await removeUser(api, token, found);
     }
   });
 
@@ -49,12 +54,15 @@ test.describe('the Toolshop API helpers', { tag: ['@framework', '@self-hosted'] 
     await api.registerCustomer(customer);
     const userId = (await api.findUserByEmail(token, customer.email))!.id;
     let made!: { brand: { id: string }; product: { id: string; name: string } };
-    await withProduct(api, token, async (arranged) => {
-      made = arranged;
-      await api.deleteProduct(token, made.product.id);
-      await api.deleteBrand(token, made.brand.id);
-    });
-    await api.deleteUser(token, userId);
+    try {
+      await withProduct(api, token, async (arranged) => {
+        made = arranged;
+        await api.deleteProduct(token, made.product.id);
+        await api.deleteBrand(token, made.brand.id);
+      });
+    } finally {
+      await api.deleteUser(token, userId).catch(() => undefined);
+    }
     expect(await api.findUserByEmail(token, customer.email), 'the customer is gone').toBeUndefined();
     expect(await api.findProductByName(token, made.product.name), 'the product is gone').toBeUndefined();
     expect((await api.listBrands()).some(({ id }) => id === made.brand.id), 'the brand is gone').toBe(false);

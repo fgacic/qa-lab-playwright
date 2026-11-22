@@ -63,6 +63,15 @@ test.describe('verify-bugs orchestration', { tag: ['@framework'] }, () => {
     expect(outcome.summary.reproduces).toHaveLength(3);
   });
 
+  test('a lockout pin is verified in a pass of its own, after perf, so its sign-in burst shares no address with the others', () => {
+    const outcome = verify([pin('first'), pin('measured', { line: 30, projects: ['perf'] }), pin('burst', { line: 40, projects: ['lockout'] })]);
+    expect(outcome.status).toBe(0);
+    expect(outcome.stdout).toContain('3 known-bug specs scheduled, 3 ran: 3 still reproduce, 0 fixed, 0 fail for another reason, 0 could not be verified.');
+    const runs = outcome.calls.filter((call) => !call.listing && !call.rerun);
+    expect(runs.map((call) => call.projects), 'the main pass, then perf alone, then lockout alone').toEqual([['chromium'], ['perf'], ['lockout']]);
+    expect(outcome.summary.reproduces.filter((label) => label.includes('burst')), 'the lockout pin is verified in its own pass').toHaveLength(1);
+  });
+
   test('every Playwright call lifts the config\'s CI failure cap, so more than 30 reproducing pins still all run', () => {
     const outcome = verify([pin('first'), pin('second', { line: 20 })]);
     expect(outcome.calls.length).toBeGreaterThan(2);

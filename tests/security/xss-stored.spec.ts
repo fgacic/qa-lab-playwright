@@ -38,12 +38,6 @@ const NAME_STEM = 'Qa Lab';
 const SHORT_LAST_NAME_PAYLOAD = 'Qa<img src=x>';
 
 /**
- * A key no other test, worker, retry or earlier run shares, short enough for the API's field limits (a first name is capped
- * at 40 characters, and the payload already uses most of them). A random one, because the records these tests leave behind
- * (messages cannot be deleted) must never collide, whatever starts when.
- */
-
-/**
  * What a test saved in the shared database is removed again by the admin API, whether an assertion failed or not, and even
  * when the save went out but its answer never arrived: a brand is found by the name the test declared before saving, a
  * product by the id the test arranged, a customer by the e-mail the test registered with. The removals are entries of the

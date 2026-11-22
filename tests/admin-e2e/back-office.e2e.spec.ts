@@ -29,7 +29,6 @@ import { contactSubjectSlug } from '@support/payloads';
  */
 test.use({ adminSession: 'storage-state' });
 
-/** Unique per test and per repeat, so parallel workers and retries never find each other's data. */
 /** A yes or no as a named outcome, so a failure reads "expected 'bars', received 'no bars'" instead of "true, false". */
 const barsOrNot = (yes: boolean) => (yes ? 'bars' : 'no bars');
 /** The stock an edit fills in, because the edit form does not load it (ADM-05). */

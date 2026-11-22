@@ -152,8 +152,6 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
 
   const statusOf = async (request: APIRequestContext, path: string, token: string) => ((await (await call(request, 'GET', path, { token })).json()) as { status: string }).status;
 
-  /** A short key no other test, worker, retry or run shares: a contact message's name is capped, and a UUID is longer than the cap. */
-  
   test('the admin can change the status of an order and of a message, with the bodies the attempts below send', async ({ request, adminToken, catalog, world }) => {
     const admin = await adminToken();
     const order = await guestOrder(world, catalog);

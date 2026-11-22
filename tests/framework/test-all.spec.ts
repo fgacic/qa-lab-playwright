@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const ROOT = join(__dirname, '..', '..');
-const ALL_PASSES_MS = 150_000; // four passes, each of which lists and selects nothing
+const ALL_PASSES_MS = 180_000; // five passes, each of which lists and selects nothing
 
 test.describe('the test-all runner', { tag: ['@framework', '@self-hosted'] }, () => {
   test('a pass in which the arguments select no test is reported as skipped, and the run exits 0', () => {
@@ -19,7 +19,7 @@ test.describe('the test-all runner', { tag: ['@framework', '@self-hosted'] }, ()
       expect(run.error, 'test-all started').toBeUndefined();
       expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
       const summary = run.stdout.slice(run.stdout.lastIndexOf('\n\n'));
-      for (const pass of ['browsers', 'framework', 'perf', 'sessions']) expect(summary, `the summary lists the ${pass} pass as skipped`).toMatch(new RegExp(`skipped  ${pass}`));
+      for (const pass of ['browsers', 'framework', 'perf', 'lockout', 'sessions']) expect(summary, `the summary lists the ${pass} pass as skipped`).toMatch(new RegExp(`skipped  ${pass}`));
     } finally {
       rmSync(output, { recursive: true, force: true });
     }

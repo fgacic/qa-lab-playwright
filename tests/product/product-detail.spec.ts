@@ -1,3 +1,4 @@
+import { CART_MESSAGES } from '@components/CartTable';
 import { expect, mock, test, withMocks } from '@fixtures';
 import { allowLoggedFailure } from '@pages/admin/alerts';
 import { ProductPage } from '@pages/ProductPage';
@@ -10,8 +11,8 @@ import { escapeRegExp } from '@support/regexp';
 
 /** What the shop tells the shopper, word for word. */
 const MESSAGES = {
-  added: 'Product added to shopping cart.',
-  atMost99: 'You can order at most 99 of this product.',
+  added: CART_MESSAGES.added,
+  atMost99: CART_MESSAGES.atMost99,
   favouriteAdded: 'Product added to your favorites list.',
   favouriteDuplicate: 'Product already in your favorites list.',
   favouriteSignedOut: 'Unauthorized, can not add product to your favorite list.',

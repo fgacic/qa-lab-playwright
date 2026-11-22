@@ -46,6 +46,7 @@ export class ProfilePage {
     this.confirmNewPassword = page.getByRole('textbox', { name: 'Confirm New Password' });
     this.changePasswordButton = page.getByRole('button', { name: 'Change Password' });
     this.alerts = page.getByRole('alert');
+    // CSS: the TOTP QR code is a custom <qrcode> element with no role, label or test id.
     this.qrCode = page.locator('qrcode');
   }
 

@@ -1,7 +1,9 @@
 import { CART_MESSAGES } from '@components/CartTable';
+import { searchedFor } from '@components/SearchBar';
 import { devices } from '@playwright/test';
 import { expect, test } from '@fixtures';
 import type { Measurement, Vitals } from '@fixtures/performance';
+import { HAMMER, PLIERS } from '@support/catalog-terms';
 import { BUDGET, ceilingOf } from './limits';
 
 /**
@@ -48,8 +50,8 @@ import { BUDGET, ceilingOf } from './limits';
 test.use({ measureVitals: true });
 
 /** What the scenarios filter by and search for, named once. */
-const FILTER_CATEGORY = 'Pliers';
-const SEARCH_TERM = 'hammer';
+const FILTER_CATEGORY = PLIERS.category;
+const SEARCH_TERM = HAMMER.term;
 
 const RESPONSIVE_METRICS: (keyof Vitals)[] = ['lcp', 'tbt', 'inp'];
 
@@ -115,7 +117,7 @@ test.describe('Performance budgets (self-hosted)', { tag: ['@perf', '@self-hoste
       await expect(homePage.grid.cards.first()).toBeVisible();
       await homePage.search.searchFor(SEARCH_TERM);
       // The caption appears only once the results have replaced the overview.
-      await expect(homePage.search.caption).toHaveText(`Searched for: ${SEARCH_TERM}`);
+      await expect(homePage.search.caption).toHaveText(searchedFor(SEARCH_TERM));
     };
 
     const measurement = await vitals.measure('search', visit, { inputs: SEARCH_INPUTS });
