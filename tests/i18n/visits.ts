@@ -1,3 +1,4 @@
+import { ChatWidget } from '@components/ChatWidget';
 import { CheckoutWizard } from '@components/checkout/CheckoutWizard';
 import { PAYMENT_FIELDS as FIELD, PAYMENT_MESSAGES } from '@components/checkout/PaymentStep';
 import type { Language } from '@components/LanguageSwitcher';
@@ -5,6 +6,7 @@ import { expect, mock } from '@fixtures';
 import { NO_SUCH_PRODUCT } from '@fixtures/a11y';
 import type { Catalog } from '@fixtures/api';
 import { postcodeLookupMock } from '@fixtures/mocks';
+import { LoginPage } from '@pages/LoginPage';
 import type { Locator, Page } from '@playwright/test';
 import type { MockRoute } from '@support/api-mock';
 import { acceptedGuestInvoice, fakeFavorite, fakeInvoice, fakeMessage, fakeUser, listOf, UNKNOWN_EMAIL, UNKNOWN_PASSWORD } from '@support/payloads';
@@ -69,6 +71,41 @@ export interface Visit {
   driveInEnglish?: boolean;
 }
 
+/**
+ * The test ids the visits find controls by, in one place. Role names and labels change with the language, so a visit cannot use them; a test id does not.
+ * (The controls a page object already owns - the checkout steps' buttons, the chat window, the login error - come from the page object.)
+ */
+const ID = {
+  addToCart: 'add-to-cart',
+  brand: /^brand-/,
+  category: /^category-/,
+  chatToggle: 'chat-toggle',
+  comparisonEmpty: 'comparison-empty',
+  comparisonTable: 'comparison-table',
+  contactSubmit: 'contact-submit',
+  email: 'email',
+  emailError: 'email-error',
+  favorite: /^favorite-/,
+  firstNameError: 'first-name-error',
+  forgotPasswordSubmit: 'forgot-password-submit',
+  langEn: 'lang-en',
+  languageSelect: 'language-select',
+  loginSubmit: 'login-submit',
+  navFavorites: 'nav-favorites',
+  noResults: 'no-results',
+  pageTitle: 'page-title',
+  paginationNext: 'pagination-next',
+  password: 'password',
+  productCard: /^product-[0-9A-Z]{26}$/,
+  productName: 'product-name',
+  productSpecs: 'product-specs',
+  registerSubmit: 'register-submit',
+  removeProduct: 'remove-product',
+  searchQuery: 'search-query',
+  searchSubmit: 'search-submit',
+  updateProfileSubmit: 'update-profile-submit',
+} as const;
+
 /** The header's "Categories" menu in each language: proof that the translation file is in, whatever else is on the page (signed in or not). */
 export const CATEGORIES_MENU: Record<Language, string> = { de: 'Kategorien', el: 'Κατηγορίες', en: 'Categories', es: 'Categorías', fr: 'Catégories', nl: 'Categorieën', tr: 'Kategoriler' };
 
@@ -101,31 +138,31 @@ export const VISITS: Visit[] = [
   {
     name: 'home', pageStrings: 29,
     path: '/',
-    ready: (page) => [page.getByTestId('product-name'), page.getByTestId(/^category-/), page.getByTestId(/^brand-/), page.getByTestId('pagination-next')],
+    ready: (page) => [page.getByTestId(ID.productName), page.getByTestId(ID.category), page.getByTestId(ID.brand), page.getByTestId(ID.paginationNext)],
   },
   {
     name: 'search without results', pageStrings: 23,
     path: '/',
-    ready: (page) => [page.getByTestId('product-name'), page.getByTestId('search-query')],
+    ready: (page) => [page.getByTestId(ID.productName), page.getByTestId(ID.searchQuery)],
     drive: async (page) => {
-      await page.getByTestId('search-query').fill(NO_SUCH_PRODUCT);
-      await page.getByTestId('search-submit').click();
+      await page.getByTestId(ID.searchQuery).fill(NO_SUCH_PRODUCT);
+      await page.getByTestId(ID.searchSubmit).click();
     },
-    witness: (page) => expect(page.getByTestId('no-results')).toBeVisible(),
+    witness: (page) => expect(page.getByTestId(ID.noResults)).toBeVisible(),
   },
   {
     name: 'product page', pageStrings: 10,
     dataTitle: true,
     path: async (catalog) => `/product/${(await catalog.inStock()).id}`,
-    ready: (page) => [page.getByTestId('add-to-cart'), page.getByTestId('product-specs'), page.getByRole('heading', { level: 5 })],
+    ready: (page) => [page.getByTestId(ID.addToCart), page.getByTestId(ID.productSpecs), page.getByRole('heading', { level: 5 })],
   },
   {
     name: 'product page with a toast', pageStrings: 10, fades: true,
     dataTitle: true,
     path: async (catalog) => `/product/${(await catalog.inStock()).id}`,
-    ready: (page) => [page.getByTestId('add-to-cart')],
+    ready: (page) => [page.getByTestId(ID.addToCart)],
     drive: async (page) => {
-      await page.getByTestId('add-to-cart').click();
+      await page.getByTestId(ID.addToCart).click();
     },
     witness: (page) => expect(page.getByRole('alert').first()).toBeVisible(),
   },
@@ -138,19 +175,19 @@ export const VISITS: Visit[] = [
     // All the page draws is the "Related products" heading.
     ready: (page) => [page.getByRole('heading', { level: 2 })],
   },
-  { name: 'category page', pageStrings: 16, dataTitle: true, path: async (catalog) => `/category/${(await catalog.inStock()).category.slug}`, ready: (page) => [page.getByTestId('page-title'), page.getByTestId('product-name')] },
-  { name: 'rentals', pageStrings: 1, path: '/rentals', ready: (page) => [page.getByTestId('page-title'), page.getByTestId(/^product-[0-9A-Z]{26}$/)] },
-  { name: 'empty comparison', pageStrings: 3, path: '/comparison', ready: (page) => [page.getByTestId('comparison-empty')] },
-  { name: 'comparison with products', pageStrings: 12, path: '/comparison', compared: true, ready: (page) => [page.getByTestId('comparison-table'), page.getByTestId('remove-product')] },
+  { name: 'category page', pageStrings: 16, dataTitle: true, path: async (catalog) => `/category/${(await catalog.inStock()).category.slug}`, ready: (page) => [page.getByTestId(ID.pageTitle), page.getByTestId(ID.productName)] },
+  { name: 'rentals', pageStrings: 1, path: '/rentals', ready: (page) => [page.getByTestId(ID.pageTitle), page.getByTestId(ID.productCard)] },
+  { name: 'empty comparison', pageStrings: 3, path: '/comparison', ready: (page) => [page.getByTestId(ID.comparisonEmpty)] },
+  { name: 'comparison with products', pageStrings: 12, path: '/comparison', compared: true, ready: (page) => [page.getByTestId(ID.comparisonTable), page.getByTestId(ID.removeProduct)] },
   // An empty cart renders only the four numbered steps of the wizard, the last of them numbered 4 whatever the language calls it.
   // The empty cart shows the wizard's steps and nothing else: its last step is the 4th list item. A fifth step would need this number moved with it.
   { name: 'empty cart', pageStrings: 4, path: '/checkout', ready: (page) => [page.getByRole('listitem').filter({ hasText: /^\D*4$/ })] },
-  { name: 'cart with a product', pageStrings: 9, path: '/checkout', cart: true, ready: (page) => [page.getByTestId('proceed-1')] },
+  { name: 'cart with a product', pageStrings: 9, path: '/checkout', cart: true, ready: (page) => [new CheckoutWizard(page).cart.proceedButton] },
   {
     name: 'checkout billing', pageStrings: 14,
     path: '/checkout',
     cart: true,
-    ready: (page) => [page.getByTestId('proceed-1')],
+    ready: (page) => [new CheckoutWizard(page).cart.proceedButton],
     driveInEnglish: true,
     mocks: [postcodeLookupMock],
     drive: async (page) => {
@@ -159,13 +196,13 @@ export const VISITS: Visit[] = [
       await signIn.continueAsGuest(fakeGuest());
     },
     // The step's own button: the heading's name is English.
-    witness: (page) => expect(page.getByTestId('proceed-3')).toBeVisible(),
+    witness: (page) => expect(new CheckoutWizard(page).billing.proceedButton).toBeVisible(),
   },
   {
     name: 'checkout payment', pageStrings: 19,
     path: '/checkout',
     cart: true,
-    ready: (page) => [page.getByTestId('proceed-1')],
+    ready: (page) => [new CheckoutWizard(page).cart.proceedButton],
     driveInEnglish: true,
     mocks: [postcodeLookupMock],
     drive: async (page) => {
@@ -180,14 +217,15 @@ export const VISITS: Visit[] = [
       await payment.field(FIELD.cardNumber).blur();
       await expect(payment.validationMessage(PAYMENT_MESSAGES.cardNumber)).toBeVisible();
     },
-    // By test id and class, because the message and the label are translated (or not) by language: the field is the one the message is about.
-    witness: (page) => expect(page.getByTestId('credit_card_number')).toHaveClass(/ng-invalid/),
+    // The validation message is the one alert the page shows, found by its Bootstrap class: it has no role or test id, and its text is translated (or not) by language.
+    // That it is drawn is the visitor's signal that the card field is refused (the app sets no aria-invalid, only Angular's own ng-invalid class).
+    witness: (page) => expect(page.locator('.alert-danger')).toBeVisible(),
   },
   {
     name: 'order confirmation', pageStrings: 7,
     path: '/checkout',
     cart: true,
-    ready: (page) => [page.getByTestId('proceed-1')],
+    ready: (page) => [new CheckoutWizard(page).cart.proceedButton],
     driveInEnglish: true,
     // The check and the order are writes: answered by mocks, so no order is ever placed.
     mocks: [postcodeLookupMock, mock.respond('POST', '/payment/check', { message: 'Payment was successful' }), mock.respond('POST', '/invoices/guest', acceptedGuestInvoice, 201)],
@@ -202,69 +240,69 @@ export const VISITS: Visit[] = [
     // The invoice number the mock issued: the sentence around it is translated.
     witness: (page) => expect(page.getByText(acceptedGuestInvoice.invoice_number)).toBeVisible(),
   },
-  { name: 'contact with errors', pageStrings: 21, path: '/contact', ready: (page) => [page.getByTestId('contact-submit')], submit: { button: 'contact-submit', error: 'first-name-error' } },
-  { name: 'login with errors', pageStrings: 15, path: '/auth/login', ready: (page) => [page.getByTestId('login-submit')], submit: { button: 'login-submit', error: 'email-error' } },
+  { name: 'contact with errors', pageStrings: 21, path: '/contact', ready: (page) => [page.getByTestId(ID.contactSubmit)], submit: { button: ID.contactSubmit, error: ID.firstNameError } },
+  { name: 'login with errors', pageStrings: 15, path: '/auth/login', ready: (page) => [page.getByTestId(ID.loginSubmit)], submit: { button: ID.loginSubmit, error: ID.emailError } },
   {
     name: 'login refused', pageStrings: 14,
     path: '/auth/login',
-    ready: (page) => [page.getByTestId('login-submit')],
+    ready: (page) => [page.getByTestId(ID.loginSubmit)],
     // The body the real API answers unknown credentials with (401).
     mocks: [mock.fail('POST', '/users/login', 401, { error: 'Unauthorized' })],
     drive: async (page) => {
       // By test id, so the steps work in any language.
-      await page.getByTestId('email').fill(UNKNOWN_EMAIL);
-      await page.getByTestId('password').fill(UNKNOWN_PASSWORD);
-      await page.getByTestId('login-submit').click();
+      await page.getByTestId(ID.email).fill(UNKNOWN_EMAIL);
+      await page.getByTestId(ID.password).fill(UNKNOWN_PASSWORD);
+      await page.getByTestId(ID.loginSubmit).click();
     },
-    witness: (page) => expect(page.getByTestId('login-error')).toBeVisible(),
+    witness: (page) => expect(new LoginPage(page).error).toBeVisible(),
   },
-  { name: 'registration with errors', pageStrings: 42, path: '/auth/register', ready: (page) => [page.getByTestId('register-submit')], submit: { button: 'register-submit', error: 'first-name-error' } },
-  { name: 'forgot password', pageStrings: 4, path: '/auth/forgot-password', ready: (page) => [page.getByTestId('forgot-password-submit')] },
+  { name: 'registration with errors', pageStrings: 42, path: '/auth/register', ready: (page) => [page.getByTestId(ID.registerSubmit)], submit: { button: ID.registerSubmit, error: ID.firstNameError } },
+  { name: 'forgot password', pageStrings: 4, path: '/auth/forgot-password', ready: (page) => [page.getByTestId(ID.forgotPasswordSubmit)] },
   {
     name: 'forgot password sent', pageStrings: 4, fades: true,
     path: '/auth/forgot-password',
-    ready: (page) => [page.getByTestId('forgot-password-submit')],
+    ready: (page) => [page.getByTestId(ID.forgotPasswordSubmit)],
     mocks: [mock.respond('POST', '/users/forgot-password', { success: true })],
     // By test id and in the page's own language, with no switch afterwards: the confirmation fades out after three seconds.
     drive: async (page) => {
-      await page.getByTestId('email').fill(fakeUser.email);
-      await page.getByTestId('forgot-password-submit').click();
+      await page.getByTestId(ID.email).fill(fakeUser.email);
+      await page.getByTestId(ID.forgotPasswordSubmit).click();
     },
     // Visible in the final settled sample too: it fades out after three seconds, so a slow read must fail here, not read the page without it.
     witness: (page) => expect(page.getByRole('alert')).toBeVisible(),
   },
   { name: 'privacy policy', pageStrings: 16, path: '/privacy', ready: (page) => [page.getByRole('heading', { level: 1 })] },
-  { name: 'account', pageStrings: 5, path: '/account', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title'), page.getByTestId('nav-favorites')] },
-  { name: 'account favorites', pageStrings: 2, path: '/account/favorites', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title')] },
-  { name: 'account invoices', pageStrings: 4, path: '/account/invoices', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title')] },
-  { name: 'account messages', pageStrings: 4, path: '/account/messages', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title')] },
-  { name: 'account favorites with items', pageStrings: 1, path: '/account/favorites', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId('page-title'), page.getByTestId(/^favorite-/)] },
-  { name: 'account invoices with items', pageStrings: 5, path: '/account/invoices', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId('page-title'), page.getByRole('row').nth(1)] },
-  { name: 'account messages with items', pageStrings: 6, path: '/account/messages', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId('page-title'), page.getByRole('row').nth(1)] },
-  { name: 'account profile', pageStrings: 28, path: '/account/profile', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId('page-title'), page.getByTestId('update-profile-submit')] },
+  { name: 'account', pageStrings: 5, path: '/account', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId(ID.pageTitle), page.getByTestId(ID.navFavorites)] },
+  { name: 'account favorites', pageStrings: 2, path: '/account/favorites', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId(ID.pageTitle)] },
+  { name: 'account invoices', pageStrings: 4, path: '/account/invoices', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId(ID.pageTitle)] },
+  { name: 'account messages', pageStrings: 4, path: '/account/messages', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId(ID.pageTitle)] },
+  { name: 'account favorites with items', pageStrings: 1, path: '/account/favorites', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId(ID.pageTitle), page.getByTestId(ID.favorite)] },
+  { name: 'account invoices with items', pageStrings: 5, path: '/account/invoices', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId(ID.pageTitle), page.getByRole('row').nth(1)] },
+  { name: 'account messages with items', pageStrings: 6, path: '/account/messages', signedIn: true, mocks: accountLists, ready: (page) => [page.getByTestId(ID.pageTitle), page.getByRole('row').nth(1)] },
+  { name: 'account profile', pageStrings: 28, path: '/account/profile', signedIn: true, mocks: accountData, ready: (page) => [page.getByTestId(ID.pageTitle), page.getByTestId(ID.updateProfileSubmit)] },
   {
     name: 'chat open', pageStrings: 29,
     path: '/',
-    ready: (page) => [page.getByTestId('chat-toggle')],
+    ready: (page) => [page.getByTestId(ID.chatToggle)],
     drive: async (page) => {
-      await page.getByTestId('chat-toggle').click();
+      await page.getByTestId(ID.chatToggle).click();
     },
-    witness: (page) => expect(page.getByTestId('chat-window')).toBeVisible(),
+    witness: (page) => expect(new ChatWidget(page).window).toBeVisible(),
   },
   {
     name: 'language menu open', pageStrings: 29,
     path: '/',
-    ready: (page) => [page.getByTestId('language-select')],
+    ready: (page) => [page.getByTestId(ID.languageSelect)],
     drive: async (page) => {
-      await page.getByTestId('language-select').click();
+      await page.getByTestId(ID.languageSelect).click();
     },
-    witness: (page) => expect(page.getByTestId('lang-en')).toBeVisible(),
+    witness: (page) => expect(page.getByTestId(ID.langEn)).toBeVisible(),
   },
   {
     name: 'home on a phone', pageStrings: 13,
     path: '/',
     phone: true,
     // The header's menu is closed behind its toggler: the page itself is what proves the translation file is in (the categories menu is in the closed menu, read by its text content).
-    ready: (page) => [page.getByTestId('product-name'), page.getByTestId('pagination-next')],
+    ready: (page) => [page.getByTestId(ID.productName), page.getByTestId(ID.paginationNext)],
   },
 ];

@@ -1,5 +1,7 @@
 import { expect, mock, test, withMocks } from '@fixtures';
 import { ACCOUNT_TITLE } from '@pages/account/AccountPage';
+import { FAVORITES_EMPTY_HINT } from '@pages/account/FavoritesPage';
+import { MESSAGES_EMPTY_HINT } from '@pages/account/MessagesPage';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { failureFeedback } from '@support/feedback';
 import { apiPath } from '@support/env';
@@ -124,7 +126,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('GET', '/favorites', [])));
 
     test('the empty state explains how to add one', async ({ favoritesPage }) => {
-      await expect(favoritesPage.emptyState).toContainText('please go to the product listing and mark some products as your favorite');
+      await expect(favoritesPage.emptyState).toContainText(FAVORITES_EMPTY_HINT);
     });
   });
 
@@ -170,7 +172,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
     test('the list is empty: no order rows and no failure notice', async ({ invoicesPage, page }) => {
       await expect(invoicesPage.title).toBeVisible();
-      await expect(invoicesPage.table.getByRole('columnheader', { name: 'Invoice Number' })).toBeVisible();
+      await expect(invoicesPage.invoiceNumberHeader).toBeVisible();
 
       await expect(invoicesPage.invoiceRows).toHaveCount(0);
       await expect(failureFeedback(page)).toHaveCount(0);
@@ -178,7 +180,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
 
     test('the customer is told there are no invoices yet', { tag: ['@bug'] }, async ({ invoicesPage }) => {
       knownBug('BUG-48', 'an account with no invoices shows the bare table header and no empty-state text, unlike the favorites and messages pages.', { absence: true });
-      await expect(invoicesPage.table.getByRole('columnheader', { name: 'Invoice Number' })).toBeVisible();
+      await expect(invoicesPage.invoiceNumberHeader).toBeVisible();
       await expect(invoicesPage.invoiceRows).toHaveCount(0);
 
       await expect(invoicesPage.emptyState, 'BUG-48: an empty invoice list says so').toBeVisible({ timeout: BUG_TIMEOUT });
@@ -241,6 +243,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
   });
 
   test.describe('when a reply fails', { tag: ['@bug'] }, () => {
+    const REFUSED_REPLY = 'A reply the API refuses.';
     test.use(withMocks(
       mock.respond('GET', '/messages', listOf([fakeMessage])),
       mock.respond('GET', `/messages/${fakeMessage.id}`, fakeMessage),
@@ -251,7 +254,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
       knownBug('BUG-50', 'a reply the API refuses (500) is not reported: no alert, no message, and the reply box keeps its text without a word.', { absence: true });
       const details = await messagesPage.openDetails(fakeMessage.subject);
       const answered = apiMock.waitForResponse('POST', `/messages/${fakeMessage.id}/reply`);
-      await details.sendReply('A reply the API refuses.');
+      await details.sendReply(REFUSED_REPLY);
       // Precondition, true whether or not the bug is fixed: the failure path ran.
       expect((await answered).response.status()).toBe(500);
 
@@ -263,7 +266,7 @@ test.describe('Account area (mocked session)', { tag: ['@mocked'] }, () => {
     test.use(withMocks(mock.respond('GET', '/messages', listOf([]))));
 
     test('the empty state points to the contact form', async ({ messagesPage }) => {
-      await expect(messagesPage.emptyState).toContainText('Navigate to the contact form');
+      await expect(messagesPage.emptyState).toContainText(MESSAGES_EMPTY_HINT);
     });
   });
 });

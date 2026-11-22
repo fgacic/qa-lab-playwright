@@ -85,9 +85,9 @@ const noBranches = {
 // - serial describes: tests that depend on each other's order hide which one broke and cannot be sharded or retried alone;
 //   arrange the state each test needs through the API instead.
 // Code run inside the page, on any object: `page.evaluate`, `locator.evaluate` / `evaluateAll`, `handle.evaluate` / `evaluateHandle`,
-// `page.$eval` / `$$eval`, `waitForFunction`. A name is matched whatever the receiver is called, because a locator, a frame or a
+// `page.$eval` / `$$eval`, `waitForFunction`, and `addInitScript` (a script that runs in every page of the tab or context). A name is matched whatever the receiver is called, because a locator, a frame or a
 // JSHandle (`message.args()[0].evaluate(...)`) is as untyped, unretried and invisible to the report as `page` is.
-const IN_PAGE_CODE = "CallExpression[callee.property.name=/^(evaluate|evaluateAll|evaluateHandle|\\$eval|\\$\\$eval|waitForFunction)$/]";
+const IN_PAGE_CODE = "CallExpression[callee.property.name=/^(evaluate|evaluateAll|evaluateHandle|\\$eval|\\$\\$eval|waitForFunction|addInitScript)$/]";
 const noInlineHazards = {
   files: ['tests/**/*.spec.ts'],
   rules: {
@@ -95,7 +95,7 @@ const noInlineHazards = {
       'error',
       {
         selector: IN_PAGE_CODE,
-        message: 'No code run in the page in a spec (evaluate, evaluateAll, evaluateHandle, $eval, $$eval, waitForFunction): read what the app stored through a named helper (storedToken in @support/session, fetchStatus in @support/page-fetch, consoleArgsText in @support/console-guard for the arguments of a console message) or assert what the user sees.',
+        message: 'No code run in the page in a spec (evaluate, evaluateAll, evaluateHandle, $eval, $$eval, waitForFunction, addInitScript): read or seed what the app stores through a named helper (storedToken, installToken, seedTabCart and seedTabComparison in @support/session, fetchStatus in @support/page-fetch, consoleArgsText in @support/console-guard for the arguments of a console message) or assert what the user sees.',
       },
       {
         selector: "Literal[value=/^https?:\\/\\//], TemplateElement[value.raw=/https?:\\/\\//]",

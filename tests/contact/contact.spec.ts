@@ -17,6 +17,15 @@ const MIN_LENGTH_ERROR = `Message must be minimal ${MIN_MESSAGE_LENGTH} characte
 const messageOfLength = (length: number) => 'a'.repeat(length);
 const textFile = (name: string, content: string) => ({ name, mimeType: 'text/plain', buffer: Buffer.from(content) });
 
+const MALFORMED_EMAIL = 'not-an-email';
+/** What the form says about a bad attachment. */
+const ATTACHMENT_ERRORS = { notEmpty: 'File should be empty.', notTxt: 'File should have a txt extension.' };
+/** What a signed-in customer reads in place of the name and email fields. */
+const greetingFor = (user: { first_name: string; last_name: string }) => `Hello ${user.first_name} ${user.last_name}, please fill out this form to submit your message.`;
+/** The 422 body the shop sends for a bad email: typed once, for the mock and for the assertion. */
+const INVALID_EMAIL_DETAIL = 'The email field must be a valid email address.';
+const INVALID_DATA_422 = { message: 'The given data was invalid.', errors: { email: [INVALID_EMAIL_DETAIL] } };
+
 const message = (overrides: Partial<ContactMessage> = {}): ContactMessage => ({
   from: fakeGuest(),
   subject: DEFAULT_SUBJECT,
@@ -49,7 +58,7 @@ test.describe('Contact form', () => {
     });
 
     test('a malformed email is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
-      await contactPage.send(message({ from: { ...fakeGuest(), email: 'not-an-email' } }));
+      await contactPage.send(message({ from: { ...fakeGuest(), email: MALFORMED_EMAIL } }));
 
       await expect(contactPage.email.error).toHaveText(FIELD_ERRORS.emailInvalid);
       await apiMock.expectNoRequest('POST', '/messages');
@@ -65,14 +74,14 @@ test.describe('Contact form', () => {
     test('an attachment with content is rejected: files must be empty', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ attachment: textFile('notes.txt', 'not empty') }));
 
-      await expect(contactPage.attachment.error).toHaveText('File should be empty.');
+      await expect(contactPage.attachment.error).toHaveText(ATTACHMENT_ERRORS.notEmpty);
       await apiMock.expectNoRequest('POST', '/messages');
     });
 
     test('an attachment that is not .txt is rejected', { tag: ['@negative'] }, async ({ contactPage, apiMock }) => {
       await contactPage.send(message({ attachment: { name: 'image.png', mimeType: 'image/png', buffer: Buffer.alloc(0) } }));
 
-      await expect(contactPage.attachment.error).toHaveText('File should have a txt extension.');
+      await expect(contactPage.attachment.error).toHaveText(ATTACHMENT_ERRORS.notTxt);
       await apiMock.expectNoRequest('POST', '/messages');
     });
   });
@@ -169,7 +178,7 @@ test.describe('Contact form', () => {
   });
 
   test.describe('when the API rejects the message', { tag: ['@mocked', '@bug'] }, () => {
-    test.use(withMocks(mock.fail('POST', '/messages', 422, { message: 'The given data was invalid.', errors: { email: ['The email field must be a valid email address.'] } })));
+    test.use(withMocks(mock.fail('POST', '/messages', 422, INVALID_DATA_422)));
 
     test('the validation message is readable', async ({ contactPage, apiMock }) => {
       knownBug('BUG-21', 'a 422 from POST /messages is shown as "The given data was invalid. [object Object]".', { absence: true });
@@ -177,7 +186,7 @@ test.describe('Contact form', () => {
       await contactPage.send(message());
       expect((await answered).response.status()).toBe(422);
 
-      await expect(contactPage.statusMessage(/valid email address/), 'BUG-21: the validation detail is readable').toBeVisible({ timeout: BUG_TIMEOUT });
+      await expect(contactPage.statusMessage(INVALID_EMAIL_DETAIL), 'BUG-21: the validation detail is readable').toBeVisible({ timeout: BUG_TIMEOUT });
       await expect(contactPage.statusMessage('[object Object]'), 'BUG-21: no unrendered object in the message').toHaveCount(0);
     });
   });
@@ -206,7 +215,7 @@ test.describe('Contact form', () => {
     test('the form greets the customer by name and asks for no name or email', async ({ signedIn: _, shop }) => {
       await shop.contact.open();
 
-      await expect(shop.contact.greeting).toHaveText(`Hello ${fakeUser.first_name} ${fakeUser.last_name}, please fill out this form to submit your message.`);
+      await expect(shop.contact.greeting).toHaveText(greetingFor(fakeUser));
       await expect(shop.contact.firstName.input).toHaveCount(0);
       await expect(shop.contact.lastName.input).toHaveCount(0);
       await expect(shop.contact.email.input).toHaveCount(0);

@@ -21,8 +21,10 @@ import { httpsUrl } from '@support/urls';
  * What counts as a good header value is judged by the matchers in src/support/security-headers.ts, which
  * tests/security/header-matchers.spec.ts runs offline on sample values, on the gate.
  *
- * The whole file is `@live-only`: it never runs on the CI gate, which is the self-hosted target (the nginx there is ours, not the
- * product's). It runs in the nightly live run only, so a change here is not exercised by a pull request.
+ * The whole file is `@live-only`: it runs against the live site only (TARGET=live), never on the CI gate or locally, which is the self-hosted target
+ * (the nginx there is ours, not the product's). The live workflow is disabled in GitHub Actions for now, so today nothing schedules this file; it runs
+ * when someone runs it against live. What is proven offline, on every gate run, is the matchers that judge the header values:
+ * tests/security/header-matchers.spec.ts. A change to the requests or the expectations here is not exercised by a pull request.
  */
 
 const expected: { id: string; header: string; ok: (value: string) => boolean; accepts: string; why: string }[] = [
@@ -61,9 +63,17 @@ async function shopHeaders(request: APIRequestContext, testInfo: TestInfo) {
   return (await shopAnswer(request, testInfo)).headers();
 }
 
-/** What the report says of the cookies read: the count, and for none that there was nothing to check (a pass that vouches for no cookie). */
-function cookiesInspected(count: number): string {
-  return count ? String(count) : '0: the shop and its API set no cookie, so there was nothing to check; this pass says so, it does not vouch for a cookie';
+/** The cookies the live shop and its API set today: none (read from the live site's responses on 2026-11-22). */
+const COOKIES_SET_TODAY = 0;
+
+/** What is wrong with each cookie (a `Set-Cookie` value): the attributes it lacks, named by cookie. Empty when every cookie is Secure, HttpOnly and has a SameSite. */
+function cookieFaults(cookies: string[]): string[] {
+  const required: [attribute: string, present: RegExp][] = [
+    ['Secure', /;\s*secure(;|$)/i],
+    ['HttpOnly', /;\s*httponly(;|$)/i],
+    ['a SameSite', /;\s*samesite=(strict|lax|none)(;|$)/i],
+  ];
+  return cookies.flatMap((cookie) => required.filter(([, present]) => !present.test(cookie)).map(([attribute]) => `${cookie.split('=')[0]} lacks ${attribute}`));
 }
 
 test.describe('Security headers of the live shop', { tag: ['@security', '@live-only', '@bug'] }, () => {
@@ -110,15 +120,10 @@ test.describe('Cookies, CORS and Permissions-Policy of the live shop', { tag: ['
     expect(api.status(), 'the API answered before its cookies are judged').toBeLessThan(400);
     const answers = [await shopAnswer(request, testInfo), api];
     const cookies = answers.flatMap((answer) => answer.headersArray().filter(({ name }) => name.toLowerCase() === 'set-cookie').map(({ value }) => value));
-    // A shop that sets no cookie has nothing to misconfigure (hence "if any" in the title), but the count is recorded so "none" is a stated fact and not an unread loop.
-    testInfo.annotations.push({ type: 'cookies inspected', description: cookiesInspected(cookies.length) });
-
-    for (const cookie of cookies) {
-      const name = cookie.split('=')[0];
-      expect.soft(cookie, `${name} is Secure`).toMatch(/;\s*secure(;|$)/i);
-      expect.soft(cookie, `${name} is HttpOnly`).toMatch(/;\s*httponly(;|$)/i);
-      expect.soft(cookie, `${name} has a SameSite`).toMatch(/;\s*samesite=(strict|lax|none)(;|$)/i);
-    }
+    // "None" is a stated fact, not a silent pass: the count is asserted against what the live shop does today, so a shop that starts setting a cookie fails here by name
+    // (and is then judged by the check below, with COOKIES_SET_TODAY updated), and a run that read no cookie says so instead of vouching for one.
+    expect(cookies, `Set-Cookie values from the shop and its API (${COOKIES_SET_TODAY} expected; if the shop now sets cookies, update COOKIES_SET_TODAY once they pass the check below)`).toHaveLength(COOKIES_SET_TODAY);
+    expect(cookieFaults(cookies), `cookies (${cookies.length} read) missing Secure, HttpOnly or SameSite`).toEqual([]);
   });
 
   test('the API does not let another origin read it with credentials', async ({ request }) => {

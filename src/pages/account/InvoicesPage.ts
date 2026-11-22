@@ -7,6 +7,8 @@ export class InvoicesPage {
   readonly title: Locator;
   readonly table: Locator;
   readonly invoiceRows: Locator;
+  /** The first column's header: drawn even when the list is empty. */
+  readonly invoiceNumberHeader: Locator;
   /** What an account with no invoices should say, as the favorites and messages pages do (BUG-48: this page says nothing). */
   readonly emptyState: Locator;
 
@@ -14,6 +16,7 @@ export class InvoicesPage {
     this.shell = new AppShell(page);
     this.title = page.getByTestId('page-title');
     this.table = page.getByRole('table');
+    this.invoiceNumberHeader = this.table.getByRole('columnheader', { name: 'Invoice Number' });
     this.emptyState = page.getByText(/no invoices|no orders/i);
     this.invoiceRows = this.table.getByRole('row').filter({ hasText: /INV-\d+/ });
   }

@@ -2,6 +2,9 @@ import type { Locator, Page } from '@playwright/test';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 
+/** The hint an empty favorites list gives on how to add one. */
+export const FAVORITES_EMPTY_HINT = 'please go to the product listing and mark some products as your favorite';
+
 export class FavoritesPage {
   readonly shell: AppShell;
   readonly title: Locator;

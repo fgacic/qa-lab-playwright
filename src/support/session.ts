@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
+import { COMPARE_STORAGE_KEY } from '@pages/ComparisonPage';
 
 /** The localStorage key the SPA keeps its JWT under. */
 export const TOKEN_KEY = 'auth-token';
@@ -20,6 +21,32 @@ export async function installToken(page: Page, token: string): Promise<void> {
       localStorage.setItem(key, token);
     },
     { key: TOKEN_KEY, token },
+  );
+}
+
+/**
+ * Puts a cart made through the API in this tab's session storage, where the SPA keeps its cart, before the tab's first page script runs.
+ * Once per tab: a cart the app deletes later (after an order) is not brought back on the next navigation.
+ */
+export async function seedTabCart(page: Page, cartId: string, quantity: number): Promise<void> {
+  await page.addInitScript(
+    ({ cartId, quantity }) => {
+      if (sessionStorage.getItem('qa-lab-cart-seeded')) return;
+      sessionStorage.setItem('qa-lab-cart-seeded', '1');
+      sessionStorage.setItem('cart_id', cartId);
+      sessionStorage.setItem('cart_quantity', String(quantity));
+    },
+    { cartId, quantity },
+  );
+}
+
+/** Puts the products selected for comparison (as the comparison bar leaves them) in this tab's session storage, unless the tab already holds a selection. */
+export async function seedTabComparison(page: Page, ids: string[]): Promise<void> {
+  await page.addInitScript(
+    ({ ids, key }) => {
+      if (ids.length && !sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(ids));
+    },
+    { ids, key: COMPARE_STORAGE_KEY },
   );
 }
 

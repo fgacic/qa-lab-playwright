@@ -2,7 +2,7 @@ import { mergeTests } from '@playwright/test';
 import { AppShell } from '@pages/AppShell';
 import { CategoryPage } from '@pages/CategoryPage';
 import { CheckoutPage } from '@pages/CheckoutPage';
-import { COMPARE_STORAGE_KEY, ComparisonPage } from '@pages/ComparisonPage';
+import { ComparisonPage } from '@pages/ComparisonPage';
 import { ContactPage } from '@pages/ContactPage';
 import { ForgotPasswordPage } from '@pages/ForgotPasswordPage';
 import { HomePage } from '@pages/HomePage';
@@ -10,7 +10,7 @@ import { LoginPage } from '@pages/LoginPage';
 import { ProductPage } from '@pages/ProductPage';
 import { RegisterPage } from '@pages/RegisterPage';
 import { RentalsPage } from '@pages/RentalsPage';
-import { installToken } from '@support/session';
+import { installToken, seedTabComparison } from '@support/session';
 import type { CartItem, Product } from '@support/toolshop-api';
 import { test as apiTest, type Catalog } from './api';
 import { test as authTest } from './auth';
@@ -115,12 +115,7 @@ export const test = mergeTests(apiTest, mocksTest, authTest).extend<PageOptions 
   },
   comparisonPage: async ({ page, comparedProducts }, use) => {
     const ids = comparedProducts.map((p) => p.id);
-    await page.addInitScript(
-      ({ ids, key }) => {
-        if (ids.length && !sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(ids));
-      },
-      { ids, key: COMPARE_STORAGE_KEY },
-    );
+    await seedTabComparison(page, ids);
     const comparisonPage = new ComparisonPage(page);
     await comparisonPage.open();
     await use(comparisonPage);

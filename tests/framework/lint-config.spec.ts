@@ -49,7 +49,7 @@ function lintSamples(samples: string[]): string[][] {
   return JSON.parse(run.stdout) as string[][];
 }
 
-const IN_PAGE = 'No code run in the page in a spec (evaluate, evaluateAll, evaluateHandle, $eval, $$eval, waitForFunction)';
+const IN_PAGE = 'No code run in the page in a spec (evaluate, evaluateAll, evaluateHandle, $eval, $$eval, waitForFunction, addInitScript)';
 const REFUSED: [code: string, message: string][] = [
   ['page.evaluate(() => 1)', IN_PAGE],
   ['this.page.evaluate(() => 1)', IN_PAGE],
@@ -61,6 +61,8 @@ const REFUSED: [code: string, message: string][] = [
   ['page.$$eval("a", (els) => els.length)', IN_PAGE],
   ['page.waitForFunction(() => true)', IN_PAGE],
   ['frame.waitForFunction(() => true)', IN_PAGE],
+  ['await page.addInitScript(() => sessionStorage.clear());', IN_PAGE],
+  ['await context.addInitScript(() => 1);', IN_PAGE],
   ['const at = new Date();', 'No new Date() in a spec'],
   ['const t = performance.now();', 'No performance.now() in a spec'],
   ['const t = Date.now();', 'No Date.now in a spec'],
@@ -75,6 +77,7 @@ const ALLOWED = [
   'const at = new Date("2026-01-02T03:04:05Z"); const n = new Date(0); await page.clock.install({ time: at });',
   'await expect(page.getByRole("button")).toBeVisible(); const t = await storedToken(page); await consoleArgsText(args);',
   'const status = await fetchStatus(page, "/api/brands");',
+  'await installToken(page, token); await seedTabCart(page, cartId, 1); await seedTabComparison(page, ids);',
   'await page.goto("/products/" + id); const note = "see http docs"; const label = `${id}/https`;',
   'test.describe.parallel("a", () => {}); test.describe.configure({ mode: "parallel" }); test.describe.configure({ retries: 2 });',
 ];

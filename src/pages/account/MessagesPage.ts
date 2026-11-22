@@ -2,6 +2,9 @@ import type { Locator, Page } from '@playwright/test';
 import { step } from '@support/step';
 import { AppShell } from '../AppShell';
 
+/** The hint an empty messages list gives on how to send one. */
+export const MESSAGES_EMPTY_HINT = 'Navigate to the contact form';
+
 export class MessagesPage {
   readonly shell: AppShell;
   readonly title: Locator;

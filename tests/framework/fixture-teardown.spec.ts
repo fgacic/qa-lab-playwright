@@ -48,7 +48,7 @@ async function runProbes(): Promise<Record<string, Outcome>> {
 }
 
 test.describe('fixture teardown guards', { tag: ['@framework', '@self-hosted'] }, () => {
-  // One nested run feeds every test below: in one worker, so a retry or a second worker never repeats it.
+  // One nested run feeds every test below: normally once per worker; a retry after a failure restarts the worker and repeats it (up to 100 s), which is the price of one shared nested run.
   test.describe.configure({ mode: 'default' });
   let outcomes: Record<string, Outcome>;
   /**
