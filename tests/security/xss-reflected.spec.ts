@@ -1,8 +1,8 @@
 import { expect, test } from '@fixtures';
-import { consoleArgsText } from '@support/console-guard';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
 import { ATTRIBUTE_XSS_PAYLOADS, MAX_SEARCH_TERM, ROUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { escapeRegExp } from '@support/regexp';
+import { productsFoundFor, searchedFor } from '@components/SearchBar';
 
 /**
  * Reflected input: what a visitor types is shown back without being stored anywhere, so these
@@ -34,9 +34,9 @@ test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => 
     test(`a search for ${name} is shown as text, not run`, async ({ homePage, xss }) => {
       await homePage.search.searchFor(payload);
 
-      await expect(homePage.search.caption).toHaveText(`Searched for: ${payload}`);
+      await expect(homePage.search.caption).toHaveText(searchedFor(payload));
       // The count line echoes the term too, in a second place a sink could be.
-      await expect(homePage.search.resultCount).toHaveText(new RegExp(`^\\s*\\d+ products? found for '${escapeRegExp(payload)}'\\s*$`));
+      await expect(homePage.search.resultCount).toHaveText(productsFoundFor(0, payload));
       await xss.expectNoInjectedElements();
       await xss.expectNotExecuted();
     });
@@ -57,7 +57,7 @@ test.describe('Injection, reflected (read-only)', { tag: ['@security'] }, () => 
 });
 
 /** The same error, read from the error object itself (message text and the object's message), which every engine can give. */
-const CATEGORY_TYPE_ERROR = /categories\[0\]|reading 'name'/;
+const CATEGORY_TYPE_ERROR = /(?=[\s\S]*TypeError)[\s\S]*(categories\[0\]|reading 'name')/;
 
 /** The address bar is input too. Payloads go in as a path segment, percent-encoded as a browser would send them. */
 test.describe('Injection, reflected through the route (read-only)', { tag: ['@security'] }, () => {
@@ -95,23 +95,14 @@ test.describe('Injection, reflected through the route (read-only)', { tag: ['@se
  * address bar. The page still draws (its title echoes the slug), so nothing visibly breaks, which is why only a console guard saw it.
  */
 test.describe('Unknown route segments, uncaught errors (read-only)', { tag: ['@security', '@bug'] }, () => {
-  test('an unknown category slug does not throw an uncaught error', async ({ categoryPage, page }) => {
+  test('an unknown category slug does not throw an uncaught error', async ({ categoryPage, consoleGuard }) => {
     knownBug('SEC-13', 'the category page throws "TypeError: Cannot read properties of undefined (reading \'name\')" for a slug it does not know (any slug from the address bar).');
-    const logged: Promise<string>[] = [];
-    // The error object's own message, not the console text: Firefox prints an object it logged as `JSHandle@object`.
-    page.on('console', (message) => {
-      if (message.type() === 'error') logged.push(consoleArgsText(message.args()));
-    });
-    const thrownSoFar = async () => (await Promise.all(logged)).filter((text) => /TypeError/.test(text) && CATEGORY_TYPE_ERROR.test(text));
-
     await categoryPage.open('qa-lab-no-such-category');
     // Precondition, true whether or not the bug is fixed: the page drew for the slug (its answer was waited for in `open`).
     await expect(categoryPage.title).toBeVisible();
-    // The error is logged a moment after the page draws, so a read right now could miss it and pass a broken page. Give it the pin's
-    // window to arrive (settled, not awaited for success: on a fixed site none does, and the window runs out into the assertion below). A fixed site therefore pays the whole window (BUG_TIMEOUT),
-    // the price of proving that something never happens; a poll that passes on the first empty read would prove nothing.
-    await Promise.allSettled([expect.poll(thrownSoFar, { timeout: BUG_TIMEOUT }).not.toEqual([])]);
-
-    expect(await thrownSoFar(), 'SEC-13: the category page threw for an unknown slug').toEqual([]);
+    // The error is logged a moment after the page draws, so a read right now could miss it. The guard watches console errors and
+    // uncaught page errors (reading the error object's own message, which Firefox needs) for the pin's window. A fixed site pays the
+    // whole window (BUG_TIMEOUT), the price of proving that something never happens.
+    await expect(consoleGuard.expectNoneLogged(CATEGORY_TYPE_ERROR, { within: BUG_TIMEOUT }), 'SEC-13: the category page threw for an unknown slug').resolves.toBeUndefined();
   });
 });

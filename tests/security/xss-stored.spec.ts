@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { expect, test as base } from '@fixtures';
 import { ADMIN_MESSAGES } from '@pages/admin/alerts';
 import { ProfilePage } from '@pages/account/ProfilePage';
@@ -6,7 +5,7 @@ import { ATTRIBUTE_XSS_PAYLOADS, XSS_PAYLOADS } from '@fixtures/security';
 import { API_URL } from '@support/env';
 import { CONTACT_SUBJECTS } from '@support/payloads';
 import { escapeRegExp } from '@support/regexp';
-import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
+import { CONTACT_MESSAGE, fakeCustomer, fakeGuest, uniqueEmail, uniqueKey } from '@support/test-data';
 
 /**
  * Stored input: payloads are saved through a form and then shown to someone else, the admin or
@@ -43,7 +42,6 @@ const SHORT_LAST_NAME_PAYLOAD = 'Qa<img src=x>';
  * at 40 characters, and the payload already uses most of them). A random one, because the records these tests leave behind
  * (messages cannot be deleted) must never collide, whatever starts when.
  */
-const uniqueKey = () => randomUUID().slice(0, 8);
 
 /**
  * What a test saved in the shared database is removed again by the admin API, whether an assertion failed or not, and even

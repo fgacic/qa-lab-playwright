@@ -1,11 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import { mergeTests, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
 import { worldTest } from '@fixtures/security';
 import { call, newCustomer, profileBody, REFUSED, REFUSED_OR_HIDDEN, favouriteOf, hasFavourite, WHO, OWN_NAME, INTRUDER_NAME, expectVerdict, tokenFor, contactMessage, type Caller, type World, type Account } from '@support/authz';
 import { knownBug } from '@support/known-bug';
 import { fromBase64Url } from '@support/payloads';
-import { fakeGuest } from '@support/test-data';
+import { fakeGuest, uniqueKey } from '@support/test-data';
 import type { Product, ToolshopApi } from '@support/toolshop-api';
 
 /**
@@ -154,12 +153,11 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   const statusOf = async (request: APIRequestContext, path: string, token: string) => ((await (await call(request, 'GET', path, { token })).json()) as { status: string }).status;
 
   /** A short key no other test, worker, retry or run shares: a contact message's name is capped, and a UUID is longer than the cap. */
-  const newKey = () => randomUUID().slice(0, 8);
-
+  
   test('the admin can change the status of an order and of a message, with the bodies the attempts below send', async ({ request, adminToken, catalog, world }) => {
     const admin = await adminToken();
     const order = await guestOrder(world, catalog);
-    const message = await contactMessage(world, `Authz admin ${newKey()}`);
+    const message = await contactMessage(world, `Authz admin ${uniqueKey()}`);
 
     const orderResponse = await call(request, 'PUT', `/invoices/${order}/status`, { token: admin, data: { status: STATUS.order.to } });
     const messageResponse = await call(request, 'PUT', `/messages/${message}/status`, { token: admin, data: { status: STATUS.message.to } });
@@ -204,7 +202,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
   });
 
   test("a message's status cannot be set by an anonymous caller", async ({ request, api, adminToken, cleanups }) => {
-    const { response, before, after } = await setMessageStatus({ request, api, adminToken, cleanups }, newKey(), 'anonymous');
+    const { response, before, after } = await setMessageStatus({ request, api, adminToken, cleanups }, uniqueKey(), 'anonymous');
 
     expect(REFUSED, `PUT /messages/{id}/status as an anonymous caller answered ${response.status()}`).toContain(response.status());
     expect(after, 'the message is unchanged').toBe(before);
@@ -223,7 +221,7 @@ test.describe('API authorisation, writes to other records (self-hosted only)', {
     test("a message's status cannot be set by a customer", async ({ request, api, adminToken, cleanups }) => {
       knownBug('SEC-11', 'PUT /messages/{id}/status is accepted from a customer: anybody with an account can mark the contact inbox read, in progress or done.');
 
-      const { response, before, after } = await setMessageStatus({ request, api, adminToken, cleanups }, newKey(), 'customer');
+      const { response, before, after } = await setMessageStatus({ request, api, adminToken, cleanups }, uniqueKey(), 'customer');
 
       expect.soft(REFUSED, `SEC-11: PUT /messages/{id}/status as a customer answered ${response.status()}`).toContain(response.status());
       expect.soft(after, `SEC-11: the message is now "${after}" (read back as the admin), set by a customer`).toBe(before);

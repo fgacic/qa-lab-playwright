@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { API_URL } from '@support/env';
 import { step } from '@support/step';
 
@@ -41,6 +41,8 @@ export class SearchBar {
   /** Submits the search and waits for its answer, so the grid shows the results, not the old list. */
   @step('Search for "{0}"')
   async searchFor(term: string, { submitWith = 'button' }: { submitWith?: 'button' | 'enter' } = {}): Promise<void> {
+    // One of the two states is drawn before either is read (see FilterPanel.expand): the toggle (phone) or the search box (desktop).
+    await expect(this.sidebarToggle.or(this.query)).toBeVisible();
     if ((await this.sidebarToggle.isVisible()) && !(await this.query.isVisible())) await this.sidebarToggle.click();
     const answered = this.query.page().waitForResponse((r) => r.url() === `${API_URL}/products/search` && r.request().method() === 'QUERY');
     await this.query.fill(term);

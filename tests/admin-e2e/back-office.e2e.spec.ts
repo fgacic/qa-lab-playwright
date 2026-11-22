@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { expect, test } from '@fixtures';
 import type { AdminProductForm } from '@pages/admin/AdminForms';
 import type { AdminListPage } from '@pages/admin/AdminListPage';
@@ -6,7 +5,7 @@ import { ADM_12, ADMIN_MESSAGES, allowLoggedFailure } from '@pages/admin/alerts'
 import type { HomePage } from '@pages/HomePage';
 import { dollars } from '@support/admin-payloads';
 import { BUG_TIMEOUT, knownBug } from '@support/known-bug';
-import { fakeCustomer, fakeGuest, uniqueEmail } from '@support/test-data';
+import { fakeCustomer, fakeGuest, uniqueEmail, uniqueKey } from '@support/test-data';
 import { contactSubjectSlug } from '@support/payloads';
 
 /**
@@ -31,7 +30,6 @@ import { contactSubjectSlug } from '@support/payloads';
 test.use({ adminSession: 'storage-state' });
 
 /** Unique per test and per repeat, so parallel workers and retries never find each other's data. */
-const unique = () => randomUUID().slice(0, 8);
 /** A yes or no as a named outcome, so a failure reads "expected 'bars', received 'no bars'" instead of "true, false". */
 const barsOrNot = (yes: boolean) => (yes ? 'bars' : 'no bars');
 /** The stock an edit fills in, because the edit form does not load it (ADM-05). */
@@ -83,7 +81,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   // No word under three letters in this name: search requires every word, and MariaDB's full-text
   // index ignores short ones (BUG-28, pinned below).
   test('a product created in the back office is listed in the shop, repriced, then deleted', { tag: ['@self-hosted', '@flow'] }, async ({ adminProducts, shop, createdProducts }) => {
-    const name = `QaLab Product ${unique()}`;
+    const name = `QaLab Product ${uniqueKey()}`;
 
     await test.step('Create the product in the back office', async () => {
       await createProduct(adminProducts, { name, price: PRICE_ON_CREATE });
@@ -115,7 +113,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
 
   test('a product with a short word in its name is found by its full name', { tag: ['@self-hosted', '@bug'] }, async ({ adminProducts, shop, createdProducts, apiMock }) => {
     knownBug('BUG-28', 'searching a product by its full name finds nothing when the name has a word under 3 letters ("of"): every word is required, but the full-text index drops short words.');
-    const name = `Set of QaLab Pliers ${unique()}`;
+    const name = `Set of QaLab Pliers ${uniqueKey()}`;
     await createProduct(adminProducts, { name, price: PRICE_ON_SEARCH_PIN });
     await expect.poll(() => createdProducts.pending(), 'the created product is tracked for cleanup').toHaveLength(1);
 
@@ -204,7 +202,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   });
 
   test('an order placed by a guest can be marked as shipped', { tag: ['@self-hosted'] }, async ({ api, catalog, adminOrders }) => {
-    const { invoice_number } = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], { ...fakeGuest(), lastName: `${LEFTOVER} ${unique()}` });
+    const { invoice_number } = await api.placeGuestOrder([{ product: await catalog.inStock(), quantity: 1 }], { ...fakeGuest(), lastName: `${LEFTOVER} ${uniqueKey()}` });
 
     await adminOrders.search.searchFor(invoice_number);
     const order = await adminOrders.edit(invoice_number);
@@ -218,8 +216,8 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
   // One test on purpose: arrival, status and reply are successive states of one message, and the arrange step (a real send) leaves a
   // record no API call can remove (see the header), so splitting it would leave two. Each step asserts its own named result.
   test('a contact message arrives in the inbox, is taken in progress and is answered', { tag: ['@self-hosted'] }, async ({ api, adminMessages, apiMock, adminToken }) => {
-    const sender = `${LEFTOVER} sender ${unique()}`;
-    const text = `Sent by the qa-lab suite (${unique()}) and safe to delete, long enough to be a real message.`;
+    const sender = `${LEFTOVER} sender ${uniqueKey()}`;
+    const text = `Sent by the qa-lab suite (${uniqueKey()}) and safe to delete, long enough to be a real message.`;
     await api.sendContactMessage({ name: sender, email: uniqueEmail('contact'), subject: contactSubjectSlug('Webmaster'), message: text });
 
     // The inbox lists newest first, 15 to a page, and has no search: the row is on page 1 unless 15 newer messages
@@ -238,7 +236,7 @@ test.describe('Back office, real backend', { tag: ['@admin'] }, () => {
     await expect(message.status).toHaveValue('IN_PROGRESS');
 
     // The answer: the real API stores it and the page lists it under the message once it asks again.
-    const answer = `Answered by the qa-lab suite (${unique()}).`;
+    const answer = `Answered by the qa-lab suite (${uniqueKey()}).`;
     const replied = apiMock.waitForResponse('POST', /^\/messages\/[^/]+\/reply$/);
     await message.reply(answer);
     expect((await replied).response.ok(), 'the real API accepted the reply').toBe(true);

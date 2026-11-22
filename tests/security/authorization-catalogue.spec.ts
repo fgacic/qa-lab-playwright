@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import { mergeTests, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
 import { worldTest } from '@fixtures/security';
 import { call, REFUSED, removeLater, CALLERS, WHO, CREATED, expectVerdict, tokenFor, type World } from '@support/authz';
 import { knownBug } from '@support/known-bug';
+import { uniqueKey } from '@support/test-data';
 import type { Product } from '@support/toolshop-api';
 
 /**
@@ -20,7 +20,7 @@ const test = mergeTests(apiOnlyTest, worldTest);
  */
 test.describe('API authorisation, catalogue writes (self-hosted only)', { tag: ['@security', '@self-hosted', '@api'] }, () => {
   /** A name no other test, retry, repeat or run shares: the label says what it is, the random part makes it unique. */
-  const unique = (label: string) => `Qa Lab Authz ${label} ${randomUUID().slice(0, 8)}`;
+  const unique = (label: string) => `Qa Lab Authz ${label} ${uniqueKey()}`;
   const slugOf = (name: string) => name.toLowerCase().replace(/\W+/g, '-');
 
   /** The three admin-managed record types, each with the body that creates one and the one that renames it. */

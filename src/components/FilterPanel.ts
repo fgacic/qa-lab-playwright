@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { apiPath } from '@support/env';
 import { step } from '@support/step';
 
@@ -51,6 +51,9 @@ export class FilterPanel {
 
   @step('Unfold the filters if they are folded away')
   async expand(): Promise<void> {
+    // The panel has drawn one of the two states below before either is read: the toggle (phone) or the controls (desktop). Without
+    // this, a panel still rendering would look "not folded" and be left shut.
+    await expect(this.toggle.or(this.sort)).toBeVisible();
     if ((await this.toggle.isVisible()) && !(await this.sort.isVisible())) await this.toggle.click();
   }
 

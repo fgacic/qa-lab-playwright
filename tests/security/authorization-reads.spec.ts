@@ -1,9 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import { mergeTests } from '@playwright/test';
 import { apiOnlyTest, expect } from '@fixtures';
 import { worldTest } from '@fixtures/security';
 import { call, newCustomer, REFUSED_OR_HIDDEN, removeFavouritesLater, contactMessage } from '@support/authz';
-import { fakeGuest } from '@support/test-data';
+import { fakeGuest, uniqueKey } from '@support/test-data';
 
 /**
  * Authorisation of the API itself, below the UI: who may call what. This file: Who may read what: the reads that need a token, and the lists that hold only the caller's own rows.
@@ -87,7 +86,7 @@ test.describe('API authorisation, list scoping (self-hosted only)', { tag: ['@se
 
   test('a customer lists no contact message that somebody else sent', async ({ request, world }) => {
     // The control: the admin's inbox holds the message (found by paging through it), so its absence below is about who is asking.
-    await contactMessage(world, `Authz scoping ${randomUUID().slice(0, 8)}`);
+    await contactMessage(world, `Authz scoping ${uniqueKey()}`);
     const { token } = await newCustomer(world);
 
     const listed = await (await call(request, 'GET', '/messages', { token })).json();
