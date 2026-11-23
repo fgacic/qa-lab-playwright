@@ -12,7 +12,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .nvmrc
         cache: npm
@@ -34,7 +34,7 @@ runs:
     - name: Restore Playwright browsers
       id: browser-cache
       if: inputs.browsers != 'none'
-      uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
@@ -52,7 +52,7 @@ runs:
     # Saved right after the install, before any test runs, whatever the job does later.
     - name: Save Playwright browsers
       if: ${{ always() && inputs.browsers != 'none' && inputs.save-browsers == 'true' && steps.browser-cache.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
